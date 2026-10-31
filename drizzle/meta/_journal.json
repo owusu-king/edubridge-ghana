@@ -169,6 +169,20 @@
       "when": 1793481602871,
       "tag": "0023_fees_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793484365669,
+      "tag": "0024_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793484366240,
+      "tag": "0025_ledger_rls",
+      "breakpoints": true
     }
   ]
 }

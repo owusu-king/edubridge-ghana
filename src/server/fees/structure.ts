@@ -9,6 +9,7 @@ import { withTenant } from "../db/context";
 import { academicYears, classes, feeItems, feeStructureLines, levels, terms } from "../db/schema";
 import { DomainError, PG_UNIQUE_VIOLATION, pgErrorCode } from "../errors";
 import { canAccessCampus, type TenantContext } from "../tenancy/service";
+import { assertCanManageSchoolFees } from "./access";
 import { resolveFees, totalFees } from "./resolve";
 
 /**
@@ -62,17 +63,6 @@ export const SUGGESTED_FEE_ITEMS = [
 const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
 const itemName = z.string().trim().min(1, "Enter a name.").max(60, "Use 60 characters or fewer.");
 
-/** Fee structures apply to the whole school, so only staff with access to every campus may change them. */
-function assertCanManage(ctx: TenantContext): void {
-  assertCan(ctx.roles, "fees.manage");
-  if (ctx.campusIds !== null) {
-    throw new DomainError(
-      "campus_restricted",
-      "Fees apply to the whole school. Ask a colleague with access to every campus.",
-    );
-  }
-}
-
 function duplicateName(error: unknown): never {
   if (pgErrorCode(error) === PG_UNIQUE_VIOLATION)
     throw new DomainError("duplicate", "A fee item with this name already exists.", "name");
@@ -101,7 +91,7 @@ async function nextSequence(tx: Transaction, ctx: TenantContext): Promise<number
 }
 
 export async function createFeeItem(database: Database, ctx: TenantContext, input: unknown): Promise<string> {
-  assertCanManage(ctx);
+  assertCanManageSchoolFees(ctx);
   const { name } = z.object({ name: itemName }).parse(input);
   return withTenant(database, scope(ctx), async (tx) => {
     const [item] = await tx
@@ -122,7 +112,7 @@ export async function createFeeItem(database: Database, ctx: TenantContext, inpu
 
 /** Adds the chosen suggested items. Only while the school has no fee items. */
 export async function setupFeeItems(database: Database, ctx: TenantContext, input: unknown): Promise<number> {
-  assertCanManage(ctx);
+  assertCanManageSchoolFees(ctx);
   const { names } = z
     .object({ names: z.array(z.enum(SUGGESTED_FEE_ITEMS)).min(1, "Choose at least one item.") })
     .parse(input);
@@ -154,7 +144,7 @@ export async function renameFeeItem(
   itemId: string,
   input: unknown,
 ): Promise<void> {
-  assertCanManage(ctx);
+  assertCanManageSchoolFees(ctx);
   const { name } = z.object({ name: itemName }).parse(input);
   await withTenant(database, scope(ctx), async (tx) => {
     const [item] = await tx
@@ -181,7 +171,7 @@ export async function setFeeItemStatus(
   itemId: string,
   status: "active" | "archived",
 ): Promise<void> {
-  assertCanManage(ctx);
+  assertCanManageSchoolFees(ctx);
   await withTenant(database, scope(ctx), async (tx) => {
     const [item] = await tx
       .update(feeItems)
@@ -312,7 +302,7 @@ export async function saveLevelFees(
   levelId: string,
   input: LevelFeesInput,
 ): Promise<void> {
-  assertCanManage(ctx);
+  assertCanManageSchoolFees(ctx);
   await withTenant(database, scope(ctx), async (tx) => {
     const [term] = await tx
       .select({ id: terms.id, name: terms.name })
@@ -407,7 +397,7 @@ export async function copyFeeStructure(
   ctx: TenantContext,
   input: unknown,
 ): Promise<number> {
-  assertCanManage(ctx);
+  assertCanManageSchoolFees(ctx);
   const { fromTermId, toTermId } = z
     .object({ fromTermId: z.string().uuid("Choose a term to copy from."), toTermId: z.string().uuid() })
     .refine((v) => v.fromTermId !== v.toTermId, { message: "Choose a different term.", path: ["fromTermId"] })

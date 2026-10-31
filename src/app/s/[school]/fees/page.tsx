@@ -7,12 +7,13 @@ import { EmptyState } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { can } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
+import { getBillingStatus } from "@/server/fees/ledger";
 import { getFeeStructure, listFeeTerms, type FeeTerm } from "@/server/fees/structure";
 import { formatCedis, pesewasToInput } from "@/lib/money";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
-import { copyFeeStructureAction, saveLevelFeesAction } from "./actions";
-import { CopyStructureDialog, LevelFeesDialog } from "./fee-controls";
+import { billTermAction, copyFeeStructureAction, saveLevelFeesAction } from "./actions";
+import { BillTermDialog, CopyStructureDialog, LevelFeesDialog } from "./fee-controls";
 
 export const metadata: Metadata = { title: "Fees" };
 
@@ -49,7 +50,10 @@ export default async function FeeStructurePage({
   }
 
   const term = terms.find((t) => t.id === search.term) ?? terms.find((t) => t.isCurrent) ?? terms[0]!;
-  const structure = await getFeeStructure(db(), ctx, term.id);
+  const [structure, billing] = await Promise.all([
+    getFeeStructure(db(), ctx, term.id),
+    getBillingStatus(db(), ctx, term.id),
+  ]);
   const activeItems = structure.items.filter((i) => i.status === "active");
   const copySources = terms.filter((t) => t.id !== term.id && t.lineCount > 0);
   const empty = term.lineCount === 0;
@@ -197,6 +201,83 @@ export default async function FeeStructurePage({
           </TBody>
         </Table>
       </TableFrame>
+      {!empty && billing && (
+        <section aria-labelledby="billing-heading" className="space-y-4 border-t border-line pt-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1">
+              <h2 id="billing-heading" className="text-md font-semibold text-ink">
+                Billing
+              </h2>
+              <p className="text-base text-ink-2">
+                {billing.enrolled === 0
+                  ? "No students are placed in a class this term, so there is no one to bill yet."
+                  : `${billing.billedStudents} of ${billing.enrolled} students billed for ${termLabel(term)}.`}
+              </p>
+              {billing.studentsToBill > 0 && (
+                <p className="text-base text-ink-2">
+                  {billing.studentsToBill} {billing.studentsToBill === 1 ? "student has" : "students have"}{" "}
+                  charges still to bill: {formatCedis(billing.amountToBillPesewas)} in total.
+                </p>
+              )}
+              <p className="text-sm text-ink-3">
+                Billing charges each student what their class pays. Running it again only bills new students
+                and new items; existing charges never change.
+              </p>
+            </div>
+            {canManage && billing.studentsToBill > 0 && (
+              <BillTermDialog
+                action={billTermAction.bind(null, slug, term.id)}
+                termLabel={termLabel(term)}
+                students={billing.studentsToBill}
+                amount={formatCedis(billing.amountToBillPesewas)}
+              />
+            )}
+          </div>
+          {billing.differenceCount > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-base font-semibold text-ink">
+                {billing.differenceCount}{" "}
+                {billing.differenceCount === 1 ? "charge differs" : "charges differ"} from the fee structure
+              </h3>
+              <p className="text-sm text-ink-3">
+                The fees changed, or the student moved class, after billing. To correct a charge, reverse it
+                on the student&rsquo;s account, then bill again.
+              </p>
+              <TableFrame>
+                <Table>
+                  <caption className="sr-only">Charges that differ from the fee structure</caption>
+                  <THead>
+                    <tr>
+                      <TH>Student</TH>
+                      <TH>Item</TH>
+                      <TH className="text-right">Billed</TH>
+                      <TH className="text-right">Fee structure</TH>
+                    </tr>
+                  </THead>
+                  <TBody>
+                    {billing.differences.map((d) => (
+                      <TR key={`${d.studentId}-${d.itemName}`}>
+                        <TD>
+                          <Link
+                            href={schoolPath(slug, `students/${d.studentId}`)}
+                            className="font-medium text-ink underline-offset-2 hover:underline"
+                          >
+                            {d.studentName}
+                          </Link>
+                          <span className="block font-mono text-sm text-ink-3">{d.admissionNumber}</span>
+                        </TD>
+                        <TD>{d.itemName}</TD>
+                        <TD className="text-right tabular-nums">{formatCedis(d.billedPesewas)}</TD>
+                        <TD className="text-right tabular-nums">{formatCedis(d.structurePesewas)}</TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              </TableFrame>
+            </div>
+          )}
+        </section>
+      )}
       {!canManage && can(ctx.roles, "fees.manage") && (
         <p className="text-sm text-ink-3">
           Fees apply to the whole school, so they can only be changed by staff with access to every campus.

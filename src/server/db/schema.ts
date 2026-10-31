@@ -669,3 +669,79 @@ export const feeStructureLines = pgTable(
     check("fee_structure_lines_amount_range", sql`${t.amountPesewas} between 0 and 1000000000`),
   ],
 );
+
+export const LEDGER_KINDS = [
+  "charge",
+  "payment",
+  "discount",
+  "adjustment",
+  "opening_balance",
+  "reversal",
+] as const;
+
+/**
+ * A student's fee account, append-only. Positive amounts are owed by the family (charges); negative
+ * amounts reduce what is owed (payments, discounts). The balance is the sum. Entries are never updated
+ * or deleted: mistakes are corrected with a reversal that exactly negates the original (enforced by
+ * triggers in migration 0025), so the full history is always preserved.
+ */
+export const ledgerEntries = pgTable(
+  "ledger_entries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Global insertion order; statements sort by effective date, then this. */
+    entryNumber: bigint("entry_number", { mode: "number" }).generatedAlwaysAsIdentity().notNull(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    studentId: uuid("student_id").notNull(),
+    termId: uuid("term_id"),
+    kind: text("kind", { enum: LEDGER_KINDS }).notNull(),
+    feeItemId: uuid("fee_item_id"),
+    description: text("description").notNull(),
+    amountPesewas: bigint("amount_pesewas", { mode: "number" }).notNull(),
+    /** Idempotency key for automatic entries, e.g. one charge per student, term and fee item. */
+    billingKey: text("billing_key"),
+    reversesEntryId: uuid("reverses_entry_id"),
+    /** The day the entry counts from, in the school's calendar. */
+    effectiveOn: date("effective_on", { mode: "string" }).notNull(),
+    recordedByUserId: uuid("recorded_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "ledger_entries_student_fk",
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }),
+    foreignKey({
+      name: "ledger_entries_term_fk",
+      columns: [t.tenantId, t.termId],
+      foreignColumns: [terms.tenantId, terms.id],
+    }),
+    foreignKey({
+      name: "ledger_entries_item_fk",
+      columns: [t.tenantId, t.feeItemId],
+      foreignColumns: [feeItems.tenantId, feeItems.id],
+    }),
+    foreignKey({
+      name: "ledger_entries_reverses_fk",
+      columns: [t.tenantId, t.reversesEntryId],
+      foreignColumns: [t.tenantId, t.id],
+    }),
+    unique("ledger_entries_tenant_id_unique").on(t.tenantId, t.id),
+    unique("ledger_entries_billing_key_unique").on(t.tenantId, t.studentId, t.billingKey),
+    unique("ledger_entries_reversed_once").on(t.reversesEntryId),
+    index("ledger_entries_student_idx").on(t.tenantId, t.studentId, t.effectiveOn, t.entryNumber),
+    index("ledger_entries_term_idx").on(t.tenantId, t.termId),
+    check(
+      "ledger_entries_amount_sign",
+      sql`(${t.kind} = 'charge' and ${t.amountPesewas} > 0)
+        or (${t.kind} in ('payment', 'discount') and ${t.amountPesewas} < 0)
+        or (${t.kind} in ('adjustment', 'opening_balance', 'reversal') and ${t.amountPesewas} <> 0)`,
+    ),
+    check("ledger_entries_amount_range", sql`abs(${t.amountPesewas}) <= 1000000000`),
+    check("ledger_entries_reversal_link", sql`(${t.kind} = 'reversal') = (${t.reversesEntryId} is not null)`),
+    check("ledger_entries_description_length", sql`char_length(${t.description}) between 1 and 200`),
+  ],
+);

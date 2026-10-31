@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/server/db/client";
+import { billTerm } from "@/server/fees/ledger";
 import {
   copyFeeStructure,
   createFeeItem,
@@ -118,4 +119,8 @@ export async function copyFeeStructureAction(
     (ctx) => copyFeeStructure(db(), ctx, { fromTermId: formData.get("fromTermId"), toTermId }),
     "Fees copied.",
   );
+}
+
+export async function billTermAction(slug: string, termId: string, _prev: FormState) {
+  return run(slug, null, (ctx) => billTerm(db(), ctx, termId), "Students billed.");
 }
