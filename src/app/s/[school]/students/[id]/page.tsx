@@ -10,7 +10,7 @@ import { db } from "@/server/db/client";
 import { listGuardians, RELATIONSHIP_LABELS } from "@/server/students/guardians";
 import { getStudentAccount } from "@/server/fees/ledger";
 import { getStudent, listClassOptions } from "@/server/students/service";
-import { formatCalendarDate } from "@/lib/format";
+import { formatCalendarDate, todayIn } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
@@ -140,7 +140,16 @@ export default async function StudentPage({ params }: { params: Promise<{ school
               </TableFrame>
             )}
           </Section>
-          {account && <FeeAccount slug={slug} account={account} canManage={can(ctx.roles, "fees.manage")} />}
+          {account && (
+            <FeeAccount
+              slug={slug}
+              account={account}
+              canManage={can(ctx.roles, "fees.manage")}
+              canRecordPayment={can(ctx.roles, "payments.record")}
+              payerName={links.find((g) => g.isPrimary)?.fullName}
+              today={todayIn(ctx.tenant.timezone)}
+            />
+          )}
         </div>
         <div className="space-y-10">
           <Section title="Details">

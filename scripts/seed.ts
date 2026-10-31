@@ -17,6 +17,8 @@ import {
   feeItems,
   feeStructureLines,
   ledgerEntries,
+  payments,
+  tenantCounters,
   guardians,
   levels,
   loginAttempts,
@@ -436,6 +438,78 @@ async function main() {
           effectiveOn: term.startsOn,
         })),
       );
+    });
+
+    // A few synthetic payments, so accounts show part payments, paid-up and owing students.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
+      const [existing] = await tx
+        .select({ id: payments.id })
+        .from(payments)
+        .where(eq(payments.tenantId, kpone))
+        .limit(1);
+      const [term] = await tx
+        .select({ id: terms.id })
+        .from(terms)
+        .where(and(eq(terms.tenantId, kpone), eq(terms.isCurrent, true)));
+      if (existing || !term) return;
+      const received: [
+        string,
+        number,
+        "cash" | "mobile_money" | "bank_deposit",
+        string | null,
+        string,
+        string,
+      ][] = [
+        ["S0001", 60000, "cash", null, "2026-09-09", "Akosua Owusu"],
+        ["S0002", 114000, "mobile_money", "MM260910.0931.C11427", "2026-09-10", "Grace Mensah"],
+        ["S0005", 30000, "bank_deposit", "GCB-448120", "2026-09-14", "Kwasi Asante"],
+        ["S0008", 147000, "cash", null, "2026-09-15", "Ato Annan"],
+      ];
+      const labels = { cash: "Cash", mobile_money: "Mobile Money", bank_deposit: "Bank deposit" };
+      const [accountant] = await tx
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.email, "bursar@example.test"));
+      let n = 0;
+      for (const [admissionNumber, amountPesewas, method, reference, paidOn, payerName] of received) {
+        const [student] = await tx
+          .select({ id: students.id })
+          .from(students)
+          .where(and(eq(students.tenantId, kpone), eq(students.admissionNumber, admissionNumber)));
+        if (!student) continue;
+        const receiptNumber = `R${String(++n).padStart(6, "0")}`;
+        const [payment] = await tx
+          .insert(payments)
+          .values({
+            tenantId: kpone,
+            studentId: student.id,
+            receiptNumber,
+            amountPesewas,
+            method,
+            reference,
+            payerName,
+            paidOn,
+            idempotencyKey: `seed-${receiptNumber}`,
+            recordedByUserId: accountant?.id ?? null,
+          })
+          .returning({ id: payments.id });
+        await tx.insert(ledgerEntries).values({
+          tenantId: kpone,
+          studentId: student.id,
+          termId: term.id,
+          kind: "payment",
+          description: `Payment, receipt ${receiptNumber} (${labels[method]})`,
+          amountPesewas: -amountPesewas,
+          paymentId: payment!.id,
+          effectiveOn: paidOn,
+          recordedByUserId: accountant?.id ?? null,
+        });
+      }
+      await tx
+        .insert(tenantCounters)
+        .values({ tenantId: kpone, key: "receipt_number", value: n })
+        .onConflictDoUpdate({ target: [tenantCounters.tenantId, tenantCounters.key], set: { value: n } });
     });
 
     // Clear sign-in throttling for the synthetic accounts so local runs start clean.

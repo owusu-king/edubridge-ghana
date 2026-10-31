@@ -19,12 +19,18 @@ export default async function FeesLayout({
   const slug = ctx.tenant.slug;
   return (
     <div className="space-y-8">
-      <div className="space-y-6">
-        <PageHeader title="Fees" description="What each class pays per term." bordered={false} />
+      <div className="space-y-6 print:hidden">
+        <PageHeader
+          title="Fees"
+          description="Fee structures, billing, payments and balances."
+          bordered={false}
+        />
         <SubNav
           label="Fees"
           items={[
             { label: "Fee structure", href: schoolPath(slug, "fees") },
+            { label: "Accounts", href: schoolPath(slug, "fees/accounts") },
+            { label: "Payments", href: schoolPath(slug, "fees/payments") },
             { label: "Fee items", href: schoolPath(slug, "fees/items") },
           ]}
         />

@@ -35,6 +35,8 @@ const LABELS: Record<string, string> = {
   "fees.structure_copied": "Fees copied from another term",
   "fees.term_billed": "Students billed for a term",
   "ledger.entry_reversed": "Fee account entry reversed",
+  "payment.recorded": "Payment recorded",
+  "payment.voided": "Receipt voided",
   "guardian.linked": "Guardian added",
   "guardian.updated": "Guardian details changed",
   "guardian.made_primary": "Primary contact changed",

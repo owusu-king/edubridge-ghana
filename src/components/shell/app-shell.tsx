@@ -16,7 +16,7 @@ export interface AppShellProps {
 export function AppShell({ area, user, isPlatformAdmin, signOut, children }: AppShellProps) {
   const menu = { name: user.name, email: user.email, signOut, isPlatformAdmin };
   return (
-    <div className="min-h-dvh lg:grid lg:grid-cols-[15.5rem_1fr]">
+    <div className="min-h-dvh lg:grid lg:grid-cols-[15.5rem_1fr] print:block">
       <a
         href="#main"
         className="sr-only z-50 rounded-md bg-ink px-3 py-2 text-white focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
@@ -24,7 +24,7 @@ export function AppShell({ area, user, isPlatformAdmin, signOut, children }: App
         Skip to content
       </a>
 
-      <aside className="sticky top-0 hidden h-dvh flex-col border-r border-line bg-canvas px-3 py-3 lg:flex">
+      <aside className="sticky top-0 hidden h-dvh flex-col border-r border-line bg-canvas px-3 py-3 lg:flex print:hidden">
         <ShellIdentity area={area} />
         <div className="mt-6 flex-1 overflow-y-auto">
           <SidebarNav area={area} />
@@ -35,7 +35,7 @@ export function AppShell({ area, user, isPlatformAdmin, signOut, children }: App
       </aside>
 
       <div className="flex min-h-dvh min-w-0 flex-col">
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-canvas/95 px-4 backdrop-blur lg:hidden">
+        <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-canvas/95 px-4 backdrop-blur lg:hidden print:hidden">
           <MobileNav area={area} />
           <span className="min-w-0 flex-1 truncate text-base font-semibold">{areaTitle(area)}</span>
           <UserMenu {...menu} compact />

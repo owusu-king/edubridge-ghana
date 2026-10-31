@@ -703,6 +703,8 @@ export const ledgerEntries = pgTable(
     /** Idempotency key for automatic entries, e.g. one charge per student, term and fee item. */
     billingKey: text("billing_key"),
     reversesEntryId: uuid("reverses_entry_id"),
+    /** For payment entries (and their reversals): the payment and its receipt. */
+    paymentId: uuid("payment_id"),
     /** The day the entry counts from, in the school's calendar. */
     effectiveOn: date("effective_on", { mode: "string" }).notNull(),
     recordedByUserId: uuid("recorded_by_user_id").references(() => users.id, { onDelete: "restrict" }),
@@ -729,6 +731,11 @@ export const ledgerEntries = pgTable(
       columns: [t.tenantId, t.reversesEntryId],
       foreignColumns: [t.tenantId, t.id],
     }),
+    foreignKey({
+      name: "ledger_entries_payment_fk",
+      columns: [t.tenantId, t.paymentId],
+      foreignColumns: [payments.tenantId, payments.id],
+    }),
     unique("ledger_entries_tenant_id_unique").on(t.tenantId, t.id),
     unique("ledger_entries_billing_key_unique").on(t.tenantId, t.studentId, t.billingKey),
     unique("ledger_entries_reversed_once").on(t.reversesEntryId),
@@ -743,5 +750,76 @@ export const ledgerEntries = pgTable(
     check("ledger_entries_amount_range", sql`abs(${t.amountPesewas}) <= 1000000000`),
     check("ledger_entries_reversal_link", sql`(${t.kind} = 'reversal') = (${t.reversesEntryId} is not null)`),
     check("ledger_entries_description_length", sql`char_length(${t.description}) between 1 and 200`),
+    check("ledger_entries_payment_link", sql`(${t.kind} = 'payment') <= (${t.paymentId} is not null)`),
+  ],
+);
+
+export const PAYMENT_METHODS = ["cash", "mobile_money", "bank_deposit", "bank_transfer", "cheque"] as const;
+
+/**
+ * Money received from a family, recorded by staff. Insert-only like the ledger: a mistaken payment is
+ * voided (payment_voids) and its ledger entry reversed, so the receipt number stays accounted for.
+ * Receipt numbers are sequential per school with no gaps (allocated in the same transaction).
+ */
+export const payments = pgTable(
+  "payments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    studentId: uuid("student_id").notNull(),
+    receiptNumber: text("receipt_number").notNull(),
+    amountPesewas: bigint("amount_pesewas", { mode: "number" }).notNull(),
+    method: text("method", { enum: PAYMENT_METHODS }).notNull(),
+    /** Bank slip, cheque or Mobile Money transaction number. */
+    reference: text("reference"),
+    payerName: text("payer_name"),
+    paidOn: date("paid_on", { mode: "string" }).notNull(),
+    /** Sent with the form so a double submission records one payment. */
+    idempotencyKey: text("idempotency_key").notNull(),
+    recordedByUserId: uuid("recorded_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "payments_student_fk",
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }),
+    unique("payments_tenant_id_unique").on(t.tenantId, t.id),
+    unique("payments_tenant_receipt_unique").on(t.tenantId, t.receiptNumber),
+    unique("payments_tenant_idempotency_unique").on(t.tenantId, t.idempotencyKey),
+    index("payments_tenant_paid_on_idx").on(t.tenantId, t.paidOn),
+    index("payments_student_idx").on(t.tenantId, t.studentId),
+    check("payments_amount_range", sql`${t.amountPesewas} between 1 and 1000000000`),
+    check(
+      "payments_reference_length",
+      sql`${t.reference} is null or char_length(${t.reference}) between 1 and 60`,
+    ),
+    check(
+      "payments_payer_length",
+      sql`${t.payerName} is null or char_length(${t.payerName}) between 1 and 120`,
+    ),
+  ],
+);
+
+/** A voided payment. One per payment; recorded with the reversal of its ledger entry. */
+export const paymentVoids = pgTable(
+  "payment_voids",
+  {
+    paymentId: uuid("payment_id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    reason: text("reason").notNull(),
+    voidedByUserId: uuid("voided_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    voidedAt: timestamp("voided_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "payment_voids_payment_fk",
+      columns: [t.tenantId, t.paymentId],
+      foreignColumns: [payments.tenantId, payments.id],
+    }),
+    check("payment_voids_reason_length", sql`char_length(${t.reason}) between 3 and 120`),
   ],
 );
