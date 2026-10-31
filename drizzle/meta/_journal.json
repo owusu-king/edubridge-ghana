@@ -127,6 +127,20 @@
       "when": 1793477512661,
       "tag": "0017_levels_classes_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793478242023,
+      "tag": "0018_students_enrolments",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793478242570,
+      "tag": "0019_students_rls",
+      "breakpoints": true
     }
   ]
 }

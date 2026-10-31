@@ -12,10 +12,12 @@ import {
   academicYears,
   campuses,
   classes,
+  enrolments,
   levels,
   loginAttempts,
   memberships,
   platformAdmins,
+  students,
   tenantEntitlements,
   tenants,
   terms,
@@ -233,6 +235,55 @@ async function main() {
         { tenantId: kpone, levelId: levelId("JHS 1"), campusId: main, name: "JHS 1" },
         { tenantId: kpone, levelId: levelId("Basic 1"), campusId: sakumono, name: "Basic 1 Sakumono" },
       ]);
+    });
+
+    // Synthetic students (fictional names) in Kpone Ridge classes for the current term.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
+      const [term] = await tx
+        .select({ id: terms.id })
+        .from(terms)
+        .where(and(eq(terms.tenantId, kpone), eq(terms.isCurrent, true)));
+      const classRows = await tx
+        .select({ id: classes.id, name: classes.name })
+        .from(classes)
+        .where(eq(classes.tenantId, kpone));
+      const classId = (name: string) => classRows.find((c) => c.name === name)!.id;
+      const roster: [string, string, string, "female" | "male", string, string][] = [
+        ["S0001", "Akua", "Owusu", "female", "2017-02-11", "Basic 4A"],
+        ["S0002", "Kwame", "Mensah", "male", "2016-11-03", "Basic 4A"],
+        ["S0003", "Esi", "Quaye", "female", "2017-05-21", "Basic 4A"],
+        ["S0004", "Yaw", "Darko", "male", "2017-01-30", "Basic 4A"],
+        ["S0005", "Abena", "Asante", "female", "2016-09-14", "Basic 4A"],
+        ["S0006", "Kojo", "Addo", "male", "2017-03-08", "Basic 4B"],
+        ["S0007", "Adwoa", "Boateng", "female", "2017-07-19", "Basic 4B"],
+        ["S0008", "Fiifi", "Annan", "male", "2014-04-02", "JHS 1"],
+        ["S0009", "Efua", "Ofori", "female", "2014-08-25", "JHS 1"],
+        ["S0010", "Nana", "Agyeman", "male", "2021-06-12", "KG 1"],
+        ["S0011", "Afia", "Sarpong", "female", "2020-12-01", "Basic 1 Sakumono"],
+        ["S0012", "Kweku", "Amponsah", "male", "2020-10-17", "Basic 1 Sakumono"],
+      ];
+      // Seeded students use an "S" prefix so they never collide with numbers assigned during testing.
+      for (const [admissionNumber, firstName, lastName, sex, dateOfBirth, className] of roster) {
+        const [student] = await tx
+          .insert(students)
+          .values({
+            tenantId: kpone,
+            admissionNumber,
+            firstName,
+            lastName,
+            sex,
+            dateOfBirth,
+            admittedOn: "2026-09-08",
+          })
+          .onConflictDoNothing()
+          .returning({ id: students.id });
+        if (student && term) {
+          await tx
+            .insert(enrolments)
+            .values({ tenantId: kpone, studentId: student.id, termId: term.id, classId: classId(className) });
+        }
+      }
     });
 
     // Clear sign-in throttling for the synthetic accounts so local runs start clean.

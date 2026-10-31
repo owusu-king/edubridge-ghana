@@ -398,6 +398,85 @@ export const classes = pgTable(
   ],
 );
 
+/** Per-school counters for human-readable numbers (admission numbers now; receipts later). */
+export const tenantCounters = pgTable(
+  "tenant_counters",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    key: text("key").notNull(),
+    value: bigint("value", { mode: "number" }).notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.key] })],
+);
+
+/**
+ * A learner. Data minimisation: only what schools need for class lists, fees and report cards.
+ * Medical and other sensitive details are deliberately not stored yet.
+ */
+export const students = pgTable(
+  "students",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    admissionNumber: citext("admission_number").notNull(),
+    firstName: text("first_name").notNull(),
+    otherNames: text("other_names"),
+    lastName: text("last_name").notNull(),
+    sex: text("sex", { enum: ["female", "male"] }).notNull(),
+    dateOfBirth: date("date_of_birth", { mode: "string" }),
+    admittedOn: date("admitted_on", { mode: "string" }),
+    status: text("status", { enum: ["active", "withdrawn", "graduated"] })
+      .notNull()
+      .default("active"),
+    ...timestamps,
+  },
+  (t) => [
+    unique("students_tenant_admission_unique").on(t.tenantId, t.admissionNumber),
+    unique("students_tenant_id_unique").on(t.tenantId, t.id),
+    index("students_tenant_name_idx").on(t.tenantId, t.lastName, t.firstName),
+    check(
+      "students_names_length",
+      sql`char_length(${t.firstName}) between 1 and 60 and char_length(${t.lastName}) between 1 and 60`,
+    ),
+  ],
+);
+
+/** Which class a student is in for a term. One class per student per term. */
+export const enrolments = pgTable(
+  "enrolments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    studentId: uuid("student_id").notNull(),
+    termId: uuid("term_id").notNull(),
+    classId: uuid("class_id").notNull(),
+    ...timestamps,
+  },
+  (t) => [
+    foreignKey({
+      name: "enrolments_student_fk",
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "enrolments_term_fk",
+      columns: [t.tenantId, t.termId],
+      foreignColumns: [terms.tenantId, terms.id],
+    }),
+    foreignKey({
+      name: "enrolments_class_fk",
+      columns: [t.tenantId, t.classId],
+      foreignColumns: [classes.tenantId, classes.id],
+    }),
+    unique("enrolments_term_student_unique").on(t.termId, t.studentId),
+    index("enrolments_class_term_idx").on(t.tenantId, t.classId, t.termId),
+  ],
+);
+
 /** Restricts a membership to specific campuses. No rows means access to every campus. */
 export const membershipCampuses = pgTable(
   "membership_campuses",
