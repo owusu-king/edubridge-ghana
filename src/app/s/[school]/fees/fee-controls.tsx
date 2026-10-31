@@ -313,20 +313,25 @@ export function BillTermDialog({
   action,
   termLabel,
   students,
-  amount,
+  charges,
+  discounts,
 }: {
   action: Action;
   termLabel: string;
   students: number;
-  amount: string;
+  charges?: string;
+  discounts?: string;
 }) {
   const who = `${students} ${students === 1 ? "student" : "students"}`;
+  const adds = [charges && `${charges} of charges`, discounts && `${discounts} of discounts`]
+    .filter(Boolean)
+    .join(" and ");
   return (
     <FormDialog
       trigger={`Bill ${who}`}
       triggerVariant="primary"
       title={`Bill ${who} for ${termLabel}?`}
-      description={`This adds ${amount} of charges to their accounts, as set in the fee structure. Charges are not edited afterwards; a mistake is corrected with a reversal.`}
+      description={`This adds ${adds} to their accounts, from the fee structure and their scholarships. Entries are not edited afterwards; a mistake is corrected with a reversal.`}
       submitLabel={`Bill ${who}`}
       action={action}
     />
