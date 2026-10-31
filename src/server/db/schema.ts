@@ -338,6 +338,66 @@ export const terms = pgTable(
   ],
 );
 
+/** Grade levels in promotion order (e.g. KG 2 -> Basic 1). The stage selects defaults such as grading scales. */
+export const levels = pgTable(
+  "levels",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    name: citext("name").notNull(),
+    stage: text("stage", { enum: ["creche", "nursery", "kindergarten", "primary", "jhs"] }).notNull(),
+    sequence: integer("sequence").notNull(),
+    status: text("status", { enum: ["active", "archived"] })
+      .notNull()
+      .default("active"),
+    ...timestamps,
+  },
+  (t) => [
+    unique("levels_tenant_name_unique").on(t.tenantId, t.name),
+    unique("levels_tenant_id_unique").on(t.tenantId, t.id),
+    check("levels_name_length", sql`char_length(${t.name}) between 1 and 40`),
+  ],
+);
+
+/** A class (stream) within a level at a campus, e.g. "Basic 4A", with an optional class teacher. */
+export const classes = pgTable(
+  "classes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    levelId: uuid("level_id").notNull(),
+    campusId: uuid("campus_id").notNull(),
+    name: citext("name").notNull(),
+    classTeacherMembershipId: uuid("class_teacher_membership_id"),
+    status: text("status", { enum: ["active", "archived"] })
+      .notNull()
+      .default("active"),
+    ...timestamps,
+  },
+  (t) => [
+    foreignKey({
+      name: "classes_level_fk",
+      columns: [t.tenantId, t.levelId],
+      foreignColumns: [levels.tenantId, levels.id],
+    }),
+    foreignKey({
+      name: "classes_campus_fk",
+      columns: [t.tenantId, t.campusId],
+      foreignColumns: [campuses.tenantId, campuses.id],
+    }),
+    foreignKey({
+      name: "classes_class_teacher_fk",
+      columns: [t.tenantId, t.classTeacherMembershipId],
+      foreignColumns: [memberships.tenantId, memberships.id],
+    }),
+    unique("classes_campus_name_unique").on(t.tenantId, t.campusId, t.name),
+    unique("classes_tenant_id_unique").on(t.tenantId, t.id),
+    check("classes_name_length", sql`char_length(${t.name}) between 1 and 40`),
+  ],
+);
+
 /** Restricts a membership to specific campuses. No rows means access to every campus. */
 export const membershipCampuses = pgTable(
   "membership_campuses",

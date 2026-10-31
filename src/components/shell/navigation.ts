@@ -1,5 +1,5 @@
 import type { Route } from "next";
-import { Building2, LayoutGrid, Settings, Users, type LucideIcon } from "lucide-react";
+import { Building2, LayoutGrid, School, Settings, Users, type LucideIcon } from "lucide-react";
 import { can, type Permission, type Role } from "@/server/authz/permissions";
 import { schoolPath } from "@/lib/routes";
 
@@ -42,6 +42,7 @@ export function settingsTabs(slug: string, roles: readonly Role[]): { label: str
 /** Only modules that actually exist appear here. Nothing is shown as available before it works. */
 const SCHOOL_NAV: readonly { label: string; segment: string; icon: LucideIcon; permission: Permission }[] = [
   { label: "Overview", segment: "", icon: LayoutGrid, permission: "school.view" },
+  { label: "Classes", segment: "classes", icon: School, permission: "classes.view" },
   { label: "Members", segment: "members", icon: Users, permission: "members.view" },
 ];
 

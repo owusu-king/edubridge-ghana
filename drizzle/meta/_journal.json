@@ -113,6 +113,20 @@
       "when": 1793477027792,
       "tag": "0015_academic_calendar_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1793477512097,
+      "tag": "0016_levels_classes",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793477512661,
+      "tag": "0017_levels_classes_rls",
+      "breakpoints": true
     }
   ]
 }
