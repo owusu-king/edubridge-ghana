@@ -155,6 +155,20 @@
       "when": 1793478808715,
       "tag": "0021_guardians_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1793481599069,
+      "tag": "0022_fees",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1793481602871,
+      "tag": "0023_fees_rls",
+      "breakpoints": true
     }
   ]
 }

@@ -31,6 +31,7 @@ PostgreSQL 16. Schema in `src/server/db/schema.ts`; migrations are reviewed SQL 
 | `levels`, `classes` | tenant | Levels in promotion order with a stage (creche … jhs). Classes reference level, campus and optional class teacher by composite FKs (`(tenant_id, x_id)`); unique name per campus; archived, never deleted. |
 | `students`, `enrolments`, `tenant_counters` | tenant | Minimal student data (names, sex, optional date of birth); admission number unique per school, auto-numbered from a per-school counter that skips numbers in use. One class per student per term (composite FKs to student, term, class). Teachers see only their classes' students. |
 | `guardians`, `student_guardians` | tenant | One guardian per phone number per school (partial unique index), so siblings share guardians; phone or email required (E.164 check). Links carry relationship and a primary contact flag (one per student, partial unique index). |
+| `fee_items`, `fee_structure_lines` | tenant | Fee items (unique name per school, archived, never deleted). Structure lines: amount in integer pesewas (`bigint`, check 0 – 1,000,000,000) per term, item and level, with an optional class override; `UNIQUE NULLS NOT DISTINCT (term, item, level, class)`. Billing will copy amounts into the ledger, so structure edits never change past bills. |
 | `audit_events`   | tenant | Append-only: the app role has INSERT and SELECT only.                                                                                                               |
 
 ## Tenant context

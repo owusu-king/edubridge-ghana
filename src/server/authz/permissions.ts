@@ -31,13 +31,16 @@ const GRANTS = {
   "students.manage": ["owner", "headteacher", "admin"],
   "school.settings.manage": ["owner", "admin"],
   "academics.manage": ["owner", "headteacher", "admin"],
-  // Head teachers oversee staff and academics; finance access (read-only) arrives with the fees module.
+  // Head teachers oversee staff and academics, and see school finances without changing them.
   "members.view": ["owner", "headteacher", "admin"],
   "members.manage": ["owner", "admin"],
   "campuses.manage": ["owner", "admin"],
   "plan.view": ["owner", "admin"],
   "audit.view": ["owner", "admin"],
   "security.manage": ["owner"],
+  // Finance: the Proprietor and Accountant run fees; the Head teacher can look but not change anything.
+  "fees.view": ["owner", "headteacher", "bursar"],
+  "fees.manage": ["owner", "bursar"],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type Permission = keyof typeof GRANTS;

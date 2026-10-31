@@ -603,3 +603,69 @@ export const auditEvents = pgTable(
   },
   (t) => [index("audit_events_tenant_time_idx").on(t.tenantId, t.occurredAt)],
 );
+
+/** Something a school charges for: tuition, PTA dues, books, feeding, and so on. */
+export const feeItems = pgTable(
+  "fee_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    name: citext("name").notNull(),
+    /** Order on bills and statements. */
+    sequence: integer("sequence").notNull(),
+    status: text("status", { enum: ["active", "archived"] })
+      .notNull()
+      .default("active"),
+    ...timestamps,
+  },
+  (t) => [
+    unique("fee_items_tenant_name_unique").on(t.tenantId, t.name),
+    unique("fee_items_tenant_id_unique").on(t.tenantId, t.id),
+    check("fee_items_name_length", sql`char_length(${t.name}) between 1 and 60`),
+  ],
+);
+
+/**
+ * The amount charged for a fee item, per term, for a level. A row with a class overrides the level's
+ * amount for that class (an amount of zero exempts the class). Amounts are integer pesewas.
+ */
+export const feeStructureLines = pgTable(
+  "fee_structure_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    termId: uuid("term_id").notNull(),
+    feeItemId: uuid("fee_item_id").notNull(),
+    levelId: uuid("level_id").notNull(),
+    classId: uuid("class_id"),
+    amountPesewas: bigint("amount_pesewas", { mode: "number" }).notNull(),
+    ...timestamps,
+  },
+  (t) => [
+    foreignKey({
+      name: "fee_structure_lines_term_fk",
+      columns: [t.tenantId, t.termId],
+      foreignColumns: [terms.tenantId, terms.id],
+    }),
+    foreignKey({
+      name: "fee_structure_lines_item_fk",
+      columns: [t.tenantId, t.feeItemId],
+      foreignColumns: [feeItems.tenantId, feeItems.id],
+    }),
+    foreignKey({
+      name: "fee_structure_lines_level_fk",
+      columns: [t.tenantId, t.levelId],
+      foreignColumns: [levels.tenantId, levels.id],
+    }),
+    foreignKey({
+      name: "fee_structure_lines_class_fk",
+      columns: [t.tenantId, t.classId],
+      foreignColumns: [classes.tenantId, classes.id],
+    }),
+    unique("fee_structure_lines_unique").on(t.termId, t.feeItemId, t.levelId, t.classId).nullsNotDistinct(),
+    index("fee_structure_lines_term_idx").on(t.tenantId, t.termId),
+    check("fee_structure_lines_amount_range", sql`${t.amountPesewas} between 0 and 1000000000`),
+  ],
+);
