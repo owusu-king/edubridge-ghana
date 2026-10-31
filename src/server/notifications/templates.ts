@@ -65,6 +65,24 @@ export const TEMPLATES = {
       text: `${lines.join("\n\n")}\n\nReset your password: ${url}\n`,
     };
   },
+
+  // SMS templates: short, no personal details beyond what the recipient already knows.
+  phone_code(payload: { code: string }): RenderedEmail {
+    return {
+      subject: "",
+      html: "",
+      text: `EduBridge code: ${payload.code}. It expires in 10 minutes. Never share it.`,
+    };
+  },
+
+  password_reset_sms(payload: { token: string; expiresMinutes: number }): RenderedEmail {
+    const url = appUrl(`/reset-password/${payload.token}`);
+    return {
+      subject: "",
+      html: "",
+      text: `EduBridge: reset your password at ${url} (expires in ${payload.expiresMinutes} min). Ignore if you did not ask.`,
+    };
+  },
 } as const;
 
 export type TemplateName = keyof typeof TEMPLATES;

@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import QRCode from "qrcode";
 import { changePassword, signOutOtherSessions, updateProfile } from "@/server/auth/account";
 import { beginEnrollment, confirmEnrollment, disableMfa, regenerateRecoveryCodes } from "@/server/auth/mfa";
+import { confirmPhoneVerification, removePhone, startPhoneVerification } from "@/server/auth/phone";
 import { db } from "@/server/db/client";
+import { dispatchAfterResponse } from "@/web/notify";
 import { requireSession } from "@/web/auth";
 import { toFormError, type FormState } from "@/web/forms";
 
@@ -115,4 +117,40 @@ export async function disableMfaAction(_prev: FormState, formData: FormData): Pr
   }
   revalidatePath("/account/security");
   return { status: "success", message: "Two-step verification is off." };
+}
+
+export async function startPhoneAction(
+  _prev: FormState<{ verificationId: string; phone: string }>,
+  formData: FormData,
+): Promise<FormState<{ verificationId: string; phone: string }>> {
+  const { user } = await requireSession();
+  try {
+    const started = await startPhoneVerification(db(), user.id, String(formData.get("phone") ?? ""));
+    dispatchAfterResponse();
+    return { status: "success", data: started };
+  } catch (error) {
+    return toFormError(error, formData);
+  }
+}
+
+export async function confirmPhoneAction(
+  verificationId: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const { user } = await requireSession();
+  try {
+    await confirmPhoneVerification(db(), user.id, verificationId, String(formData.get("code") ?? ""));
+  } catch (error) {
+    return toFormError(error);
+  }
+  revalidatePath("/account");
+  return { status: "success", message: "Phone number verified." };
+}
+
+export async function removePhoneAction(_prev: FormState): Promise<FormState> {
+  const { user } = await requireSession();
+  await removePhone(db(), user.id);
+  revalidatePath("/account");
+  return { status: "success", message: "Phone number removed." };
 }

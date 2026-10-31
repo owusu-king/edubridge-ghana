@@ -16,7 +16,7 @@ export function RequestResetForm() {
     return (
       <div className="space-y-6">
         <Alert tone="positive">
-          If an account exists for that email, we have sent a link to reset the password. It expires in 30
+          If an account matches, we have sent a link to reset the password by email or SMS. It expires in 30
           minutes.
         </Alert>
         <Link href="/login" className="text-base font-medium text-accent hover:underline">
@@ -27,14 +27,14 @@ export function RequestResetForm() {
   }
   return (
     <form action={action} className="space-y-5" noValidate>
-      <Field label="Email" error={state.fieldErrors?.email}>
+      <Field label="Email or phone number" error={state.fieldErrors?.identifier}>
         {(p) => (
           <Input
             {...p}
-            name="email"
-            type="email"
+            name="identifier"
+            type="text"
             autoComplete="username"
-            defaultValue={state.values?.email}
+            defaultValue={state.values?.identifier}
             required
             autoFocus
           />

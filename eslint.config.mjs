@@ -20,6 +20,23 @@ const config = [
     },
   },
   {
+    // UI code reaches data only through services in src/server, never the schema directly.
+    files: ["src/app/**/*.{ts,tsx}", "src/components/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/server/db/schema", "drizzle-orm", "drizzle-orm/*"],
+              message: "Use a service in src/server instead.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Domain code must stay framework-agnostic so it can serve web, API and future mobile clients.
     files: ["src/server/**/*.ts"],
     rules: {

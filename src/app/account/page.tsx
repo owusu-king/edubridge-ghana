@@ -1,17 +1,27 @@
 import type { Metadata } from "next";
 import { Section } from "@/components/ui/layout";
 import { PASSWORD_MIN_LENGTH } from "@/server/auth/password";
+import { getVerifiedPhone } from "@/server/auth/phone";
+import { db } from "@/server/db/client";
 import { requireUser } from "@/web/auth";
+import { PhoneSection } from "./phone-form";
 import { PasswordForm, ProfileForm, SignOutOthersForm } from "./account-forms";
 
 export const metadata: Metadata = { title: "Profile" };
 
 export default async function AccountPage() {
   const user = await requireUser();
+  const phone = await getVerifiedPhone(db(), user.id);
   return (
     <div className="space-y-12">
       <Section title="Profile">
         <ProfileForm name={user.name} />
+      </Section>
+      <Section
+        title="Phone number"
+        description="Used for sign-in and account recovery by SMS. Ghanaian numbers can be entered as 024 123 4567."
+      >
+        <PhoneSection phone={phone} />
       </Section>
       <Section title="Password" description="Changing your password signs you out on other devices.">
         <PasswordForm minLength={PASSWORD_MIN_LENGTH} email={user.email} />

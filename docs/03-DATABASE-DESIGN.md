@@ -19,11 +19,12 @@ PostgreSQL 16. Schema in `src/server/db/schema.ts`; migrations are reviewed SQL 
 | Table            | Scope  | Notes                                                                                                                                                               |
 | ---------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `tenants`        | global | Schools. Readable by slug; the app may only update the current tenant's name, timezone and `mfa_required_roles` (two-step policy).                                                                              |
-| `users`          | global | Identities. One user can belong to several schools. `citext` email.                                                                                                 |
+| `users`          | global | Identities. One user can belong to several schools. `citext` email; optional E.164 `phone`, stored only once verified by SMS (unique).                                                                                                 |
 | `sessions`       | global | `id` = SHA-256 of the session token.                                                                                                                                |
 | `login_attempts` | global | Failed sign-ins for throttling. Safe to purge rows older than 15 minutes.                                                                                           |
 | `user_mfa`, `mfa_recovery_codes`, `mfa_challenges` | global | TOTP seed sealed with AES-256-GCM (`MFA_ENCRYPTION_KEY`); last accepted step stored to block replays; recovery codes and challenge tokens stored as SHA-256. |
 | `notification_outbox` | global | Email/SMS written in the business transaction; claimed with `FOR UPDATE SKIP LOCKED`; retried with backoff (5 attempts); payload cleared after sending or giving up. |
+| `phone_verifications` | global | 6-digit SMS codes (hashed with the verification id), 10 minutes, 5 attempts, 3 per user per hour. |
 | `password_resets` | global | 30-minute, single-use, hashed tokens; 3 requests per account and 20 per IP per hour. |
 | `memberships`    | tenant | User ↔ school with `roles text[]` (validated by a check constraint). Never deleted by the app; suspend. A user can also see their own memberships in other schools. |
 | `audit_events`   | tenant | Append-only: the app role has INSERT and SELECT only.                                                                                                               |

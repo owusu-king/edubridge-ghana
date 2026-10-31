@@ -6,16 +6,20 @@ import { loginAttempts, passwordResets, sessions, users } from "../db/schema";
 import { DomainError } from "../errors";
 import { enqueue } from "../notifications/outbox";
 import { hashPassword, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "./password";
+import { identifierSchema } from "./sign-in";
 import type { ClientInfo } from "./sessions";
 import { generateToken, hashToken } from "./tokens";
 
 export const RESET_LIFETIME_MINUTES = 30;
 const MAX_REQUESTS_PER_USER_PER_HOUR = 3;
-const MAX_REQUESTS_PER_IP_PER_HOUR = 20;
+/** Per-IP limit; overridable for shared test environments where every request comes from one address. */
+const maxRequestsPerIpPerHour = () => Number(process.env.PASSWORD_RESET_LIMIT_PER_IP_HOUR ?? 20);
 
-export const resetRequestSchema = z.object({
-  email: z.string().trim().toLowerCase().email("Enter a valid email address.").max(254),
-});
+export const resetRequestSchema = z.preprocess(
+  (v) =>
+    v && typeof v === "object" && !("identifier" in v) ? { identifier: (v as { email?: unknown }).email } : v,
+  z.object({ identifier: identifierSchema }),
+);
 
 export const newPasswordSchema = z.object({
   password: z
@@ -34,11 +38,13 @@ export async function requestPasswordReset(
   client: ClientInfo = {},
   now = new Date(),
 ): Promise<void> {
-  const { email } = resetRequestSchema.parse(input);
+  const { identifier } = resetRequestSchema.parse(input);
   const [user] = await database
-    .select({ id: users.id, name: users.name, status: users.status })
+    .select({ id: users.id, name: users.name, email: users.email, phone: users.phone, status: users.status })
     .from(users)
-    .where(eq(users.email, email))
+    .where(
+      identifier.kind === "email" ? eq(users.email, identifier.value) : eq(users.phone, identifier.value),
+    )
     .limit(1);
   if (!user || user.status !== "active") return;
 
@@ -53,7 +59,7 @@ export async function requestPasswordReset(
       .select({ n: sql<number>`count(*)::int` })
       .from(passwordResets)
       .where(and(eq(passwordResets.requestedIp, client.ipAddress), gt(passwordResets.createdAt, hourAgo)));
-    if ((byIp?.n ?? 0) >= MAX_REQUESTS_PER_IP_PER_HOUR) return;
+    if ((byIp?.n ?? 0) >= maxRequestsPerIpPerHour()) return;
   }
 
   const token = generateToken();
@@ -65,12 +71,22 @@ export async function requestPasswordReset(
       requestedIp: client.ipAddress ?? null,
       createdAt: now,
     });
-    await enqueue(tx, {
-      channel: "email",
-      recipient: email,
-      template: "password_reset",
-      payload: { name: user.name, token, expiresMinutes: RESET_LIFETIME_MINUTES },
-    });
+    // Reply on the channel the person used: a phone request gets an SMS, an email request an email.
+    if (identifier.kind === "phone" && user.phone) {
+      await enqueue(tx, {
+        channel: "sms",
+        recipient: user.phone,
+        template: "password_reset_sms",
+        payload: { token, expiresMinutes: RESET_LIFETIME_MINUTES },
+      });
+    } else {
+      await enqueue(tx, {
+        channel: "email",
+        recipient: user.email,
+        template: "password_reset",
+        payload: { name: user.name, token, expiresMinutes: RESET_LIFETIME_MINUTES },
+      });
+    }
   });
 }
 
