@@ -19,7 +19,7 @@ test("shows one generic error for bad credentials", async ({ page }) => {
   await page.getByLabel("Password").fill("not-the-password");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(
-    page.getByRole("alert").filter({ hasText: "The email or password is incorrect." }),
+    page.getByRole("alert").filter({ hasText: "The sign-in details are incorrect." }),
   ).toBeVisible();
 });
 

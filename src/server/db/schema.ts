@@ -64,6 +64,9 @@ export const users = pgTable("users", {
   email: citext("email").notNull().unique(),
   name: text("name").notNull(),
   passwordHash: text("password_hash"),
+  /** E.164. Unique once verified; used for SMS and phone sign-in. */
+  phone: text("phone").unique(),
+  phoneVerifiedAt: timestamp("phone_verified_at", { withTimezone: true }),
   status: text("status", { enum: ["active", "disabled"] })
     .notNull()
     .default("active"),
@@ -141,6 +144,24 @@ export const passwordResets = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("password_resets_user_idx").on(t.userId, t.createdAt)],
+);
+
+/** SMS codes proving ownership of a phone number before it is attached to an account. */
+export const phoneVerifications = pgTable(
+  "phone_verifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    phone: text("phone").notNull(),
+    codeHash: text("code_hash").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("phone_verifications_user_idx").on(t.userId, t.createdAt)],
 );
 
 /** TOTP two-step verification. The seed is encrypted at rest (src/server/auth/secret-box.ts). */

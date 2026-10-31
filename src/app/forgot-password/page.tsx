@@ -6,7 +6,7 @@ export const metadata: Metadata = { title: "Reset password" };
 
 export default function ForgotPasswordPage() {
   return (
-    <AuthFrame title="Reset your password" intro="Enter the email address you sign in with.">
+    <AuthFrame title="Reset your password" intro="Enter the email address or phone number you sign in with.">
       <RequestResetForm />
     </AuthFrame>
   );

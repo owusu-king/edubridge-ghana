@@ -8,7 +8,7 @@ import { isTemplate, TEMPLATES, type TemplateName } from "./templates";
 export const MAX_ATTEMPTS = 5;
 
 export interface EnqueueInput<T extends TemplateName> {
-  channel: "email";
+  channel: "email" | "sms";
   recipient: string;
   template: T;
   payload: Parameters<(typeof TEMPLATES)[T]>[0];

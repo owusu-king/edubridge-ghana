@@ -8,7 +8,7 @@ import { dispatchAfterResponse } from "@/web/notify";
 
 export async function requestResetAction(_prev: FormState, formData: FormData): Promise<FormState> {
   try {
-    await requestPasswordReset(db(), { email: formData.get("email") }, await getClientInfo());
+    await requestPasswordReset(db(), { identifier: formData.get("identifier") }, await getClientInfo());
   } catch (error) {
     return toFormError(error, formData);
   }

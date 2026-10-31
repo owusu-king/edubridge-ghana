@@ -16,18 +16,23 @@ export interface SignInFormState {
 }
 
 export async function signInAction(_prev: SignInFormState, formData: FormData): Promise<SignInFormState> {
-  const email = String(formData.get("email") ?? "");
-  const parsed = signInSchema.safeParse({ email, password: formData.get("password") });
+  const email = String(formData.get("identifier") ?? "");
+  const parsed = signInSchema.safeParse({ identifier: email, password: formData.get("password") });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check your details.", email };
 
-  const result = await signIn(db(), parsed.data, await getClientInfo());
+  // signIn validates its own (raw) input; parsing above only produces the field error message.
+  const result = await signIn(
+    db(),
+    { identifier: email, password: formData.get("password") as string },
+    await getClientInfo(),
+  );
   if (!result.ok) {
     return {
       email,
       error:
         result.reason === "throttled"
           ? "Too many unsuccessful attempts. Wait 15 minutes, then try again."
-          : "The email or password is incorrect.",
+          : "The sign-in details are incorrect.",
     };
   }
   const next = safeRedirectPath(formData.get("next"), "/");

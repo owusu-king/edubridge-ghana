@@ -12,14 +12,14 @@ export function SignInForm({ next }: { next?: string }) {
     <form action={action} className="space-y-5">
       {state.error && <Alert tone="critical">{state.error}</Alert>}
       {next && <input type="hidden" name="next" value={next} />}
-      <Field label="Email">
+      <Field label="Email or phone number">
         {(props) => (
           <Input
             {...props}
-            name="email"
-            type="email"
+            name="identifier"
+            type="text"
             autoComplete="username"
-            inputMode="email"
+            autoCapitalize="none"
             defaultValue={state.email}
             required
             autoFocus

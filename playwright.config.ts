@@ -29,7 +29,12 @@ export default defineConfig({
     url: `http://localhost:${PORT}/api/health`,
     reuseExistingServer: !process.env.CI,
     // Messages go to a local mailbox file that tests read; nothing is sent.
-    env: { NOTIFICATIONS_TRANSPORT: "log", DEV_MAILBOX_FILE: ".dev-mailbox.jsonl" },
+    env: {
+      NOTIFICATIONS_TRANSPORT: "log",
+      DEV_MAILBOX_FILE: ".dev-mailbox.jsonl",
+      // Every test request comes from 127.0.0.1, so repeated local runs would hit the per-IP reset limit.
+      PASSWORD_RESET_LIMIT_PER_IP_HOUR: "100000",
+    },
     timeout: 60_000,
   },
 });

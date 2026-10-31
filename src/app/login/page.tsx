@@ -27,7 +27,7 @@ export default async function LoginPage({
         <div className="w-full max-w-sm">
           <h1 className="font-display text-2xl font-medium tracking-tight">Sign in</h1>
           <p className="mt-2 mb-8 text-base text-ink-2">
-            Use the email address your school registered for you.
+            Use your email address, or your phone number if you have added one.
           </p>
           {reset && (
             <Alert tone="positive" className="mb-5">

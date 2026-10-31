@@ -65,7 +65,7 @@ test("an owner's account security journey", async ({ browser }) => {
   await expect(page.getByRole("heading", { name: "Reset your password" })).toBeVisible();
   await page.getByLabel("Email").fill(email);
   await page.getByRole("button", { name: "Send reset link" }).click();
-  await expect(page.getByText("If an account exists for that email")).toBeVisible();
+  await expect(page.getByText("If an account matches")).toBeVisible();
   const resetPath = linkPath((await waitForMessage(email, /reset-password/)).text);
   await page.goto(resetPath);
   await page.getByLabel("New password").fill("third-strong-password");
@@ -99,5 +99,5 @@ test("password reset does not reveal whether an account exists", async ({ page }
   await page.goto("/forgot-password");
   await page.getByLabel("Email").fill(`unknown-${randomUUID().slice(0, 8)}@example.test`);
   await page.getByRole("button", { name: "Send reset link" }).click();
-  await expect(page.getByText("If an account exists for that email")).toBeVisible();
+  await expect(page.getByText("If an account matches")).toBeVisible();
 });
