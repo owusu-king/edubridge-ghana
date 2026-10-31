@@ -13,11 +13,17 @@ import type { TenantContext } from "../tenancy/service";
 /**
  * Member management. Rules:
  * - Requires `members.manage` and access to every campus.
- * - Only owners can grant or remove the owner role, or change and suspend owners.
- * - A school always keeps at least one active owner; nobody can suspend themselves.
+ * - Only proprietors (role key "owner") can grant or remove that role, or change and suspend proprietors.
+ * - A school always keeps at least one active proprietor; nobody can suspend themselves.
  * - Staff roles only: parent and student access will come from guardian and student records (R1).
  */
-export const ASSIGNABLE_ROLES = ["owner", "admin", "bursar", "teacher"] as const satisfies readonly Role[];
+export const ASSIGNABLE_ROLES = [
+  "owner",
+  "headteacher",
+  "admin",
+  "bursar",
+  "teacher",
+] as const satisfies readonly Role[];
 export type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
 
 const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
@@ -49,7 +55,7 @@ function assertManager(ctx: TenantContext): void {
 
 function assertCanGrant(ctx: TenantContext, roles: readonly string[]): void {
   if (roles.includes("owner") && !ctx.roles.includes("owner")) {
-    throw new DomainError("owner_required", "Only an owner can grant the owner role.", "roles");
+    throw new DomainError("owner_required", "Only a proprietor can make someone a proprietor.", "roles");
   }
 }
 
@@ -256,7 +262,7 @@ export async function updateMember(
     if ((wasOwner || isOwner) && !ctx.roles.includes("owner")) {
       throw new DomainError(
         "owner_required",
-        "Only an owner can change an owner's access or grant the owner role.",
+        "Only a proprietor can change a proprietor's access or make someone a proprietor.",
       );
     }
     if (
@@ -267,7 +273,7 @@ export async function updateMember(
     ) {
       throw new DomainError(
         "last_owner",
-        "A school needs at least one owner. Make someone else an owner first.",
+        "A school needs at least one proprietor. Make someone else a proprietor first.",
         "roles",
       );
     }
@@ -325,9 +331,9 @@ export async function setMemberStatus(
     }
     if (member.roles.includes("owner")) {
       if (!ctx.roles.includes("owner"))
-        throw new DomainError("owner_required", "Only an owner can change an owner's access.");
+        throw new DomainError("owner_required", "Only a proprietor can change a proprietor's access.");
       if (status === "suspended" && (await otherActiveOwners(tx, ctx.tenant.id, member.id)) === 0) {
-        throw new DomainError("last_owner", "A school needs at least one active owner.");
+        throw new DomainError("last_owner", "A school needs at least one active proprietor.");
       }
     }
     // Access is re-checked on every request, so a suspended member is locked out on their next request.

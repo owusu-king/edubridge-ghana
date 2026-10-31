@@ -34,7 +34,7 @@ export default async function SchoolsAdminPage() {
         <EmptyState
           icon={<Building2 />}
           title="No schools yet"
-          description="Create the first school to onboard its owner."
+          description="Create the first school to onboard its proprietor."
           action={newSchool}
         />
       ) : (

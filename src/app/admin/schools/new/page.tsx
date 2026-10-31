@@ -15,7 +15,7 @@ export default async function NewSchoolPage() {
       <PageHeader
         eyebrow="Schools"
         title="New school"
-        description="Creates the school, its plan, a Main campus and an owner invitation."
+        description="Creates the school, its plan, a Main campus and a proprietor invitation."
       />
       <CreateSchoolForm
         countries={SUPPORTED_COUNTRIES.map((code) => ({ code, name: countryName(code) }))}

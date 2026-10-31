@@ -141,7 +141,7 @@ export function ReissueInvitationForm({
         state.status === "error" && !state.fieldErrors && <Message state={state} />
       )}
       <form action={formAction} className="flex flex-col gap-3 sm:flex-row sm:items-start" noValidate>
-        <Field label="Owner's email" error={state.fieldErrors?.email} className="flex-1">
+        <Field label="Proprietor's email" error={state.fieldErrors?.email} className="flex-1">
           {(p) => (
             <Input
               {...p}
@@ -154,7 +154,7 @@ export function ReissueInvitationForm({
           )}
         </Field>
         <Button type="submit" variant="secondary" pending={pending} className="sm:mt-6">
-          Create new owner link
+          Create new proprietor link
         </Button>
       </form>
     </div>

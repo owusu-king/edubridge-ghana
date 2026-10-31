@@ -63,7 +63,7 @@ export default async function SchoolAdminPage({ params }: { params: Promise<{ id
           </Section>
 
           <Section
-            title="Owner access"
+            title="Proprietor access"
             description="Creating a new link revokes any pending link for that email."
           >
             <ReissueInvitationForm

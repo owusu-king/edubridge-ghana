@@ -8,7 +8,7 @@ import { MfaPolicyForm } from "./policy-form";
 
 export const metadata: Metadata = { title: "Settings · Security" };
 
-const POLICY_ROLES = ["owner", "admin", "bursar", "teacher"] as const;
+const POLICY_ROLES = ["owner", "headteacher", "admin", "bursar", "teacher"] as const;
 
 export default async function SecuritySettingsPage({ params }: { params: Promise<{ school: string }> }) {
   const { school } = await params;
@@ -17,7 +17,7 @@ export default async function SecuritySettingsPage({ params }: { params: Promise
   return (
     <Section
       title="Two-step verification"
-      description="Recommended for anyone who can see fees or change who has access. Owners can change this policy."
+      description="Recommended for anyone who can see fees or change who has access. Proprietors can change this policy."
     >
       <div className="max-w-xl">
         <MfaPolicyForm

@@ -12,7 +12,7 @@ test("an owner's account security journey", async ({ browser }) => {
   await admin.goto("/admin/schools/new");
   await admin.getByLabel("School name").fill(`Secure School ${id}`);
   await admin.getByLabel("Address").fill(slug);
-  await admin.getByLabel("Owner's email").fill(email);
+  await admin.getByLabel("Proprietor's email").fill(email);
   await admin.getByRole("button", { name: "Create school" }).click();
   const invitePath = new URL(await admin.getByLabel("Invitation link").inputValue()).pathname;
 
@@ -83,7 +83,7 @@ test("an owner's account security journey", async ({ browser }) => {
 
   // The owner can change the school's policy; the change is audited.
   await page.goto(`/s/${slug}/settings/security`);
-  await page.getByRole("checkbox", { name: "Owner" }).uncheck();
+  await page.getByRole("checkbox", { name: "Proprietor" }).uncheck();
   await page.getByRole("button", { name: "Save policy" }).click();
   await expect(page.getByText("Security policy saved.")).toBeVisible();
   await page.goto(`/s/${slug}/settings/audit`);

@@ -48,6 +48,7 @@ const PEOPLE: { email: string; name: string; access: Record<string, Role[]> }[] 
     name: "Efua Mensah-Larbi",
     access: { "kpone-ridge": ["owner"], "adenta-hall": ["owner"] },
   },
+  { email: "head@example.test", name: "Comfort Adjei", access: { "kpone-ridge": ["headteacher"] } },
   { email: "admin@example.test", name: "Kwabena Ofori", access: { "kpone-ridge": ["admin"] } },
   { email: "bursar@example.test", name: "Akosua Darko", access: { "kpone-ridge": ["bursar"] } },
   {

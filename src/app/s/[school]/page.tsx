@@ -34,7 +34,7 @@ export default async function OverviewPage({ params }: { params: Promise<{ schoo
             </Link>
           }
         >
-          <dl className="grid grid-cols-2 border-y border-line sm:grid-cols-3 lg:grid-cols-6">
+          <dl className="grid grid-cols-2 border-y border-line sm:grid-cols-3 lg:grid-cols-7">
             {ROLES.map((role) => (
               <div
                 key={role}

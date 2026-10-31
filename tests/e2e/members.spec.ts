@@ -13,7 +13,7 @@ test("an admin invites, scopes, edits and suspends a member", async ({ page, bro
   await page.getByRole("button", { name: "Invite member" }).click();
   const invite = page.getByRole("dialog", { name: "Invite a member" });
   await invite.getByLabel("Email").fill(email);
-  await invite.getByLabel("Teacher").check();
+  await invite.getByRole("checkbox", { name: "Teacher", exact: true }).check();
   await invite.getByLabel("Only selected campuses").check();
   await invite.getByLabel("Sakumono").check();
   await invite.getByRole("button", { name: "Create invitation" }).click();
@@ -36,7 +36,7 @@ test("an admin invites, scopes, edits and suspends a member", async ({ page, bro
   await expect(row.getByText("Sakumono")).toBeVisible();
   await row.getByRole("button", { name: `Edit access for ${name}` }).click();
   const edit = page.getByRole("dialog", { name: `Edit access for ${name}` });
-  await edit.getByLabel("Teacher").uncheck();
+  await edit.getByRole("checkbox", { name: "Teacher", exact: true }).uncheck();
   await edit.getByRole("button", { name: "Save access" }).click();
   await expect(edit.getByText("Choose at least one role.")).toBeVisible();
   await edit.getByLabel("Administrator").check();
@@ -80,7 +80,8 @@ test("admins cannot change owners or invite owners; invitations can be revoked",
   const email = `revoke-${randomUUID().slice(0, 8)}@example.test`;
   await page.getByRole("button", { name: "Invite member" }).click();
   const invite = page.getByRole("dialog", { name: "Invite a member" });
-  await expect(invite.getByLabel("Owner")).toHaveCount(0);
+  await expect(invite.getByRole("checkbox", { name: "Proprietor" })).toHaveCount(0);
+  await expect(invite.getByRole("checkbox", { name: "Head teacher" })).toBeVisible();
   await invite.getByLabel("Email").fill(email);
   await invite.getByRole("button", { name: "Create invitation" }).click();
   await invite.getByRole("button", { name: "Done" }).click();
