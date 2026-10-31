@@ -33,6 +33,11 @@ export default async function SecurityPage({
           Platform administration requires two-step verification. Set it up to continue.
         </Alert>
       )}
+      {!status.enabled && required === "school" && (
+        <Alert tone="info">
+          Your school requires two-step verification for your role. Set it up to continue.
+        </Alert>
+      )}
       {status.enabled ? <ManageMfa remaining={status.recoveryCodesRemaining} /> : <EnableMfa />}
     </Section>
   );

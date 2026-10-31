@@ -5,7 +5,8 @@ import { recordAudit } from "../audit/record";
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, hashPassword } from "../auth/password";
 import { createSession, type ClientInfo } from "../auth/sessions";
 import { generateToken, hashToken } from "../auth/tokens";
-import { isRole, type Role } from "../authz/permissions";
+import { isRole, ROLE_LABELS, type Role } from "../authz/permissions";
+import { enqueue } from "../notifications/outbox";
 import type { Database, Transaction } from "../db/client";
 import { setTenantContext } from "../db/context";
 import { invitations, membershipCampuses, memberships, tenants, users } from "../db/schema";
@@ -60,6 +61,21 @@ export async function issueInvitation(
       invitedByUserId: input.invitedByUserId,
     })
     .returning({ id: invitations.id });
+  const [school] = await tx
+    .select({ name: tenants.name })
+    .from(tenants)
+    .where(eq(tenants.id, input.tenantId));
+  await enqueue(tx, {
+    channel: "email",
+    recipient: input.email,
+    template: "invitation",
+    payload: {
+      schoolName: school?.name ?? "your school",
+      roles: input.roles.map((r) => ROLE_LABELS[r]),
+      token,
+      expiresAt: expiresAt.toISOString(),
+    },
+  });
   await recordAudit(tx, {
     tenantId: input.tenantId,
     actorUserId: input.invitedByUserId,

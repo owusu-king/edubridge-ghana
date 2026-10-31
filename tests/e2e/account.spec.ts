@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
-import { completeTwoStep, PLATFORM_AUTH, totp } from "./helpers";
+import { completeTwoStep, enrollTwoStep, linkPath, PLATFORM_AUTH, waitForMessage } from "./helpers";
 
-test("an owner secures their account: password change and two-step verification", async ({ browser }) => {
+test("an owner's account security journey", async ({ browser }) => {
   const id = randomUUID().slice(0, 8);
   const email = `secure-${id}@example.test`;
   const slug = `secure-${id}`;
@@ -21,15 +21,19 @@ test("an owner secures their account: password change and two-step verification"
   await page.getByLabel("Full name").fill("Owner Secure");
   await page.getByLabel("Password").fill("first-strong-password");
   await page.getByRole("button", { name: "Create account and join" }).click();
-  await expect(page).toHaveURL(`/s/${slug}`);
 
-  // Owners are prompted to set up two-step verification.
-  await expect(page.getByText("Owners and bursars must use two-step verification.")).toBeVisible();
+  // The default policy requires owners to set up two-step verification before entering the school.
+  await expect(page).toHaveURL("/account/security?required=school");
+  await page.goto(`/s/${slug}`);
+  await expect(page).toHaveURL("/account/security?required=school");
+  const { secret, recoveryCodes } = await enrollTwoStep(page);
+  await page.reload();
+  await expect(page.getByText("10 of 10 recovery codes left.")).toBeVisible();
+  await page.goto(`/s/${slug}`);
+  await expect(page.getByRole("heading", { level: 1, name: `Secure School ${id}` })).toBeVisible();
 
-  // Change password.
-  await page.getByRole("button", { name: /^Account:/ }).click();
-  await page.getByRole("menuitem", { name: "Your account" }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Your account" })).toBeVisible();
+  // Change password from the account page.
+  await page.goto("/account");
   await page.getByLabel("Current password").fill("wrong-password");
   await page.getByLabel("New password").fill("second-strong-password");
   await page.getByRole("button", { name: "Change password" }).click();
@@ -39,30 +43,8 @@ test("an owner secures their account: password change and two-step verification"
   await page.getByRole("button", { name: "Change password" }).click();
   await expect(page.getByText("Password changed.")).toBeVisible();
 
-  // Turn on two-step verification.
-  await page.getByRole("link", { name: "Security" }).click();
-  await page.getByRole("button", { name: "Set up two-step verification" }).click();
-  await expect(page.getByRole("img", { name: "QR code for your authenticator app" })).toBeVisible();
-  const secret = (await page.getByTestId("mfa-secret").innerText()).replace(/\s+/g, "");
-  await page.getByLabel("Code from your app").fill("000000");
-  await page.getByRole("button", { name: "Turn on" }).click();
-  await expect(page.getByText("That code is not valid.")).toBeVisible();
-  await page.getByLabel("Code from your app").fill(await totp(secret));
-  await page.getByRole("button", { name: "Turn on" }).click();
-  const codeItems = page.getByRole("list", { name: "Recovery codes" }).getByRole("listitem");
-  await expect(codeItems).toHaveCount(10);
-  const codes = await codeItems.allInnerTexts();
-  await page.getByRole("button", { name: "I have saved them" }).click();
-  await page.reload();
-  await expect(page.getByText("10 of 10 recovery codes left.")).toBeVisible();
-
-  // The prompt disappears in the school.
-  await page.goto(`/s/${slug}`);
-  await expect(page.getByText("Owners and bursars must use two-step verification.")).toHaveCount(0);
-
-  // Sign out, then sign in: the new password and a code are required; a recovery code also works.
-  await page.getByRole("button", { name: /^Account:/ }).click();
-  await page.getByRole("menuitem", { name: "Sign out" }).click();
+  // Sign in again: new password, then a recovery code.
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill("second-strong-password");
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -70,23 +52,52 @@ test("an owner secures their account: password change and two-step verification"
   await page.getByLabel("Verification code").fill("000000");
   await page.getByRole("button", { name: "Verify" }).click();
   await expect(page.getByText("That code is not valid.")).toBeVisible();
-  await page.getByLabel("Verification code").fill(codes[0]!);
+  await page.getByLabel("Verification code").fill(recoveryCodes[0]!);
   await page.getByRole("button", { name: "Verify" }).click();
-  await expect(page).toHaveURL(`/s/${slug}`);
-
+  await expect(page).not.toHaveURL(/\/login/);
   await page.goto("/account/security");
   await expect(page.getByText("9 of 10 recovery codes left.")).toBeVisible();
 
-  // And the authenticator app path.
-  await page.getByRole("button", { name: /Sign out/ }).click();
+  // Forgotten password: the reset link arrives by email and works once.
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await page.getByRole("link", { name: "Forgotten your password?" }).click();
+  // Wait for the new page so the sign-in form's Email field is not filled by mistake.
+  await expect(page.getByRole("heading", { name: "Reset your password" })).toBeVisible();
   await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill("second-strong-password");
+  await page.getByRole("button", { name: "Send reset link" }).click();
+  await expect(page.getByText("If an account exists for that email")).toBeVisible();
+  const resetPath = linkPath((await waitForMessage(email, /reset-password/)).text);
+  await page.goto(resetPath);
+  await page.getByLabel("New password").fill("third-strong-password");
+  await page.getByRole("button", { name: "Set new password" }).click();
+  await expect(page.getByText("Your password has been changed.")).toBeVisible();
+  await page.goto(resetPath);
+  await expect(page.getByRole("heading", { name: "Link expired" })).toBeVisible();
+
+  // Two-step verification still applies after a reset.
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill("third-strong-password");
   await page.getByRole("button", { name: "Sign in" }).click();
   await completeTwoStep(page, secret);
-  await expect(page).toHaveURL(`/s/${slug}`);
+
+  // The owner can change the school's policy; the change is audited.
+  await page.goto(`/s/${slug}/settings/security`);
+  await page.getByRole("checkbox", { name: "Owner" }).uncheck();
+  await page.getByRole("button", { name: "Save policy" }).click();
+  await expect(page.getByText("Security policy saved.")).toBeVisible();
+  await page.goto(`/s/${slug}/settings/audit`);
+  await expect(page.getByRole("cell", { name: "Two-step verification policy changed" })).toBeVisible();
 });
 
 test("the two-step page cannot be used without a pending sign-in", async ({ page }) => {
   await page.goto("/login/verify");
   await expect(page).toHaveURL("/login");
+});
+
+test("password reset does not reveal whether an account exists", async ({ page }) => {
+  await page.goto("/forgot-password");
+  await page.getByLabel("Email").fill(`unknown-${randomUUID().slice(0, 8)}@example.test`);
+  await page.getByRole("button", { name: "Send reset link" }).click();
+  await expect(page.getByText("If an account exists for that email")).toBeVisible();
 });

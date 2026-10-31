@@ -62,6 +62,8 @@ export const requireTenant = cache(
     const user = await requireUser();
     const ctx = await resolveTenantContext(db(), slug, user.id);
     if (!ctx) notFound();
+    // The school's policy may require two-step verification for this member's roles.
+    if (ctx.mfaRequired && !(await hasMfa(db(), user.id))) redirect("/account/security?required=school");
     return { user, ctx };
   },
 );
@@ -87,7 +89,10 @@ export async function getClientInfo(): Promise<{ ipAddress: string | null; userA
 export const requirePlatformAdmin = cache(async (): Promise<SessionUser> => {
   const user = await requireUser();
   if (!(await isPlatformAdmin(db(), user.id))) notFound();
-  // Platform administrators can reach every school: two-step verification is mandatory (D-03).
-  if (!(await hasMfa(db(), user.id))) redirect("/account/security?required=platform");
+  // Platform administrators can reach every school, so two-step verification is required (D-03)
+  // unless explicitly disabled for an environment with PLATFORM_MFA_REQUIRED=false.
+  if (process.env.PLATFORM_MFA_REQUIRED !== "false" && !(await hasMfa(db(), user.id))) {
+    redirect("/account/security?required=platform");
+  }
   return user;
 });

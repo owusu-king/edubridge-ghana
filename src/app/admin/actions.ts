@@ -10,6 +10,7 @@ import {
 } from "@/server/platform/service";
 import { requirePlatformAdmin } from "@/web/auth";
 import { toFormError, type FormState } from "@/web/forms";
+import { dispatchAfterResponse } from "@/web/notify";
 import { appOrigin } from "@/web/origin";
 import type { InviteLink } from "@/components/ui/invite-link";
 
@@ -40,6 +41,7 @@ export async function createSchoolAction(
   ]);
   try {
     const created = await createSchool(db(), user.id, input);
+    dispatchAfterResponse();
     revalidatePath("/admin");
     return {
       status: "success",
@@ -102,6 +104,7 @@ export async function reissueInvitationAction(
   const email = String(formData.get("email") ?? "");
   try {
     const invitation = await reissueOwnerInvitation(db(), user.id, schoolId, email);
+    dispatchAfterResponse();
     revalidatePath(`/admin/schools/${schoolId}`);
     return {
       status: "success",

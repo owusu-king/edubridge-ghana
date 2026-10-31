@@ -40,9 +40,18 @@ export const tenants = pgTable(
     status: text("status", { enum: ["active", "suspended"] })
       .notNull()
       .default("active"),
+    /** Roles that must use two-step verification at this school (D-03 default: owner, bursar). */
+    mfaRequiredRoles: text("mfa_required_roles")
+      .array()
+      .notNull()
+      .default(sql`ARRAY['owner','bursar']::text[]`),
     ...timestamps,
   },
   (t) => [
+    check(
+      "tenants_mfa_required_roles_valid",
+      sql`${t.mfaRequiredRoles} <@ ARRAY['owner','admin','bursar','teacher','parent','student']::text[]`,
+    ),
     check("tenants_slug_format", sql`${t.slug} ~ '^[a-z0-9](?:[a-z0-9-]{1,46}[a-z0-9])$'`),
     check("tenants_country_code_format", sql`${t.countryCode} ~ '^[A-Z]{2}$'`),
     check("tenants_currency_code_format", sql`${t.currencyCode} ~ '^[A-Z]{3}$'`),
@@ -91,6 +100,47 @@ export const loginAttempts = pgTable(
     index("login_attempts_email_idx").on(t.email, t.attemptedAt),
     index("login_attempts_ip_idx").on(t.ipAddress, t.attemptedAt),
   ],
+);
+
+/**
+ * Transactional outbox for email and SMS. Rows are written in the same transaction as the business change,
+ * then delivered after commit and retried by the worker. Payloads are cleared once sent.
+ */
+export const notificationOutbox = pgTable(
+  "notification_outbox",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    channel: text("channel", { enum: ["email", "sms"] }).notNull(),
+    recipient: text("recipient").notNull(),
+    template: text("template").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    status: text("status", { enum: ["pending", "sending", "sent", "failed"] })
+      .notNull()
+      .default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    lastError: text("last_error"),
+    providerMessageId: text("provider_message_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+  },
+  (t) => [index("notification_outbox_due_idx").on(t.status, t.nextAttemptAt)],
+);
+
+/** Single-use password reset tokens (hash only), valid for 30 minutes. */
+export const passwordResets = pgTable(
+  "password_resets",
+  {
+    id: text("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    requestedIp: inet("requested_ip"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("password_resets_user_idx").on(t.userId, t.createdAt)],
 );
 
 /** TOTP two-step verification. The seed is encrypted at rest (src/server/auth/secret-box.ts). */

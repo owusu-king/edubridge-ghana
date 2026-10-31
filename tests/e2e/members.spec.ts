@@ -39,11 +39,11 @@ test("an admin invites, scopes, edits and suspends a member", async ({ page, bro
   await edit.getByLabel("Teacher").uncheck();
   await edit.getByRole("button", { name: "Save access" }).click();
   await expect(edit.getByText("Choose at least one role.")).toBeVisible();
-  await edit.getByLabel("Bursar").check();
+  await edit.getByLabel("Administrator").check();
   await edit.getByLabel("All campuses").check();
   await edit.getByRole("button", { name: "Save access" }).click();
   await expect(edit).toBeHidden();
-  await expect(row.getByText("Bursar")).toBeVisible();
+  await expect(row.getByText("Administrator")).toBeVisible();
   await expect(row.getByText("All campuses")).toBeVisible();
 
   // Suspension locks them out on their next request.

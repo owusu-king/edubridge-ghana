@@ -48,3 +48,54 @@ export async function completeTwoStep(page: Page, secret: string) {
   await page.getByRole("button", { name: "Verify" }).click();
   await expect(page).not.toHaveURL(/\/login/);
 }
+
+/** Sets up two-step verification on /account/security; returns the secret for later codes. */
+export async function enrollTwoStep(page: Page): Promise<{ secret: string; recoveryCodes: string[] }> {
+  await page.getByRole("button", { name: "Set up two-step verification" }).click();
+  const secret = (await page.getByTestId("mfa-secret").innerText()).replace(/\s+/g, "");
+  await page.getByLabel("Code from your app").fill(await totp(secret));
+  await page.getByRole("button", { name: "Turn on" }).click();
+  const items = page.getByRole("list", { name: "Recovery codes" }).getByRole("listitem");
+  await expect(items).toHaveCount(10);
+  const recoveryCodes = await items.allInnerTexts();
+  await page.getByRole("button", { name: "I have saved them" }).click();
+  return { secret, recoveryCodes };
+}
+
+interface MailboxEntry {
+  channel: "email" | "sms";
+  to: string;
+  subject?: string;
+  text: string;
+}
+
+/** Waits for the newest development-mailbox message to a recipient (written by the log provider). */
+export async function waitForMessage(to: string, match?: RegExp): Promise<MailboxEntry> {
+  let found: MailboxEntry | undefined;
+  await expect
+    .poll(
+      () => {
+        let lines: string[] = [];
+        try {
+          lines = readFileSync(".dev-mailbox.jsonl", "utf8").trim().split("\n");
+        } catch {
+          return false;
+        }
+        found = lines
+          .map((l) => JSON.parse(l) as MailboxEntry)
+          .filter((m) => m.to === to && (!match || match.test(m.text)))
+          .at(-1);
+        return Boolean(found);
+      },
+      { timeout: 10_000 },
+    )
+    .toBe(true);
+  return found!;
+}
+
+/** The path of the first app link in a message, e.g. "/invite/abc". */
+export function linkPath(text: string): string {
+  const url = text.match(/https?:\/\/\S+/)?.[0];
+  if (!url) throw new Error("No link in message");
+  return new URL(url).pathname;
+}

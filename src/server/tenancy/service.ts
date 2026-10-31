@@ -14,6 +14,8 @@ export interface Tenant {
   countryCode: string;
   timezone: string;
   currencyCode: string;
+  /** Roles that must use two-step verification at this school. */
+  mfaRequiredRoles: Role[];
 }
 
 /** The authenticated user acting inside one school. Every tenant-scoped service call takes this. */
@@ -23,6 +25,8 @@ export interface TenantContext {
   roles: Role[];
   /** Campuses this membership is limited to; null means every campus. */
   campusIds: string[] | null;
+  /** True when one of the member's roles must use two-step verification here. */
+  mfaRequired: boolean;
 }
 
 const tenantColumns = {
@@ -32,6 +36,7 @@ const tenantColumns = {
   countryCode: tenants.countryCode,
   timezone: tenants.timezone,
   currencyCode: tenants.currencyCode,
+  mfaRequiredRoles: tenants.mfaRequiredRoles,
 };
 
 function toRoles(values: string[]): Role[] {
@@ -47,12 +52,13 @@ export async function resolveTenantContext(
   slug: string,
   userId: string,
 ): Promise<TenantContext | null> {
-  const [tenant] = await database
+  const [row] = await database
     .select(tenantColumns)
     .from(tenants)
     .where(and(eq(tenants.slug, slug), eq(tenants.status, "active")))
     .limit(1);
-  if (!tenant) return null;
+  if (!row) return null;
+  const tenant: Tenant = { ...row, mfaRequiredRoles: toRoles(row.mfaRequiredRoles) };
 
   const membership = await withTenant(database, { tenantId: tenant.id, userId }, async (tx) => {
     const [row] = await tx
@@ -76,7 +82,8 @@ export async function resolveTenantContext(
   if (!membership) return null;
   const roles = toRoles(membership.roles);
   if (roles.length === 0) return null;
-  return { tenant, userId, roles, campusIds: membership.campusIds };
+  const mfaRequired = roles.some((r) => tenant.mfaRequiredRoles.includes(r));
+  return { tenant, userId, roles, campusIds: membership.campusIds, mfaRequired };
 }
 
 export interface UserSchool {
@@ -194,7 +201,7 @@ export async function updateSchoolProfile(
   /** Unvalidated input, e.g. form data; parsed here. */
   input: unknown,
   meta: { ipAddress?: string | null } = {},
-): Promise<Tenant> {
+): Promise<Omit<Tenant, "mfaRequiredRoles">> {
   assertCan(ctx.roles, "school.settings.manage");
   const data = schoolProfileSchema.parse(input);
   return withTenant(database, { tenantId: ctx.tenant.id, userId: ctx.userId }, async (tx) => {
@@ -221,5 +228,37 @@ export async function updateSchoolProfile(
       });
     }
     return updated;
+  });
+}
+
+export const mfaPolicySchema = z.object({
+  roles: z
+    .array(z.enum(["owner", "admin", "bursar", "teacher"], { message: "Choose valid roles." }))
+    .transform((r) => [...new Set(r)].sort()),
+});
+
+/** Owners choose which roles must use two-step verification at their school. Audited. */
+export async function updateMfaPolicy(
+  database: Database,
+  ctx: TenantContext,
+  input: unknown,
+  meta: { ipAddress?: string | null } = {},
+): Promise<void> {
+  assertCan(ctx.roles, "security.manage");
+  const { roles } = mfaPolicySchema.parse(input);
+  await withTenant(database, { tenantId: ctx.tenant.id, userId: ctx.userId }, async (tx) => {
+    await tx
+      .update(tenants)
+      .set({ mfaRequiredRoles: roles, updatedAt: new Date() })
+      .where(eq(tenants.id, ctx.tenant.id));
+    await recordAudit(tx, {
+      tenantId: ctx.tenant.id,
+      actorUserId: ctx.userId,
+      action: "school.mfa_policy.updated",
+      entityType: "tenant",
+      entityId: ctx.tenant.id,
+      metadata: { changes: { roles: { from: ctx.tenant.mfaRequiredRoles, to: roles } } },
+      ipAddress: meta.ipAddress ?? null,
+    });
   });
 }

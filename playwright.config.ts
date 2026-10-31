@@ -28,6 +28,8 @@ export default defineConfig({
     command: `npx next start -p ${PORT}`,
     url: `http://localhost:${PORT}/api/health`,
     reuseExistingServer: !process.env.CI,
+    // Messages go to a local mailbox file that tests read; nothing is sent.
+    env: { NOTIFICATIONS_TRANSPORT: "log", DEV_MAILBOX_FILE: ".dev-mailbox.jsonl" },
     timeout: 60_000,
   },
 });

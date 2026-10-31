@@ -1,0 +1,2 @@
+ALTER TABLE "tenants" ADD COLUMN "mfa_required_roles" text[] DEFAULT ARRAY['owner','bursar']::text[] NOT NULL;--> statement-breakpoint
+ALTER TABLE "tenants" ADD CONSTRAINT "tenants_mfa_required_roles_valid" CHECK ("tenants"."mfa_required_roles" <@ ARRAY['owner','admin','bursar','teacher','parent','student']::text[]);
