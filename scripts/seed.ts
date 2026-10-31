@@ -467,7 +467,7 @@ async function main() {
         ["S0008", 147000, "cash", null, "2026-09-15", "Ato Annan"],
       ];
       const labels = { cash: "Cash", mobile_money: "Mobile Money", bank_deposit: "Bank deposit" };
-      const [accountant] = await db
+      const [accountant] = await tx
         .select({ id: users.id })
         .from(users)
         .where(eq(users.email, "bursar@example.test"));
