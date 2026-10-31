@@ -43,9 +43,9 @@ Differences from `02` (D-09 is decided; the rest are still open):
 | Phase | Scope | Status |
 | --- | --- | --- |
 | A | Roles (Proprietor, Head teacher, Accountant), calendar, levels and classes, students, guardians | Done (#7–#11) |
-| B | Import students, classes this term and guardians from Excel/CSV | Built; in review |
-| C | Fee structures, ledger, part payments, cash/bank entry, arrears, receipts | C1–C3a done (#13–#16); C3b discounts in review (#17); C3c payment plans built |
-| D | Mobile Money behind a provider-agnostic interface (mock first) | |
+| B | Import students, classes this term and guardians from Excel/CSV | Done (#12) |
+| C | Fee structures, ledger, part payments, cash/bank entry, arrears, receipts | Done (#13–#17, #19) |
+| D | Mobile Money behind a provider-agnostic interface (mock first) | Next |
 | E | Who-owes-what, reminders, receipt/statement PDFs, WhatsApp share links | |
 | F | Parent view: SMS-code sign-in, balances | |
 | G | Assessment and bulk report cards | |
