@@ -30,6 +30,7 @@ PostgreSQL 16. Schema in `src/server/db/schema.ts`; migrations are reviewed SQL 
 | `academic_years`, `terms` | tenant | School-local `date` columns. `EXCLUDE USING gist` blocks overlapping years/terms per school (`btree_gist`); a partial unique index allows one current term per school; terms reference years by composite FK. |
 | `levels`, `classes` | tenant | Levels in promotion order with a stage (creche … jhs). Classes reference level, campus and optional class teacher by composite FKs (`(tenant_id, x_id)`); unique name per campus; archived, never deleted. |
 | `students`, `enrolments`, `tenant_counters` | tenant | Minimal student data (names, sex, optional date of birth); admission number unique per school, auto-numbered from a per-school counter that skips numbers in use. One class per student per term (composite FKs to student, term, class). Teachers see only their classes' students. |
+| `guardians`, `student_guardians` | tenant | One guardian per phone number per school (partial unique index), so siblings share guardians; phone or email required (E.164 check). Links carry relationship and a primary contact flag (one per student, partial unique index). |
 | `audit_events`   | tenant | Append-only: the app role has INSERT and SELECT only.                                                                                                               |
 
 ## Tenant context

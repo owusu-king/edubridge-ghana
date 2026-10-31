@@ -2,12 +2,12 @@
 
 import type { Route } from "next";
 import Link from "next/link";
-import { useActionState, useState } from "react";
+import { useState } from "react";
+import { useFormAction } from "@/components/ui/use-form-action";
 import { Alert } from "@/components/ui/alert";
 import { Button, buttonStyles } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
 import { Section } from "@/components/ui/layout";
-import type { FormState } from "@/web/forms";
 import { createSchoolAction, type InviteResult } from "../../actions";
 import { InviteLinkPanel } from "@/components/ui/invite-link";
 
@@ -28,9 +28,7 @@ const toSlug = (name: string) =>
     .replace(/-+$/g, "");
 
 export function CreateSchoolForm({ countries, currencies, timezones }: Options) {
-  const [state, action, pending] = useActionState<FormState<InviteResult>, FormData>(createSchoolAction, {
-    status: "idle",
-  });
+  const { state, pending, onSubmit } = useFormAction<InviteResult>(createSchoolAction);
   const [slug, setSlug] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
   const errors = state.fieldErrors ?? {};
@@ -54,7 +52,7 @@ export function CreateSchoolForm({ countries, currencies, timezones }: Options) 
   }
 
   return (
-    <form action={action} className="max-w-2xl space-y-10" noValidate>
+    <form onSubmit={onSubmit} className="max-w-2xl space-y-10" noValidate>
       {state.status === "error" && state.message && <Alert tone="critical">{state.message}</Alert>}
 
       <Section title="School">

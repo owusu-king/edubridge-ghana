@@ -54,3 +54,13 @@ function describeError(error: unknown): FormState<never> {
   }
   throw error;
 }
+
+/** A validation failure assembled by an action itself (e.g. fields named differently from the service's). */
+export function fieldErrorState(fieldErrors: Record<string, string>, formData?: FormData): FormState<never> {
+  return {
+    status: "error",
+    message: "Check the highlighted fields.",
+    fieldErrors,
+    values: formData ? echoValues(formData) : undefined,
+  };
+}

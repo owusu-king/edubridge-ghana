@@ -477,6 +477,59 @@ export const enrolments = pgTable(
   ],
 );
 
+/**
+ * A parent or guardian, per school. One record per phone number per school, so siblings share their
+ * guardians. A portal account can be linked later (parent sign-in by SMS code).
+ */
+export const guardians = pgTable(
+  "guardians",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    fullName: text("full_name").notNull(),
+    phone: text("phone"),
+    email: citext("email"),
+    ...timestamps,
+  },
+  (t) => [
+    unique("guardians_tenant_id_unique").on(t.tenantId, t.id),
+    check("guardians_contact", sql`${t.phone} is not null or ${t.email} is not null`),
+    check("guardians_phone_e164", sql`${t.phone} is null or ${t.phone} ~ '^\\+[1-9][0-9]{7,14}$'`),
+    check("guardians_name_length", sql`char_length(${t.fullName}) between 2 and 120`),
+  ],
+);
+
+export const studentGuardians = pgTable(
+  "student_guardians",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    studentId: uuid("student_id").notNull(),
+    guardianId: uuid("guardian_id").notNull(),
+    relationship: text("relationship", {
+      enum: ["mother", "father", "guardian", "grandparent", "sibling", "other"],
+    }).notNull(),
+    /** The contact for fees and messages about this student. One per student. */
+    isPrimary: boolean("is_primary").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.studentId, t.guardianId] }),
+    foreignKey({
+      name: "student_guardians_student_fk",
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "student_guardians_guardian_fk",
+      columns: [t.tenantId, t.guardianId],
+      foreignColumns: [guardians.tenantId, guardians.id],
+    }).onDelete("cascade"),
+    index("student_guardians_guardian_idx").on(t.tenantId, t.guardianId),
+  ],
+);
+
 /** Restricts a membership to specific campuses. No rows means access to every campus. */
 export const membershipCampuses = pgTable(
   "membership_campuses",

@@ -9,12 +9,15 @@ import {
   academicYears,
   classes,
   enrolments,
+  guardians,
   levels,
   memberships,
+  studentGuardians,
   students,
   tenantCounters,
   terms,
 } from "../db/schema";
+import { addGuardianSchema, linkGuardianInTx } from "./guardian-links";
 import { DomainError, PG_UNIQUE_VIOLATION, pgErrorCode } from "../errors";
 import type { TenantContext } from "../tenancy/service";
 
@@ -41,6 +44,8 @@ export const studentSchema = z.object({
 
 export const createStudentSchema = studentSchema.extend({
   classId: optional(z.string().uuid("Choose a class.")),
+  /** Optional first guardian, saved in the same transaction as the student. */
+  guardian: addGuardianSchema.optional(),
 });
 
 export interface StudentRow {
@@ -51,6 +56,7 @@ export interface StudentRow {
   status: "active" | "withdrawn" | "graduated";
   className: string | null;
   classId: string | null;
+  primaryContact: { name: string; phone: string | null } | null;
 }
 
 export function fullName(s: { firstName: string; otherNames: string | null; lastName: string }): string {
@@ -131,7 +137,21 @@ async function assertClass(tx: Transaction, ctx: TenantContext, classId: string)
   }
 }
 
+/** A unique violation on guardians (same new phone added concurrently) is a retry, not a duplicate admission number. */
+function mapRaceSafe(error: unknown): unknown {
+  const constraint = (error as { cause?: { constraint?: string } }).cause?.constraint;
+  if (constraint === "guardians_tenant_phone_unique") {
+    return new DomainError(
+      "retry",
+      "This phone number was just added by someone else. Please try again.",
+      "guardianPhone",
+    );
+  }
+  return error;
+}
+
 function mapUnique(error: unknown): never {
+  if (error instanceof DomainError) throw error;
   if (pgErrorCode(error) === PG_UNIQUE_VIOLATION) {
     throw new DomainError(
       "admission_taken",
@@ -180,6 +200,7 @@ export async function createStudent(
         .insert(enrolments)
         .values({ tenantId: ctx.tenant.id, studentId: student!.id, termId, classId: data.classId });
     }
+    if (data.guardian) await linkGuardianInTx(tx, ctx, student!.id, data.guardian);
     await recordAudit(tx, {
       tenantId: ctx.tenant.id,
       actorUserId: ctx.userId,
@@ -189,7 +210,7 @@ export async function createStudent(
       metadata: { admissionNumber },
     });
     return { id: student!.id, admissionNumber };
-  }).catch(mapUnique);
+  }).catch((error: unknown) => mapUnique(mapRaceSafe(error)));
 }
 
 export interface ListStudentsInput {
@@ -249,6 +270,8 @@ export async function listStudents(
         status: students.status,
         classId: classes.id,
         className: classes.name,
+        guardianName: guardians.fullName,
+        guardianPhone: guardians.phone,
         total: sql<number>`count(*) over ()::int`,
       })
       .from(students)
@@ -260,6 +283,11 @@ export async function listStudents(
         ),
       )
       .leftJoin(classes, eq(classes.id, enrolments.classId))
+      .leftJoin(
+        studentGuardians,
+        and(eq(studentGuardians.studentId, students.id), eq(studentGuardians.isPrimary, true)),
+      )
+      .leftJoin(guardians, eq(guardians.id, studentGuardians.guardianId))
       .where(and(...conditions))
       .orderBy(asc(students.lastName), asc(students.firstName), asc(students.admissionNumber))
       .limit(PAGE_SIZE)
@@ -274,6 +302,7 @@ export async function listStudents(
         status: r.status,
         classId: r.classId,
         className: r.className,
+        primaryContact: r.guardianName ? { name: r.guardianName, phone: r.guardianPhone } : null,
       })),
       total: rows[0]?.total ?? 0,
       page,

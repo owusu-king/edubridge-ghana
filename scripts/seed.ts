@@ -13,10 +13,12 @@ import {
   campuses,
   classes,
   enrolments,
+  guardians,
   levels,
   loginAttempts,
   memberships,
   platformAdmins,
+  studentGuardians,
   students,
   tenantEntitlements,
   tenants,
@@ -283,6 +285,40 @@ async function main() {
             .insert(enrolments)
             .values({ tenantId: kpone, studentId: student.id, termId: term.id, classId: classId(className) });
         }
+      }
+    });
+
+    // Guardians (fictional). Kwame Mensah and Efua Ofori share a guardian, so they show as siblings.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
+      const people: [string, string, string, "mother" | "father" | "guardian"][] = [
+        ["S0001", "Akosua Owusu", "+233245550101", "mother"],
+        ["S0002", "Grace Mensah", "+233545550122", "mother"],
+        ["S0009", "Grace Mensah", "+233545550122", "guardian"],
+        ["S0010", "Kofi Agyeman", "+233205550111", "father"],
+        ["S0006", "Adjoa Addo", "+233275550133", "mother"],
+      ];
+      for (const [admissionNumber, fullName, phone, relationship] of people) {
+        const [student] = await tx
+          .select({ id: students.id })
+          .from(students)
+          .where(and(eq(students.tenantId, kpone), eq(students.admissionNumber, admissionNumber)));
+        if (!student) continue;
+        await tx.insert(guardians).values({ tenantId: kpone, fullName, phone }).onConflictDoNothing();
+        const [guardian] = await tx
+          .select({ id: guardians.id })
+          .from(guardians)
+          .where(and(eq(guardians.tenantId, kpone), eq(guardians.phone, phone)));
+        await tx
+          .insert(studentGuardians)
+          .values({
+            tenantId: kpone,
+            studentId: student.id,
+            guardianId: guardian!.id,
+            relationship,
+            isPrimary: true,
+          })
+          .onConflictDoNothing();
       }
     });
 

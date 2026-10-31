@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
+import { useFormAction } from "@/components/ui/use-form-action";
 import { UserPlus } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -14,8 +15,6 @@ export interface Option {
   value: string;
   label: string;
 }
-
-const idle = { status: "idle" } as const;
 
 function ErrorMessage({ state }: { state: FormState<unknown> }) {
   return state.status === "error" && state.message ? <Alert tone="critical">{state.message}</Alert> : null;
@@ -140,7 +139,7 @@ function InviteForm({
   campusOptions: Option[];
   onDone: () => void;
 }) {
-  const [state, formAction, pending] = useActionState(action, idle);
+  const { state, pending, onSubmit } = useFormAction(action);
   if (state.status === "success" && state.data) {
     return (
       <div className="space-y-5">
@@ -153,7 +152,7 @@ function InviteForm({
   }
   const values = state.values ?? {};
   return (
-    <form action={formAction} className="space-y-5" noValidate>
+    <form onSubmit={onSubmit} className="space-y-5" noValidate>
       {state.status === "error" && !state.fieldErrors && <ErrorMessage state={state} />}
       <Field label="Email" error={state.fieldErrors?.email}>
         {(p) => (
@@ -283,13 +282,13 @@ function EditForm({
   campusOptions: Option[];
   defaults: { roles: string[]; campusIds: string[] | null };
 }) {
-  const [state, formAction, pending] = useActionState<FormState, FormData>(async (prev, formData) => {
+  const { state, pending, onSubmit } = useFormAction(async (prev: FormState, formData: FormData) => {
     const result = await action(prev, formData);
     if (result.status === "success") onDone();
     return result;
-  }, idle);
+  });
   return (
-    <form action={formAction} className="space-y-5" noValidate>
+    <form onSubmit={onSubmit} className="space-y-5" noValidate>
       {state.status === "error" && !state.fieldErrors?.roles && !state.fieldErrors?.campusIds && (
         <ErrorMessage state={state} />
       )}
@@ -322,13 +321,13 @@ export function ConfirmForm({
   label: string;
   danger?: boolean;
 }) {
-  const [state, formAction, pending] = useActionState<FormState, FormData>(async (prev, formData) => {
+  const { state, pending, onSubmit } = useFormAction(async (prev: FormState, formData: FormData) => {
     const result = await action(prev, formData);
     if (result.status === "success") onDone();
     return result;
-  }, idle);
+  });
   return (
-    <form action={formAction} className="space-y-5">
+    <form onSubmit={onSubmit} className="space-y-5">
       <ErrorMessage state={state} />
       <div className="flex justify-end gap-2">
         <Button variant="secondary" onClick={onDone}>
@@ -396,7 +395,7 @@ export function InvitationActions({
 }
 
 function ReissueForm({ action, onDone }: { action: Action<InviteLink>; onDone: () => void }) {
-  const [state, formAction, pending] = useActionState(action, idle);
+  const { state, pending, onSubmit } = useFormAction(action);
   if (state.status === "success" && state.data) {
     return (
       <div className="space-y-5">
@@ -408,7 +407,7 @@ function ReissueForm({ action, onDone }: { action: Action<InviteLink>; onDone: (
     );
   }
   return (
-    <form action={formAction} className="space-y-5">
+    <form onSubmit={onSubmit} className="space-y-5">
       <ErrorMessage state={state} />
       <div className="flex justify-end gap-2">
         <Button variant="secondary" onClick={onDone}>

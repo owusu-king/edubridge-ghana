@@ -2,17 +2,31 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { StatusText } from "@/components/ui/badge";
+import { Badge, StatusText } from "@/components/ui/badge";
 import { DescriptionList, PageHeader, Section } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { can } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
+import { listGuardians, RELATIONSHIP_LABELS } from "@/server/students/guardians";
 import { getStudent, listClassOptions } from "@/server/students/service";
 import { formatCalendarDate } from "@/lib/format";
+import { formatPhone } from "@/lib/phone";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 import { assignClassAction, setStudentStatusAction, updateStudentAction } from "../actions";
 import { ChangeClassDialog, EditStudentDialog, StatusDialog } from "../student-forms";
+import {
+  addGuardianAction,
+  makePrimaryAction,
+  unlinkGuardianAction,
+  updateGuardianAction,
+} from "./guardian-actions";
+import {
+  AddGuardianDialog,
+  EditGuardianDialog,
+  MakePrimaryButton,
+  RemoveGuardianButton,
+} from "./guardian-controls";
 
 export const metadata: Metadata = { title: "Student" };
 
@@ -26,8 +40,12 @@ export default async function StudentPage({ params }: { params: Promise<{ school
   const { school, id } = await params;
   const { ctx } = await requireTenant(school);
   if (!can(ctx.roles, "students.view")) notFound();
-  const student = await getStudent(db(), ctx, id);
+  const [student, guardianLinks] = await Promise.all([
+    getStudent(db(), ctx, id),
+    listGuardians(db(), ctx, id),
+  ]);
   if (!student) notFound();
+  const links = guardianLinks ?? [];
   const slug = ctx.tenant.slug;
   const canManage = can(ctx.roles, "students.manage");
   const classes = canManage
@@ -117,30 +135,100 @@ export default async function StudentPage({ params }: { params: Promise<{ school
             </TableFrame>
           )}
         </Section>
-        <Section title="Details">
-          <DescriptionList
-            stacked
-            items={[
-              { term: "Sex", detail: student.sex === "female" ? "Female" : "Male" },
-              {
-                term: "Date of birth",
-                detail: student.dateOfBirth ? (
-                  formatCalendarDate(student.dateOfBirth)
-                ) : (
-                  <span className="text-ink-3">Not recorded</span>
-                ),
-              },
-              {
-                term: "Admitted",
-                detail: student.admittedOn ? (
-                  formatCalendarDate(student.admittedOn)
-                ) : (
-                  <span className="text-ink-3">Not recorded</span>
-                ),
-              },
-            ]}
-          />
-        </Section>
+        <div className="space-y-10">
+          <Section title="Details">
+            <DescriptionList
+              stacked
+              items={[
+                { term: "Sex", detail: student.sex === "female" ? "Female" : "Male" },
+                {
+                  term: "Date of birth",
+                  detail: student.dateOfBirth ? (
+                    formatCalendarDate(student.dateOfBirth)
+                  ) : (
+                    <span className="text-ink-3">Not recorded</span>
+                  ),
+                },
+                {
+                  term: "Admitted",
+                  detail: student.admittedOn ? (
+                    formatCalendarDate(student.admittedOn)
+                  ) : (
+                    <span className="text-ink-3">Not recorded</span>
+                  ),
+                },
+              ]}
+            />
+          </Section>
+          <Section
+            title="Guardians"
+            aside={
+              canManage &&
+              links.length < 4 && (
+                <AddGuardianDialog action={addGuardianAction.bind(null, slug, student.id)} />
+              )
+            }
+          >
+            {links.length === 0 ? (
+              <p className="text-base text-ink-3">
+                No guardian recorded. Add one so the school can reach the family.
+              </p>
+            ) : (
+              <ul className="divide-y divide-line rounded-lg border border-line bg-surface shadow-raised">
+                {links.map((g) => (
+                  <li key={g.guardianId} className="space-y-1.5 px-4 py-3.5">
+                    <p className="flex flex-wrap items-center gap-2 text-base font-medium text-ink">
+                      {g.fullName}
+                      {g.isPrimary && <Badge tone="accent">Primary contact</Badge>}
+                    </p>
+                    <p className="text-sm text-ink-3">{RELATIONSHIP_LABELS[g.relationship]}</p>
+                    {g.phone && (
+                      <a href={`tel:${g.phone}`} className="block text-sm text-accent hover:underline">
+                        {formatPhone(g.phone)}
+                      </a>
+                    )}
+                    {g.email && <p className="text-sm break-all text-ink-2">{g.email}</p>}
+                    {g.otherStudents.length > 0 && (
+                      <p className="text-sm text-ink-2">
+                        Also guardian of{" "}
+                        {g.otherStudents.map((o, i) => (
+                          <span key={o.id}>
+                            {i > 0 && ", "}
+                            <Link
+                              href={schoolPath(slug, `students/${o.id}`)}
+                              className="text-accent hover:underline"
+                            >
+                              {o.name}
+                            </Link>
+                            {o.className && ` (${o.className})`}
+                          </span>
+                        ))}
+                      </p>
+                    )}
+                    {canManage && (
+                      <div className="-ml-3 flex flex-wrap gap-1 pt-1">
+                        <EditGuardianDialog
+                          action={updateGuardianAction.bind(null, slug, g.guardianId)}
+                          guardian={g}
+                        />
+                        {!g.isPrimary && (
+                          <MakePrimaryButton
+                            action={makePrimaryAction.bind(null, slug, student.id, g.guardianId)}
+                            name={g.fullName}
+                          />
+                        )}
+                        <RemoveGuardianButton
+                          action={unlinkGuardianAction.bind(null, slug, student.id, g.guardianId)}
+                          name={g.fullName}
+                        />
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+        </div>
       </div>
     </div>
   );
