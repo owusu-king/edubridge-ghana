@@ -259,3 +259,103 @@ export function OpeningBalanceDialog({ action, asOf }: { action: Action; asOf: s
     </FormDialog>
   );
 }
+
+export function AddConcessionDialog({
+  action,
+  items,
+}: {
+  action: Action;
+  items: { value: string; label: string }[];
+}) {
+  return (
+    <FormDialog
+      trigger="Add scholarship or discount"
+      triggerVariant="ghost"
+      triggerSize="sm"
+      title="Add a scholarship or discount"
+      description="Applied each term when fees are billed, as its own line on the statement."
+      submitLabel="Add"
+      action={action}
+    >
+      {(state) => <ConcessionFields state={state} items={items} />}
+    </FormDialog>
+  );
+}
+
+function ConcessionFields({ state, items }: { state: FormState; items: { value: string; label: string }[] }) {
+  const [kind, setKind] = useState(state.values?.kind ?? "percent");
+  return (
+    <>
+      <Field
+        label="Name"
+        description="For example Academic scholarship, Staff child or Sibling discount."
+        error={state.fieldErrors?.label}
+      >
+        {(p) => <Input {...p} name="label" defaultValue={state.values?.label} required maxLength={60} />}
+      </Field>
+      <fieldset className="space-y-2">
+        <legend className="mb-1.5 text-sm font-medium text-ink">Discount</legend>
+        {[
+          { value: "percent", label: "A percentage" },
+          { value: "amount", label: "A fixed amount each term" },
+        ].map((o) => (
+          <label key={o.value} className="flex items-center gap-2.5 text-base text-ink">
+            <input
+              type="radio"
+              name="kind"
+              value={o.value}
+              checked={kind === o.value}
+              onChange={() => setKind(o.value)}
+              className="size-4 accent-ink"
+            />
+            {o.label}
+          </label>
+        ))}
+      </fieldset>
+      <Field label={kind === "percent" ? "Percentage (%)" : "Amount (GH₵)"} error={state.fieldErrors?.value}>
+        {(p) => (
+          <Input
+            {...p}
+            name="value"
+            inputMode="decimal"
+            autoComplete="off"
+            defaultValue={state.values?.value}
+            required
+          />
+        )}
+      </Field>
+      <Field label="Applies to" error={state.fieldErrors?.feeItemId}>
+        {(p) => (
+          <Select
+            {...p}
+            name="feeItemId"
+            defaultValue={state.values?.feeItemId ?? (kind === "amount" ? items[0]?.value : "")}
+          >
+            {kind === "percent" && <option value="">Every fee item</option>}
+            {items.map((i) => (
+              <option key={i.value} value={i.value}>
+                {i.label}
+              </option>
+            ))}
+          </Select>
+        )}
+      </Field>
+    </>
+  );
+}
+
+export function EndConcessionButton({ action, label }: { action: Action; label: string }) {
+  return (
+    <FormDialog
+      trigger="End"
+      triggerVariant="ghost"
+      triggerSize="sm"
+      triggerLabel={`End ${label}`}
+      title={`End ${label}?`}
+      description="It no longer applies from the next billing. Discounts already on the statement stay; reverse them there to take them back."
+      submitLabel="End discount"
+      danger
+      action={action}
+    />
+  );
+}

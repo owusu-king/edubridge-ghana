@@ -14,6 +14,7 @@ import {
   campuses,
   classes,
   enrolments,
+  feeConcessions,
   feeItems,
   feeStructureLines,
   ledgerEntries,
@@ -512,6 +513,32 @@ async function main() {
         .insert(tenantCounters)
         .values({ tenantId: kpone, key: "receipt_number", value: n })
         .onConflictDoUpdate({ target: [tenantCounters.tenantId, tenantCounters.key], set: { value: n } });
+    });
+
+    // A sibling discount for Efua (Grace Mensah's second child), left for the accountant to bill.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
+      const [existing] = await tx
+        .select({ id: feeConcessions.id })
+        .from(feeConcessions)
+        .where(eq(feeConcessions.tenantId, kpone))
+        .limit(1);
+      const [efua] = await tx
+        .select({ id: students.id })
+        .from(students)
+        .where(and(eq(students.tenantId, kpone), eq(students.admissionNumber, "S0009")));
+      const [tuition] = await tx
+        .select({ id: feeItems.id })
+        .from(feeItems)
+        .where(and(eq(feeItems.tenantId, kpone), eq(feeItems.name, "Tuition")));
+      if (existing || !efua || !tuition) return;
+      await tx.insert(feeConcessions).values({
+        tenantId: kpone,
+        studentId: efua.id,
+        label: "Sibling discount",
+        feeItemId: tuition.id,
+        percentBasisPoints: 1000,
+      });
     });
 
     // Clear sign-in throttling for the synthetic accounts so local runs start clean.

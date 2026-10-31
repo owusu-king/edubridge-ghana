@@ -823,3 +823,55 @@ export const paymentVoids = pgTable(
     check("payment_voids_reason_length", sql`char_length(${t.reason}) between 3 and 120`),
   ],
 );
+
+/**
+ * A scholarship or discount for one student: a percentage (basis points) of one fee item or of every
+ * item, or a fixed amount off one item, each term. Billing turns it into separate discount entries in
+ * the ledger, so the concession can end without changing anything already billed.
+ */
+export const feeConcessions = pgTable(
+  "fee_concessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    studentId: uuid("student_id").notNull(),
+    label: text("label").notNull(),
+    /** Null: applies to every fee item. */
+    feeItemId: uuid("fee_item_id"),
+    percentBasisPoints: integer("percent_basis_points"),
+    amountPesewas: bigint("amount_pesewas", { mode: "number" }),
+    status: text("status", { enum: ["active", "ended"] })
+      .notNull()
+      .default("active"),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    endedByUserId: uuid("ended_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    ...timestamps,
+  },
+  (t) => [
+    foreignKey({
+      name: "fee_concessions_student_fk",
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }),
+    foreignKey({
+      name: "fee_concessions_item_fk",
+      columns: [t.tenantId, t.feeItemId],
+      foreignColumns: [feeItems.tenantId, feeItems.id],
+    }),
+    index("fee_concessions_student_idx").on(t.tenantId, t.studentId),
+    check("fee_concessions_label_length", sql`char_length(${t.label}) between 2 and 60`),
+    check("fee_concessions_one_kind", sql`(${t.percentBasisPoints} is null) <> (${t.amountPesewas} is null)`),
+    check(
+      "fee_concessions_percent_range",
+      sql`${t.percentBasisPoints} is null or ${t.percentBasisPoints} between 1 and 10000`,
+    ),
+    check(
+      "fee_concessions_amount_range",
+      sql`${t.amountPesewas} is null or (${t.amountPesewas} between 1 and 1000000000 and ${t.feeItemId} is not null)`,
+    ),
+    check("fee_concessions_ended", sql`(${t.status} = 'ended') = (${t.endedAt} is not null)`),
+  ],
+);

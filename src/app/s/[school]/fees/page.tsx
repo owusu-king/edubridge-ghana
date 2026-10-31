@@ -216,12 +216,20 @@ export default async function FeeStructurePage({
               {billing.studentsToBill > 0 && (
                 <p className="text-base text-ink-2">
                   {billing.studentsToBill} {billing.studentsToBill === 1 ? "student has" : "students have"}{" "}
-                  charges still to bill: {formatCedis(billing.amountToBillPesewas)} in total.
+                  entries still to bill:{" "}
+                  {[
+                    billing.chargesToCreate > 0 &&
+                      `${formatCedis(billing.amountToBillPesewas + billing.discountsPesewas)} in charges`,
+                    billing.discountsToCreate > 0 && `${formatCedis(billing.discountsPesewas)} in discounts`,
+                  ]
+                    .filter(Boolean)
+                    .join(", less ")}
+                  .
                 </p>
               )}
               <p className="text-sm text-ink-3">
-                Billing charges each student what their class pays. Running it again only bills new students
-                and new items; existing charges never change.
+                Billing charges each student what their class pays, less any scholarships and discounts.
+                Running it again only adds what is new; existing entries never change.
               </p>
             </div>
             {canManage && billing.studentsToBill > 0 && (
@@ -229,7 +237,12 @@ export default async function FeeStructurePage({
                 action={billTermAction.bind(null, slug, term.id)}
                 termLabel={termLabel(term)}
                 students={billing.studentsToBill}
-                amount={formatCedis(billing.amountToBillPesewas)}
+                charges={
+                  billing.chargesToCreate > 0
+                    ? formatCedis(billing.amountToBillPesewas + billing.discountsPesewas)
+                    : undefined
+                }
+                discounts={billing.discountsToCreate > 0 ? formatCedis(billing.discountsPesewas) : undefined}
               />
             )}
           </div>

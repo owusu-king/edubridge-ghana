@@ -197,6 +197,20 @@
       "when": 1793484873937,
       "tag": "0027_payments_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1793487129915,
+      "tag": "0028_concessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793487130469,
+      "tag": "0029_concessions_rls",
+      "breakpoints": true
     }
   ]
 }

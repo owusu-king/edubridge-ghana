@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/server/db/client";
 import { reverseEntry } from "@/server/fees/ledger";
+import { addConcession, endConcession } from "@/server/fees/concessions";
 import { recordAdjustment, setOpeningBalance } from "@/server/fees/opening-balances";
 import { recordPayment } from "@/server/fees/payments";
 import { schoolPath } from "@/lib/routes";
@@ -106,5 +107,41 @@ export async function setOpeningBalanceAction(
         asOf: formData.get("asOf"),
       }),
     "Opening balance recorded.",
+  );
+}
+
+export async function addConcessionAction(
+  slug: string,
+  studentId: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  return runForStudent(
+    slug,
+    studentId,
+    formData,
+    (ctx) =>
+      addConcession(db(), ctx, studentId, {
+        label: formData.get("label"),
+        feeItemId: formData.get("feeItemId") ?? "",
+        kind: formData.get("kind"),
+        value: formData.get("value") ?? "",
+      }),
+    "Discount added. It applies when the term is next billed.",
+  );
+}
+
+export async function endConcessionAction(
+  slug: string,
+  studentId: string,
+  concessionId: string,
+  _prev: FormState,
+): Promise<FormState> {
+  return runForStudent(
+    slug,
+    studentId,
+    new FormData(),
+    (ctx) => endConcession(db(), ctx, concessionId),
+    "Discount ended.",
   );
 }

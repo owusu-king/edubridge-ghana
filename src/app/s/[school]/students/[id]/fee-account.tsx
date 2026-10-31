@@ -6,7 +6,10 @@ import { formatCedis } from "@/lib/money";
 import { cn } from "@/lib/cn";
 import Link from "next/link";
 import { schoolPath } from "@/lib/routes";
+import { formatPercent, type Concession } from "@/server/fees/concessions";
 import {
+  addConcessionAction,
+  endConcessionAction,
   recordAdjustmentAction,
   recordPaymentAction,
   reverseEntryAction,
@@ -17,6 +20,8 @@ import {
   OpeningBalanceDialog,
   RecordPaymentDialog,
   ReverseEntryDialog,
+  AddConcessionDialog,
+  EndConcessionButton,
 } from "./account-controls";
 
 function balanceText(pesewas: number): string {
@@ -34,6 +39,8 @@ export function FeeAccount({
   payerName,
   today,
   openingAsOf,
+  concessions,
+  feeItems,
 }: {
   slug: string;
   account: StudentAccount;
@@ -43,7 +50,11 @@ export function FeeAccount({
   today: string;
   /** Set when the student has no opening balance yet and the user may add one. */
   openingAsOf?: string;
+  concessions: Concession[];
+  /** Active fee items, for adding discounts. */
+  feeItems: { value: string; label: string }[];
 }) {
+  const activeConcessions = concessions.filter((c) => c.status === "active");
   return (
     <Section
       title="Fees"
@@ -66,12 +77,45 @@ export function FeeAccount({
       {canManage && (
         <div className="-ml-3 flex flex-wrap gap-1">
           <AdjustmentDialog action={recordAdjustmentAction.bind(null, slug, account.student.id)} />
+          {feeItems.length > 0 && (
+            <AddConcessionDialog
+              action={addConcessionAction.bind(null, slug, account.student.id)}
+              items={feeItems}
+            />
+          )}
           {openingAsOf && (
             <OpeningBalanceDialog
               action={setOpeningBalanceAction.bind(null, slug, account.student.id)}
               asOf={openingAsOf}
             />
           )}
+        </div>
+      )}
+      {activeConcessions.length > 0 && (
+        <div className="space-y-1.5">
+          <h3 className="text-sm font-medium text-ink">Scholarships and discounts</h3>
+          <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
+            {activeConcessions.map((c) => (
+              <li key={c.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                <span className="text-base text-ink">
+                  {c.label}{" "}
+                  <span className="text-ink-3">
+                    ·{" "}
+                    {c.percentBasisPoints !== null
+                      ? formatPercent(c.percentBasisPoints)
+                      : formatCedis(c.amountPesewas!)}{" "}
+                    off {c.feeItemName ?? "every fee item"}
+                  </span>
+                </span>
+                {canManage && (
+                  <EndConcessionButton
+                    action={endConcessionAction.bind(null, slug, account.student.id, c.id)}
+                    label={c.label}
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
       {account.entries.length === 0 ? (

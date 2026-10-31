@@ -41,6 +41,8 @@ const LABELS: Record<string, string> = {
   "fees.opening_balance_set": "Opening balance recorded",
   "fees.charge_added": "One-off charge added",
   "fees.credit_added": "One-off credit added",
+  "fees.concession_added": "Scholarship or discount added",
+  "fees.concession_ended": "Scholarship or discount ended",
   "guardian.linked": "Guardian added",
   "guardian.updated": "Guardian details changed",
   "guardian.made_primary": "Primary contact changed",

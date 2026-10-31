@@ -10,6 +10,7 @@ import {
   academicYears,
   classes,
   enrolments,
+  feeConcessions,
   feeItems,
   feeStructureLines,
   ledgerEntries,
@@ -21,6 +22,7 @@ import { DomainError, PG_UNIQUE_VIOLATION, pgErrorCode } from "../errors";
 import type { TenantContext } from "../tenancy/service";
 import { assertCanManageSchoolFees, loadFinanceStudent } from "./access";
 import { planBilling, type BillingPlan } from "./billing-plan";
+import { planDiscounts, type ChargeBase, type PlannedDiscount } from "./discount-plan";
 
 const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
 
@@ -36,6 +38,10 @@ export interface BillingStatus {
   billedStudents: number;
   studentsToBill: number;
   chargesToCreate: number;
+  /** Discounts from scholarships and other concessions still to apply. */
+  discountsToCreate: number;
+  discountsPesewas: number;
+  /** Net: charges less discounts. */
   amountToBillPesewas: number;
   /** Charges that no longer match the structure (first 50). */
   differences: BillingDifferenceRow[];
@@ -62,11 +68,7 @@ async function loadTerm(tx: Transaction, ctx: TenantContext, termId: string) {
 }
 
 /** Everything the billing planner needs for a term, read in one transaction. */
-async function planTerm(
-  tx: Transaction,
-  ctx: TenantContext,
-  termId: string,
-): Promise<BillingPlan & { enrolled: number }> {
+async function planTerm(tx: Transaction, ctx: TenantContext, termId: string): Promise<TermPlan> {
   const enrolled = await tx
     .select({ studentId: enrolments.studentId, classId: enrolments.classId, levelId: classes.levelId })
     .from(enrolments)
@@ -95,9 +97,11 @@ async function planTerm(
       .where(eq(feeItems.tenantId, ctx.tenant.id))
       .orderBy(asc(feeItems.sequence))
   ).map((i) => i.id);
-  const existing = await tx
+  const automatic = await tx
     .select({
       studentId: ledgerEntries.studentId,
+      kind: ledgerEntries.kind,
+      feeItemId: ledgerEntries.feeItemId,
       billingKey: ledgerEntries.billingKey,
       amountPesewas: ledgerEntries.amountPesewas,
       reversed: isReversed,
@@ -107,10 +111,11 @@ async function planTerm(
       and(
         eq(ledgerEntries.tenantId, ctx.tenant.id),
         eq(ledgerEntries.termId, termId),
-        eq(ledgerEntries.kind, "charge"),
+        inArray(ledgerEntries.kind, ["charge", "discount"]),
         isNotNull(ledgerEntries.billingKey),
       ),
     );
+  const existing = automatic.filter((e) => e.kind === "charge");
   const plan = planBilling(
     termId,
     enrolled,
@@ -122,14 +127,59 @@ async function planTerm(
       netPesewas: e.reversed ? 0 : e.amountPesewas,
     })),
   );
-  return { ...plan, enrolled: enrolled.length };
+
+  // Discounts apply to each student's live charges: those already billed plus those about to be.
+  const enrolledIds = new Set(enrolled.map((e) => e.studentId));
+  const bases = new Map<string, ChargeBase>();
+  const addBase = (studentId: string, feeItemId: string, amount: number) => {
+    if (!enrolledIds.has(studentId)) return;
+    const key = `${studentId}|${feeItemId}`;
+    const base = bases.get(key) ?? { studentId, feeItemId, amountPesewas: 0 };
+    base.amountPesewas += amount;
+    bases.set(key, base);
+  };
+  for (const e of existing)
+    if (!e.reversed && e.feeItemId) addBase(e.studentId, e.feeItemId, e.amountPesewas);
+  for (const c of plan.toCreate) addBase(c.studentId, c.feeItemId, c.amountPesewas);
+  const concessions = await tx
+    .select({
+      id: feeConcessions.id,
+      studentId: feeConcessions.studentId,
+      feeItemId: feeConcessions.feeItemId,
+      percentBasisPoints: feeConcessions.percentBasisPoints,
+      amountPesewas: feeConcessions.amountPesewas,
+      label: feeConcessions.label,
+    })
+    .from(feeConcessions)
+    .where(and(eq(feeConcessions.tenantId, ctx.tenant.id), eq(feeConcessions.status, "active")))
+    .orderBy(asc(feeConcessions.createdAt), asc(feeConcessions.id));
+  const discounts = planDiscounts(
+    termId,
+    [...bases.values()],
+    concessions.filter((c) => enrolledIds.has(c.studentId)),
+    automatic
+      .filter((e) => e.kind === "discount")
+      .map((e) => ({
+        studentId: e.studentId,
+        billingKey: e.billingKey!,
+        netPesewas: e.reversed ? 0 : e.amountPesewas,
+      })),
+  );
+  return {
+    ...plan,
+    enrolled: enrolled.length,
+    discounts,
+    concessionLabels: new Map(concessions.map((c) => [c.id, c.label])),
+  };
 }
 
-async function summarise(
-  tx: Transaction,
-  ctx: TenantContext,
-  plan: BillingPlan & { enrolled: number },
-): Promise<BillingStatus> {
+type TermPlan = BillingPlan & {
+  enrolled: number;
+  discounts: PlannedDiscount[];
+  concessionLabels: Map<string, string>;
+};
+
+async function summarise(tx: Transaction, ctx: TenantContext, plan: TermPlan): Promise<BillingStatus> {
   const shown = plan.differences.slice(0, 50);
   let differences: BillingDifferenceRow[] = [];
   if (shown.length > 0) {
@@ -162,9 +212,11 @@ async function summarise(
   return {
     enrolled: plan.enrolled,
     billedStudents: plan.billedStudents,
-    studentsToBill: new Set(plan.toCreate.map((c) => c.studentId)).size,
+    studentsToBill: new Set([...plan.toCreate, ...plan.discounts].map((c) => c.studentId)).size,
     chargesToCreate: plan.toCreate.length,
-    amountToBillPesewas: sumPesewas(plan.toCreate.map((c) => c.amountPesewas)),
+    discountsToCreate: plan.discounts.length,
+    discountsPesewas: -sumPesewas(plan.discounts.map((d) => d.amountPesewas)),
+    amountToBillPesewas: sumPesewas([...plan.toCreate, ...plan.discounts].map((c) => c.amountPesewas)),
     differences,
     differenceCount: plan.differences.length,
   };
@@ -198,7 +250,7 @@ export async function billTerm(
     // One billing run per term at a time; the unique billing key also guards every charge.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`billing:${termId}`}))`);
     const plan = await planTerm(tx, ctx, termId);
-    if (plan.toCreate.length === 0) {
+    if (plan.toCreate.length === 0 && plan.discounts.length === 0) {
       throw new DomainError(
         "nothing_to_bill",
         plan.enrolled === 0
@@ -237,6 +289,32 @@ export async function billTerm(
           target: [ledgerEntries.tenantId, ledgerEntries.studentId, ledgerEntries.billingKey],
         });
     }
+    // Discounts are recorded after the charges, and each names the item it reduces.
+    for (let i = 0; i < plan.discounts.length; i += 500) {
+      await tx
+        .insert(ledgerEntries)
+        .values(
+          plan.discounts.slice(i, i + 500).map((d) => ({
+            tenantId: ctx.tenant.id,
+            studentId: d.studentId,
+            termId,
+            kind: "discount" as const,
+            feeItemId: d.feeItemId,
+            description:
+              `${plan.concessionLabels.get(d.concessionId) ?? "Discount"} on ${names.get(d.feeItemId) ?? "fees"}, ${termLabel}`.slice(
+                0,
+                200,
+              ),
+            amountPesewas: d.amountPesewas,
+            billingKey: d.billingKey,
+            effectiveOn: term.startsOn,
+            recordedByUserId: ctx.userId,
+          })),
+        )
+        .onConflictDoNothing({
+          target: [ledgerEntries.tenantId, ledgerEntries.studentId, ledgerEntries.billingKey],
+        });
+    }
     const status = await summarise(tx, ctx, plan);
     await recordAudit(tx, {
       tenantId: ctx.tenant.id,
@@ -248,6 +326,7 @@ export async function billTerm(
         term: termLabel,
         students: status.studentsToBill,
         charges: status.chargesToCreate,
+        discounts: status.discountsToCreate,
         totalPesewas: status.amountToBillPesewas,
       },
     });
