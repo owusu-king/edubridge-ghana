@@ -6,6 +6,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { hashPassword } from "../src/server/auth/password";
+import { planBilling } from "../src/server/fees/billing-plan";
 import { seal } from "../src/server/auth/secret-box";
 import type { Role } from "../src/server/authz/permissions";
 import {
@@ -15,6 +16,7 @@ import {
   enrolments,
   feeItems,
   feeStructureLines,
+  ledgerEntries,
   guardians,
   levels,
   loginAttempts,
@@ -388,6 +390,51 @@ async function main() {
               : [],
           ),
         ),
+      );
+    });
+
+    // Bill Kpone Ridge students for the current term.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
+      const [term] = await tx
+        .select({ id: terms.id, name: terms.name, startsOn: terms.startsOn })
+        .from(terms)
+        .where(and(eq(terms.tenantId, kpone), eq(terms.isCurrent, true)));
+      if (!term) return;
+      const [billed] = await tx
+        .select({ id: ledgerEntries.id })
+        .from(ledgerEntries)
+        .where(and(eq(ledgerEntries.tenantId, kpone), eq(ledgerEntries.termId, term.id)))
+        .limit(1);
+      if (billed) return;
+      const enrolled = await tx
+        .select({ studentId: enrolments.studentId, classId: enrolments.classId, levelId: classes.levelId })
+        .from(enrolments)
+        .innerJoin(classes, eq(classes.id, enrolments.classId))
+        .innerJoin(students, eq(students.id, enrolments.studentId))
+        .where(eq(enrolments.termId, term.id));
+      const lines = await tx.select().from(feeStructureLines).where(eq(feeStructureLines.termId, term.id));
+      const items = await tx.select().from(feeItems).where(eq(feeItems.tenantId, kpone));
+      const plan = planBilling(
+        term.id,
+        enrolled,
+        lines,
+        items.map((i) => i.id),
+        [],
+      );
+      if (plan.toCreate.length === 0) return;
+      await tx.insert(ledgerEntries).values(
+        plan.toCreate.map((c) => ({
+          tenantId: kpone,
+          studentId: c.studentId,
+          termId: term.id,
+          kind: "charge" as const,
+          feeItemId: c.feeItemId,
+          description: `${items.find((i) => i.id === c.feeItemId)!.name}, ${term.name} 2026/2027`,
+          amountPesewas: c.amountPesewas,
+          billingKey: c.billingKey,
+          effectiveOn: term.startsOn,
+        })),
       );
     });
 

@@ -44,7 +44,7 @@ Differences from `02` (D-09 is decided; the rest are still open):
 | --- | --- | --- |
 | A | Roles (Proprietor, Head teacher, Accountant), calendar, levels and classes, students, guardians | Done (#7–#11) |
 | B | Import students, classes this term and guardians from Excel/CSV | Built; in review |
-| C | Fee structures, ledger, part payments, cash/bank entry, arrears, receipts | C1 fee items and structures built; C2 ledger and payments next |
+| C | Fee structures, ledger, part payments, cash/bank entry, arrears, receipts | C1 fee structures done (#13); C2a ledger and billing built; C2b payments and receipts next |
 | D | Mobile Money behind a provider-agnostic interface (mock first) | |
 | E | Who-owes-what, reminders, receipt/statement PDFs, WhatsApp share links | |
 | F | Parent view: SMS-code sign-in, balances | |
@@ -55,7 +55,7 @@ Differences from `02` (D-09 is decided; the rest are still open):
 
 Import limitations: names must be in separate first-name and surname columns; fee balances and past scores are imported in phases C and G.
 
-Fees: money is integer pesewas (`bigint`), never floating point. Structures are per term and level, with optional class overrides (0 exempts a class). Only the Proprietor and Accountant change fees, and only with access to every campus; the Head teacher has read-only access. Assumptions to verify: the suggested fee items, and that the Administrator role has no finance access by default (a school can add the Accountant role to that person).
+Fees: money is integer pesewas (`bigint`), never floating point. Structures are per term and level, with optional class overrides (0 exempts a class). Only the Proprietor and Accountant change fees, and only with access to every campus; the Head teacher has read-only access. The ledger is append-only (database grants and triggers); corrections are reversals that exactly negate an entry, once. Billing is idempotent per student, term and item, never changes existing charges, and lists charges that differ from the structure; to correct one, reverse it and bill again. Assumptions to verify: the suggested fee items, and that the Administrator role has no finance access by default (a school can add the Accountant role to that person).
 
 ## Later releases
 

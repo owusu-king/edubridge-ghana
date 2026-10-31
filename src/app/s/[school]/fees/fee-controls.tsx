@@ -308,3 +308,27 @@ function AmountGrid({
     </div>
   );
 }
+
+export function BillTermDialog({
+  action,
+  termLabel,
+  students,
+  amount,
+}: {
+  action: Action;
+  termLabel: string;
+  students: number;
+  amount: string;
+}) {
+  const who = `${students} ${students === 1 ? "student" : "students"}`;
+  return (
+    <FormDialog
+      trigger={`Bill ${who}`}
+      triggerVariant="primary"
+      title={`Bill ${who} for ${termLabel}?`}
+      description={`This adds ${amount} of charges to their accounts, as set in the fee structure. Charges are not edited afterwards; a mistake is corrected with a reversal.`}
+      submitLabel={`Bill ${who}`}
+      action={action}
+    />
+  );
+}

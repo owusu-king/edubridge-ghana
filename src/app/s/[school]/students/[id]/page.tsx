@@ -8,6 +8,7 @@ import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/tab
 import { can } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { listGuardians, RELATIONSHIP_LABELS } from "@/server/students/guardians";
+import { getStudentAccount } from "@/server/fees/ledger";
 import { getStudent, listClassOptions } from "@/server/students/service";
 import { formatCalendarDate } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
@@ -27,6 +28,7 @@ import {
   MakePrimaryButton,
   RemoveGuardianButton,
 } from "./guardian-controls";
+import { FeeAccount } from "./fee-account";
 
 export const metadata: Metadata = { title: "Student" };
 
@@ -40,9 +42,11 @@ export default async function StudentPage({ params }: { params: Promise<{ school
   const { school, id } = await params;
   const { ctx } = await requireTenant(school);
   if (!can(ctx.roles, "students.view")) notFound();
-  const [student, guardianLinks] = await Promise.all([
+  const canSeeFees = can(ctx.roles, "fees.view");
+  const [student, guardianLinks, account] = await Promise.all([
     getStudent(db(), ctx, id),
     listGuardians(db(), ctx, id),
+    canSeeFees ? getStudentAccount(db(), ctx, id) : Promise.resolve(null),
   ]);
   if (!student) notFound();
   const links = guardianLinks ?? [];
@@ -94,47 +98,50 @@ export default async function StudentPage({ params }: { params: Promise<{ school
       </div>
 
       <div className="grid gap-10 lg:grid-cols-[1fr_20rem]">
-        <Section
-          title="Class"
-          aside={
-            canManage &&
-            student.status === "active" &&
-            classes.length > 0 && (
-              <ChangeClassDialog
-                action={assignClassAction.bind(null, slug, student.id)}
-                classes={classes}
-                currentClassId={student.currentClass?.id}
-              />
-            )
-          }
-        >
-          <p className="text-base text-ink">
-            {student.currentClass?.name ?? <span className="text-ink-3">Not in a class this term</span>}
-          </p>
-          {student.history.length > 0 && (
-            <TableFrame>
-              <Table>
-                <caption className="sr-only">Class history</caption>
-                <THead>
-                  <tr>
-                    <TH>Term</TH>
-                    <TH>Class</TH>
-                  </tr>
-                </THead>
-                <TBody>
-                  {student.history.map((h) => (
-                    <TR key={`${h.yearName}-${h.termName}`}>
-                      <TD>
-                        {h.termName}, {h.yearName}
-                      </TD>
-                      <TD className="text-ink">{h.className}</TD>
-                    </TR>
-                  ))}
-                </TBody>
-              </Table>
-            </TableFrame>
-          )}
-        </Section>
+        <div className="min-w-0 space-y-10">
+          <Section
+            title="Class"
+            aside={
+              canManage &&
+              student.status === "active" &&
+              classes.length > 0 && (
+                <ChangeClassDialog
+                  action={assignClassAction.bind(null, slug, student.id)}
+                  classes={classes}
+                  currentClassId={student.currentClass?.id}
+                />
+              )
+            }
+          >
+            <p className="text-base text-ink">
+              {student.currentClass?.name ?? <span className="text-ink-3">Not in a class this term</span>}
+            </p>
+            {student.history.length > 0 && (
+              <TableFrame>
+                <Table>
+                  <caption className="sr-only">Class history</caption>
+                  <THead>
+                    <tr>
+                      <TH>Term</TH>
+                      <TH>Class</TH>
+                    </tr>
+                  </THead>
+                  <TBody>
+                    {student.history.map((h) => (
+                      <TR key={`${h.yearName}-${h.termName}`}>
+                        <TD>
+                          {h.termName}, {h.yearName}
+                        </TD>
+                        <TD className="text-ink">{h.className}</TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              </TableFrame>
+            )}
+          </Section>
+          {account && <FeeAccount slug={slug} account={account} canManage={can(ctx.roles, "fees.manage")} />}
+        </div>
         <div className="space-y-10">
           <Section title="Details">
             <DescriptionList
