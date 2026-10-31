@@ -13,6 +13,7 @@ import {
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 import { toFormError, type FormState } from "@/web/forms";
+import { dispatchAfterResponse } from "@/web/notify";
 import { appOrigin } from "@/web/origin";
 
 /** Roles and campus scope from the shared access fields. */
@@ -34,6 +35,7 @@ export async function inviteMemberAction(
   try {
     const email = String(formData.get("email") ?? "");
     const issued = await inviteMember(db(), ctx, { email, ...accessFields(formData) });
+    dispatchAfterResponse();
     refresh(slug);
     return {
       status: "success",
@@ -104,6 +106,7 @@ export async function reissueInvitationAction(
   const { ctx } = await requireTenant(slug);
   try {
     const issued = await reissueInvitation(db(), ctx, invitationId);
+    dispatchAfterResponse();
     refresh(slug);
     return {
       status: "success",

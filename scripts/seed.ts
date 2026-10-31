@@ -30,7 +30,14 @@ const SCHOOLS = [
     maxCampuses: 3,
     campuses: ["Main campus", "Sakumono"],
   },
-  { slug: "adenta-hall", name: "Adenta Hall Academy", maxCampuses: 1, campuses: ["Main campus"] },
+  // Adenta Hall shows the configurable policy: no roles must use two-step verification.
+  {
+    slug: "adenta-hall",
+    name: "Adenta Hall Academy",
+    maxCampuses: 1,
+    campuses: ["Main campus"],
+    mfaRequiredRoles: [] as string[],
+  },
 ];
 
 const PLATFORM_ADMIN = { email: "platform@example.test", name: "Selorm Agbeko" };
@@ -81,8 +88,11 @@ async function main() {
     for (const school of SCHOOLS) {
       const [row] = await db
         .insert(tenants)
-        .values({ slug: school.slug, name: school.name })
-        .onConflictDoUpdate({ target: tenants.slug, set: { name: school.name } })
+        .values({ slug: school.slug, name: school.name, mfaRequiredRoles: school.mfaRequiredRoles })
+        .onConflictDoUpdate({
+          target: tenants.slug,
+          set: { name: school.name, mfaRequiredRoles: school.mfaRequiredRoles ?? ["owner", "bursar"] },
+        })
         .returning({ id: tenants.id });
       const tenantId = row!.id;
       tenantIds.set(school.slug, tenantId);

@@ -40,3 +40,6 @@ test-results/
 
 # Playwright saved sessions
 playwright/.auth/
+
+# Development mailbox (log email/SMS provider)
+.dev-mailbox.jsonl

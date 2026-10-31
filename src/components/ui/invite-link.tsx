@@ -20,8 +20,9 @@ export function InviteLinkPanel({ result }: { result: InviteLink }) {
   return (
     <div className="space-y-4 rounded-lg border border-line bg-canvas p-5">
       <Alert tone="info">
-        Send this link to <strong className="font-semibold">{result.email}</strong> through a channel you
-        trust. It works once, expires on {expires}, and will not be shown again.
+        An invitation email is on its way to <strong className="font-semibold">{result.email}</strong>. You
+        can also share this link through a channel you trust. It works once, expires on {expires}, and will
+        not be shown again.
       </Alert>
       <CopyField label="Invitation link" value={result.inviteUrl} />
     </div>

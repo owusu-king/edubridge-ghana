@@ -2,6 +2,7 @@
 const LABELS: Record<string, string> = {
   "school.created": "School created",
   "school.profile.updated": "School profile updated",
+  "school.mfa_policy.updated": "Two-step verification policy changed",
   "school.suspended": "School suspended",
   "school.reactivated": "School reactivated",
   "entitlements.updated": "Plan changed",

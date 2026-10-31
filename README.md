@@ -45,6 +45,14 @@ set -a && . ./.env.local && set +a && npm run db:migrate && npm run db:seed
 npm run dev
 ```
 
+In another terminal, run the worker that delivers email and SMS (with retries):
+
+```bash
+set -a && . ./.env.local && set +a && npm run worker
+```
+
+Without `BREVO_API_KEY` / `ARKESEL_API_KEY`, messages are written to `.dev-mailbox.jsonl` instead of being sent.
+
 Sign in at http://localhost:3000 (staff pages live under `/s/{school}`) with any seeded account, password `edubridge-dev-only`:
 `owner@example.test` (two schools), `admin@`, `bursar@`, `teacher@`, `parent@`, `student@example.test`.
 `platform@example.test` is a platform admin (no schools) and requires two-step verification: add the

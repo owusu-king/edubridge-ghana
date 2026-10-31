@@ -57,3 +57,13 @@ test("administrators can update the school profile", async ({ page }) => {
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByText("School profile saved.")).toBeVisible();
 });
+
+test("the school's two-step policy is enforced for required roles", async ({ page }) => {
+  // Kpone Ridge keeps the default policy (owners and bursars); the seeded owner has not set it up.
+  await signIn(page, "owner@example.test");
+  await page.goto(SCHOOL.path);
+  await expect(page).toHaveURL("/account/security?required=school");
+  // Adenta Hall's policy requires no roles, so the same owner can enter it.
+  await page.goto("/s/adenta-hall");
+  await expect(page.getByRole("heading", { level: 1, name: "Adenta Hall Academy" })).toBeVisible();
+});

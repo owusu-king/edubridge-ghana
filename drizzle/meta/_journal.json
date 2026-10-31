@@ -50,6 +50,34 @@
       "when": 1793464749287,
       "tag": "0006_mfa_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793469408342,
+      "tag": "0007_mfa_policy",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793469408888,
+      "tag": "0008_mfa_policy_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793469539255,
+      "tag": "0009_outbox_password_resets",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793469539777,
+      "tag": "0010_outbox_grants",
+      "breakpoints": true
     }
   ]
 }

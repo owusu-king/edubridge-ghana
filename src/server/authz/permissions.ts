@@ -25,6 +25,7 @@ const GRANTS = {
   "campuses.manage": ["owner", "admin"],
   "plan.view": ["owner", "admin"],
   "audit.view": ["owner", "admin"],
+  "security.manage": ["owner"],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type Permission = keyof typeof GRANTS;

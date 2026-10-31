@@ -7,7 +7,7 @@ test.describe.configure({ mode: "serial" });
 test("redirects signed-out visitors to sign in, then back to where they were going", async ({ page }) => {
   await page.goto(`${SCHOOL.path}/members`);
   await expect(page).toHaveURL(/\/login\?next=%2Fs%2Fkpone-ridge%2Fmembers$/);
-  await signIn(page, "owner@example.test", `${SCHOOL.path}/members`);
+  await signIn(page, "admin@example.test", `${SCHOOL.path}/members`);
   await expect(page).toHaveURL(`${SCHOOL.path}/members`);
   await expect(page.getByRole("heading", { level: 1, name: "Members" })).toBeVisible();
   await expect(page.getByRole("row", { name: /Yaw Boateng/ })).toBeVisible();

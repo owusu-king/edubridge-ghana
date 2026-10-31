@@ -3,8 +3,8 @@ import { SESSION_LIFETIME_MS } from "@/server/auth/policy";
 import { buildCsp } from "@/web/csp";
 import { SESSION_COOKIE, sessionCookieOptions } from "@/web/session-cookie";
 
-const PUBLIC_PATHS = ["/login", "/login/verify"];
-const PUBLIC_PREFIXES = ["/invite/"];
+const PUBLIC_PATHS = ["/login", "/login/verify", "/forgot-password"];
+const PUBLIC_PREFIXES = ["/invite/", "/reset-password/"];
 
 /**
  * No database access here: real session validation happens on the server in src/web/auth.ts.

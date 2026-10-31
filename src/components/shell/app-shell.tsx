@@ -9,13 +9,11 @@ export interface AppShellProps {
   user: { name: string; email: string };
   isPlatformAdmin: boolean;
   signOut: () => Promise<void>;
-  /** A slim, persistent notice above the page (e.g. a required security step). */
-  notice?: ReactNode;
   children: ReactNode;
 }
 
 /** Desktop: fixed sidebar. Mobile: top bar with a navigation drawer. */
-export function AppShell({ area, user, isPlatformAdmin, signOut, notice, children }: AppShellProps) {
+export function AppShell({ area, user, isPlatformAdmin, signOut, children }: AppShellProps) {
   const menu = { name: user.name, email: user.email, signOut, isPlatformAdmin };
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[15.5rem_1fr]">
@@ -44,7 +42,6 @@ export function AppShell({ area, user, isPlatformAdmin, signOut, notice, childre
         </header>
         <main id="main" className="flex-1 bg-surface lg:min-h-dvh">
           <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-10">
-            {notice && <div className="mb-6">{notice}</div>}
             {children}
           </div>
         </main>

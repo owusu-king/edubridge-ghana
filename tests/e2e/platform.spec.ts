@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
-import { PLATFORM_AUTH, signIn } from "./helpers";
+import { enrollTwoStep, linkPath, PLATFORM_AUTH, signIn, waitForMessage } from "./helpers";
 
 const suffix = () => randomUUID().slice(0, 8);
 
@@ -35,6 +35,10 @@ test("a platform admin onboards a school and its owner sets it up", async ({ bro
     maxCampuses: 2,
   });
 
+  // The invitation is also emailed, with the same link.
+  const email = await waitForMessage(ownerEmail, /\/invite\//);
+  expect(linkPath(email.text)).toBe(invitePath);
+
   // The owner opens the link in their own browser.
   const ownerContext = await browser.newContext();
   const owner = await ownerContext.newPage();
@@ -47,7 +51,11 @@ test("a platform admin onboards a school and its owner sets it up", async ({ bro
   await expect(owner.getByLabel("Full name")).toHaveValue("Adjoa Synthetic");
   await owner.getByLabel("Password").fill("a-long-synthetic-password");
   await owner.getByRole("button", { name: "Create account and join" }).click();
-  await expect(owner).toHaveURL(`/s/${slug}`);
+  // The school's default policy requires two-step verification for owners.
+  await expect(owner).toHaveURL("/account/security?required=school");
+  await expect(owner.getByText("Your school requires two-step verification for your role.")).toBeVisible();
+  await enrollTwoStep(owner);
+  await owner.goto(`/s/${slug}`);
   await expect(owner.getByRole("heading", { level: 1, name: `E2E Academy ${id}` })).toBeVisible();
 
   // The link cannot be used again.
@@ -126,6 +134,7 @@ test("an existing user signs in to accept an invitation", async ({ browser }) =>
   await teacher.getByRole("button", { name: "Sign in" }).click();
   await expect(teacher.getByRole("heading", { name: "Join your school" })).toBeVisible();
   await teacher.getByRole("button", { name: "Accept invitation" }).click();
-  await expect(teacher).toHaveURL(/\/s\/e2e-/);
+  // Accepted as owner; the new school's policy then asks for two-step verification before entry.
+  await expect(teacher).toHaveURL("/account/security?required=school");
   await context.close();
 });
