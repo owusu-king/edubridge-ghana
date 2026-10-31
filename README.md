@@ -8,6 +8,7 @@ Android and iOS apps later, sharing the same `/api/v1`.
   [architecture](docs/02-SOFTWARE-ARCHITECTURE.md), [risks](docs/13-RISKS-AND-ASSUMPTIONS.md)
 - [Database](docs/03-DATABASE-DESIGN.md) — implemented tables, tenant isolation, migration workflow
 - [Roadmap](docs/11-DEVELOPMENT-ROADMAP.md) — milestones and how the code differs from `02`
+- [Status and handoff](docs/HANDOFF.md) — where the project stands and what comes next
 
 ## Requirements
 
