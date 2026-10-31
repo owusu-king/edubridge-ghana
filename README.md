@@ -11,7 +11,7 @@ Android and iOS apps later, sharing the same `/api/v1`.
 
 ## Requirements
 
-Node.js 22+ and PostgreSQL 16, on Windows 10/11, macOS or Linux. The commands below work in any shell
+Node.js 22+ and PostgreSQL 16 (installed, or run with Docker), on Windows 10/11, macOS or Linux. The commands below work in any shell
 (PowerShell, Command Prompt, Terminal, bash) unless marked otherwise.
 
 ## Local setup
@@ -20,16 +20,41 @@ Node.js 22+ and PostgreSQL 16, on Windows 10/11, macOS or Linux. The commands be
 npm install
 ```
 
-### 1. Create the local database roles and database (once)
+### 1. Start PostgreSQL with the EduBridge roles and databases
 
-**macOS / Linux:**
+Choose one option.
+
+**Option A: Docker (recommended on Windows; works on macOS and Linux too).** Install
+[Docker Desktop](https://www.docker.com/products/docker-desktop/) (on Windows, keep the default WSL 2 setting)
+and start it. Then, in the project folder:
+
+```bash
+docker compose up -d --wait
+```
+
+This runs PostgreSQL 16 from `compose.yaml` and, on first start, creates the roles and databases from
+`scripts/db-bootstrap-local.sql`. Data is kept between restarts. Stop it with `docker compose down`, or delete
+all local data with `docker compose down -v`.
+
+If PostgreSQL is already installed and using port 5432, pick another port. In PowerShell:
+
+```powershell
+$env:EDUBRIDGE_DB_PORT = "5433"; docker compose up -d --wait
+```
+
+Then change `5432` to `5433` in both URLs in `.env.local` (step 2), and run tests with `TEST_DB_HOST` set to
+`localhost:5433`.
+
+**Option B: install PostgreSQL 16 yourself.**
+
+macOS / Linux:
 
 ```bash
 sudo -u postgres psql -f scripts/db-bootstrap-local.sql
 ```
 
-**Windows:** install PostgreSQL 16 with the [EDB installer](https://www.postgresql.org/download/windows/)
-(keep the default port 5432 and note the `postgres` password you choose), then in PowerShell:
+Windows: install with the [EDB installer](https://www.postgresql.org/download/windows/) (keep port 5432 and note
+the `postgres` password you choose), then in PowerShell:
 
 ```powershell
 & "C:\Program Files\PostgreSQL\16\bin\psql.exe" -U postgres -f scripts\db-bootstrap-local.sql

@@ -1,0 +1,28 @@
+# Local development database (Windows, macOS, Linux): PostgreSQL 16 with EduBridge's roles and
+# databases created on first start by scripts/db-bootstrap-local.sql.
+#   docker compose up -d       start (data is kept in the edubridge-pg volume)
+#   docker compose down        stop
+#   docker compose down -v     stop and delete all local data
+# Development only: the passwords here and in the bootstrap script must never be used elsewhere.
+services:
+  db:
+    image: postgres:16
+    container_name: edubridge-db
+    environment:
+      POSTGRES_PASSWORD: postgres_local_only
+    ports:
+      # Set EDUBRIDGE_DB_PORT (e.g. 5433) if PostgreSQL already uses 5432 on this computer,
+      # and change the port in .env.local to match.
+      - "${EDUBRIDGE_DB_PORT:-5432}:5432"
+    volumes:
+      - edubridge-pg:/var/lib/postgresql/data
+      - ./scripts/db-bootstrap-local.sql:/docker-entrypoint-initdb.d/01-bootstrap.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d edubridge_dev"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  edubridge-pg:
