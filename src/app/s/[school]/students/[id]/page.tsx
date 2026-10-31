@@ -9,6 +9,7 @@ import { can } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { listGuardians, RELATIONSHIP_LABELS } from "@/server/students/guardians";
 import { getStudentAccount } from "@/server/fees/ledger";
+import { hasOpeningBalance, suggestedAsOf } from "@/server/fees/opening-balances";
 import { getStudent, listClassOptions } from "@/server/students/service";
 import { formatCalendarDate, todayIn } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
@@ -49,6 +50,11 @@ export default async function StudentPage({ params }: { params: Promise<{ school
     canSeeFees ? getStudentAccount(db(), ctx, id) : Promise.resolve(null),
   ]);
   if (!student) notFound();
+  // Offer an opening balance only to finance staff, and only while the student has none.
+  const openingAsOf =
+    account && can(ctx.roles, "fees.manage") && !(await hasOpeningBalance(db(), ctx, id))
+      ? await suggestedAsOf(db(), ctx)
+      : undefined;
   const links = guardianLinks ?? [];
   const slug = ctx.tenant.slug;
   const canManage = can(ctx.roles, "students.manage");
@@ -148,6 +154,7 @@ export default async function StudentPage({ params }: { params: Promise<{ school
               canRecordPayment={can(ctx.roles, "payments.record")}
               payerName={links.find((g) => g.isPrimary)?.fullName}
               today={todayIn(ctx.tenant.timezone)}
+              openingAsOf={openingAsOf}
             />
           )}
         </div>

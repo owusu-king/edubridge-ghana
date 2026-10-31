@@ -5,10 +5,12 @@
  */
 import { createDatabase } from "../src/server/db/client";
 import { dispatchPending, releaseStuck } from "../src/server/notifications/outbox";
+import { loadLocalEnv } from "./load-env";
 
 const INTERVAL_MS = Number(process.env.WORKER_INTERVAL_MS ?? 5000);
 
 async function main() {
+  loadLocalEnv();
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL is not set.");
   const { db, pool } = createDatabase(url);

@@ -151,3 +151,111 @@ function PaymentFields({ state, payerName, today }: { state: FormState; payerNam
     </>
   );
 }
+
+export function AdjustmentDialog({ action }: { action: Action }) {
+  return (
+    <FormDialog
+      trigger="Add charge or credit"
+      triggerVariant="ghost"
+      triggerSize="sm"
+      title="Add a charge or credit"
+      description="For one-off amounts outside the fee structure, such as a lost book or a refund owed."
+      submitLabel="Add to account"
+      action={action}
+    >
+      {(state) => (
+        <>
+          <fieldset className="space-y-2">
+            <legend className="mb-1.5 text-sm font-medium text-ink">Type</legend>
+            {[
+              { value: "charge", label: "Charge: the family owes more" },
+              { value: "credit", label: "Credit: the family owes less" },
+            ].map((o) => (
+              <label key={o.value} className="flex items-center gap-2.5 text-base text-ink">
+                <input
+                  type="radio"
+                  name="direction"
+                  value={o.value}
+                  defaultChecked={(state.values?.direction ?? "charge") === o.value}
+                  className="size-4 accent-ink"
+                />
+                {o.label}
+              </label>
+            ))}
+          </fieldset>
+          <Field label="Amount (GH₵)" error={state.fieldErrors?.amount}>
+            {(p) => (
+              <Input
+                {...p}
+                name="amount"
+                inputMode="decimal"
+                autoComplete="off"
+                defaultValue={state.values?.amount}
+                required
+              />
+            )}
+          </Field>
+          <Field
+            label="What it is for"
+            description="Shown on the statement."
+            error={state.fieldErrors?.description}
+          >
+            {(p) => (
+              <Input
+                {...p}
+                name="description"
+                defaultValue={state.values?.description}
+                required
+                maxLength={120}
+              />
+            )}
+          </Field>
+        </>
+      )}
+    </FormDialog>
+  );
+}
+
+export function OpeningBalanceDialog({ action, asOf }: { action: Action; asOf: string }) {
+  return (
+    <FormDialog
+      trigger="Set opening balance"
+      triggerVariant="ghost"
+      triggerSize="sm"
+      title="Opening balance"
+      description="What this family owed (or had paid in advance) in your records before using EduBridge."
+      submitLabel="Record opening balance"
+      action={action}
+    >
+      {(state) => (
+        <>
+          <Field
+            label="Balance (GH₵)"
+            description="For example 450.50 owed, or -120 for a credit."
+            error={state.fieldErrors?.amount}
+          >
+            {(p) => (
+              <Input
+                {...p}
+                name="amount"
+                inputMode="decimal"
+                autoComplete="off"
+                defaultValue={state.values?.amount}
+                required
+              />
+            )}
+          </Field>
+          <Field
+            label="As of"
+            description="Usually the day before this term began."
+            error={state.fieldErrors?.asOf}
+          >
+            {(p) => (
+              <Input {...p} name="asOf" type="date" defaultValue={state.values?.asOf ?? asOf} required />
+            )}
+          </Field>
+        </>
+      )}
+    </FormDialog>
+  );
+}
