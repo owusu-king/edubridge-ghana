@@ -50,7 +50,7 @@ export const tenants = pgTable(
   (t) => [
     check(
       "tenants_mfa_required_roles_valid",
-      sql`${t.mfaRequiredRoles} <@ ARRAY['owner','admin','bursar','teacher','parent','student']::text[]`,
+      sql`${t.mfaRequiredRoles} <@ ARRAY['owner','headteacher','admin','bursar','teacher','parent','student']::text[]`,
     ),
     check("tenants_slug_format", sql`${t.slug} ~ '^[a-z0-9](?:[a-z0-9-]{1,46}[a-z0-9])$'`),
     check("tenants_country_code_format", sql`${t.countryCode} ~ '^[A-Z]{2}$'`),
@@ -231,7 +231,7 @@ export const memberships = pgTable(
     check("memberships_roles_not_empty", sql`cardinality(${t.roles}) > 0`),
     check(
       "memberships_roles_valid",
-      sql`${t.roles} <@ ARRAY['owner','admin','bursar','teacher','parent','student']::text[]`,
+      sql`${t.roles} <@ ARRAY['owner','headteacher','admin','bursar','teacher','parent','student']::text[]`,
     ),
   ],
 );
@@ -337,7 +337,7 @@ export const invitations = pgTable(
     check("invitations_roles_not_empty", sql`cardinality(${t.roles}) > 0`),
     check(
       "invitations_roles_valid",
-      sql`${t.roles} <@ ARRAY['owner','admin','bursar','teacher','parent','student']::text[]`,
+      sql`${t.roles} <@ ARRAY['owner','headteacher','admin','bursar','teacher','parent','student']::text[]`,
     ),
   ],
 );

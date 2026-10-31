@@ -163,8 +163,11 @@ export function CreateSchoolForm({ countries, currencies, timezones }: Options) 
         </div>
       </Section>
 
-      <Section title="Owner" description="The owner receives a single-use link to create their account.">
-        <Field label="Owner's email" error={errors.ownerEmail}>
+      <Section
+        title="Proprietor"
+        description="The proprietor receives a single-use link to create their account."
+      >
+        <Field label="Proprietor's email" error={errors.ownerEmail}>
           {(p) => (
             <Input
               {...p}

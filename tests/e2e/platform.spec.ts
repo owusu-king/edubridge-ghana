@@ -13,7 +13,7 @@ async function createSchool(
   await expect(page.getByLabel("Address")).toHaveValue(/^[a-z0-9-]+$/);
   await page.getByLabel("Address").fill(opts.slug);
   await page.getByLabel("Campus limit").fill(String(opts.maxCampuses));
-  await page.getByLabel("Owner's email").fill(opts.ownerEmail);
+  await page.getByLabel("Proprietor's email").fill(opts.ownerEmail);
   await page.getByRole("button", { name: "Create school" }).click();
   await expect(page.getByText("School created with a Main campus and its plan.")).toBeVisible();
   const link = await page.getByLabel("Invitation link").inputValue();
@@ -102,7 +102,7 @@ test("rejects a duplicate school address", async ({ browser }) => {
   await page.goto("/admin/schools/new");
   await page.getByLabel("School name").fill("Duplicate Address School");
   await page.getByLabel("Address").fill("kpone-ridge");
-  await page.getByLabel("Owner's email").fill(`dup-${suffix()}@example.test`);
+  await page.getByLabel("Proprietor's email").fill(`dup-${suffix()}@example.test`);
   await page.getByRole("button", { name: "Create school" }).click();
   await expect(page.getByText("This address is already used by another school.").first()).toBeVisible();
   await expect(page.getByLabel("School name")).toHaveValue("Duplicate Address School");

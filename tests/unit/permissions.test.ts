@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { assertCan, can, ForbiddenError, isRole } from "@/server/authz/permissions";
+import { assertCan, can, ForbiddenError, isRole, ROLE_LABELS } from "@/server/authz/permissions";
 
 describe("permissions", () => {
   it("lets every role view its school", () => {
-    for (const role of ["owner", "admin", "bursar", "teacher", "parent", "student"] as const) {
+    for (const role of ["owner", "headteacher", "admin", "bursar", "teacher", "parent", "student"] as const) {
       expect(can([role], "school.view")).toBe(true);
     }
   });
@@ -14,6 +14,21 @@ describe("permissions", () => {
     expect(can(["teacher"], "members.view")).toBe(false);
     expect(can(["parent", "student"], "school.settings.manage")).toBe(false);
     expect(can(["bursar"], "school.settings.manage")).toBe(false);
+  });
+
+  it("lets head teachers see staff but not manage them or the school's settings", () => {
+    expect(can(["headteacher"], "members.view")).toBe(true);
+    expect(can(["headteacher"], "members.manage")).toBe(false);
+    expect(can(["headteacher"], "school.settings.manage")).toBe(false);
+    expect(can(["headteacher"], "audit.view")).toBe(false);
+  });
+
+  it("shows Ghanaian school role names", () => {
+    expect([ROLE_LABELS.owner, ROLE_LABELS.headteacher, ROLE_LABELS.bursar]).toEqual([
+      "Proprietor",
+      "Head teacher",
+      "Accountant",
+    ]);
   });
 
   it("grants a permission when any held role allows it", () => {

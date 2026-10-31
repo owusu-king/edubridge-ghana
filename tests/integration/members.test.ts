@@ -127,6 +127,28 @@ describe("inviting members", () => {
   });
 });
 
+describe("head teachers", () => {
+  it("can be invited by admins, see members, and not manage them", async () => {
+    const t = await setup();
+    const { token } = await inviteMember(conn.app, t.ctx.admin, {
+      email: email(),
+      roles: ["headteacher"],
+      campusIds: null,
+    });
+    const { userId } = await acceptInvitation(conn.app, token, {
+      kind: "new-account",
+      name: "Head Teacher",
+      password: "a-strong-password",
+    });
+    const head = await t.refresh(userId);
+    expect(head.roles).toEqual(["headteacher"]);
+    expect((await listMembers(conn.app, head)).length).toBeGreaterThan(0);
+    await expect(
+      inviteMember(conn.app, head, { email: email(), roles: ["teacher"], campusIds: null }),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+  });
+});
+
 describe("changing members", () => {
   it("updates roles and campus scope", async () => {
     await updateMember(conn.app, s.ctx.admin, s.memberships.teacherM.id, {

@@ -170,7 +170,15 @@ export async function countMembersByRole(database: Database, ctx: TenantContext)
       .where(and(eq(memberships.tenantId, ctx.tenant.id), eq(memberships.status, "active")))
       .groupBy(sql`r.role`),
   );
-  const counts: RoleCounts = { owner: 0, admin: 0, bursar: 0, teacher: 0, parent: 0, student: 0 };
+  const counts: RoleCounts = {
+    owner: 0,
+    headteacher: 0,
+    admin: 0,
+    bursar: 0,
+    teacher: 0,
+    parent: 0,
+    student: 0,
+  };
   for (const row of rows) if (isRole(row.role)) counts[row.role] = row.n;
   return counts;
 }
@@ -233,11 +241,11 @@ export async function updateSchoolProfile(
 
 export const mfaPolicySchema = z.object({
   roles: z
-    .array(z.enum(["owner", "admin", "bursar", "teacher"], { message: "Choose valid roles." }))
+    .array(z.enum(["owner", "headteacher", "admin", "bursar", "teacher"], { message: "Choose valid roles." }))
     .transform((r) => [...new Set(r)].sort()),
 });
 
-/** Owners choose which roles must use two-step verification at their school. Audited. */
+/** Proprietors choose which roles must use two-step verification at their school. Audited. */
 export async function updateMfaPolicy(
   database: Database,
   ctx: TenantContext,

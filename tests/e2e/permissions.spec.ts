@@ -67,3 +67,15 @@ test("the school's two-step policy is enforced for required roles", async ({ pag
   await page.goto("/s/adenta-hall");
   await expect(page.getByRole("heading", { level: 1, name: "Adenta Hall Academy" })).toBeVisible();
 });
+
+test("head teachers see staff but cannot manage them or the school's settings", async ({ page }) => {
+  await signIn(page, "head@example.test");
+  await page.goto(SCHOOL.path);
+  const nav = page.getByRole("navigation", { name: "School" });
+  await expect(nav.getByRole("link", { name: "Members" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Settings" })).toHaveCount(0);
+  await nav.getByRole("link", { name: "Members" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Members" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Invite member" })).toHaveCount(0);
+  await expect(page.getByRole("row", { name: /Comfort Adjei/ }).getByText("Head teacher")).toBeVisible();
+});

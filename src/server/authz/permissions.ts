@@ -3,24 +3,30 @@
  * so every check is explicit, reviewable and testable. Custom per-school roles can be layered on later
  * without changing call sites, because callers only ever ask `can(roles, permission)`.
  */
-export const ROLES = ["owner", "admin", "bursar", "teacher", "parent", "student"] as const;
+/**
+ * Role keys are stable identifiers stored in the database; labels are what people see.
+ * "owner" is shown as Proprietor and "bursar" as Accountant (Ghanaian school usage).
+ */
+export const ROLES = ["owner", "headteacher", "admin", "bursar", "teacher", "parent", "student"] as const;
 export type Role = (typeof ROLES)[number];
 
 export const ROLE_LABELS: Record<Role, string> = {
-  owner: "Owner",
+  owner: "Proprietor",
+  headteacher: "Head teacher",
   admin: "Administrator",
-  bursar: "Bursar",
+  bursar: "Accountant",
   teacher: "Teacher",
   parent: "Parent",
   student: "Student",
 };
 
-const STAFF: readonly Role[] = ["owner", "admin", "bursar", "teacher"];
+const STAFF: readonly Role[] = ["owner", "headteacher", "admin", "bursar", "teacher"];
 
 const GRANTS = {
   "school.view": [...STAFF, "parent", "student"],
   "school.settings.manage": ["owner", "admin"],
-  "members.view": ["owner", "admin"],
+  // Head teachers oversee staff and academics; finance access (read-only) arrives with the fees module.
+  "members.view": ["owner", "headteacher", "admin"],
   "members.manage": ["owner", "admin"],
   "campuses.manage": ["owner", "admin"],
   "plan.view": ["owner", "admin"],
