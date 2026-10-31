@@ -1,5 +1,9 @@
 import type { ReactNode } from "react";
+import type { Route } from "next";
+import Link from "next/link";
 import { AppShell } from "@/components/shell/app-shell";
+import { Alert } from "@/components/ui/alert";
+import { hasMfa } from "@/server/auth/mfa";
 import { db } from "@/server/db/client";
 import { isPlatformAdmin } from "@/server/platform/service";
 import { listUserSchools } from "@/server/tenancy/service";
@@ -15,10 +19,13 @@ export default async function TenantLayout({
 }) {
   const { school } = await params;
   const { user, ctx } = await requireTenant(school);
-  const [schools, platformAdmin] = await Promise.all([
+  const [schools, platformAdmin, mfaOn] = await Promise.all([
     listUserSchools(db(), user.id),
     isPlatformAdmin(db(), user.id),
+    hasMfa(db(), user.id),
   ]);
+  // D-03: owners and bursars must use two-step verification; financial features will enforce it.
+  const mfaExpected = ctx.roles.includes("owner") || ctx.roles.includes("bursar");
   return (
     <AppShell
       area={{
@@ -30,6 +37,17 @@ export default async function TenantLayout({
       user={{ name: user.name, email: user.email }}
       isPlatformAdmin={platformAdmin}
       signOut={signOut}
+      notice={
+        mfaExpected && !mfaOn ? (
+          <Alert tone="info">
+            Owners and bursars must use two-step verification.{" "}
+            <Link href={"/account/security" as Route} className="font-medium underline">
+              Set it up now
+            </Link>
+            .
+          </Alert>
+        ) : undefined
+      }
     >
       {children}
     </AppShell>

@@ -3,7 +3,7 @@ import { SESSION_LIFETIME_MS } from "@/server/auth/policy";
 import { buildCsp } from "@/web/csp";
 import { SESSION_COOKIE, sessionCookieOptions } from "@/web/session-cookie";
 
-const PUBLIC_PATHS = ["/login"];
+const PUBLIC_PATHS = ["/login", "/login/verify"];
 const PUBLIC_PREFIXES = ["/invite/"];
 
 /**

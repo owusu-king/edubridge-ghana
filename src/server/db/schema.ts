@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   check,
   customType,
   foreignKey,
@@ -90,6 +91,49 @@ export const loginAttempts = pgTable(
     index("login_attempts_email_idx").on(t.email, t.attemptedAt),
     index("login_attempts_ip_idx").on(t.ipAddress, t.attemptedAt),
   ],
+);
+
+/** TOTP two-step verification. The seed is encrypted at rest (src/server/auth/secret-box.ts). */
+export const userMfa = pgTable("user_mfa", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  secretSealed: text("secret_sealed").notNull(),
+  /** Null while enrolment is pending confirmation. */
+  enabledAt: timestamp("enabled_at", { withTimezone: true }),
+  /** Last accepted time step; codes at or before it are rejected (replay protection). */
+  lastUsedStep: bigint("last_used_step", { mode: "number" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Single-use recovery codes, stored hashed. */
+export const mfaRecoveryCodes = pgTable(
+  "mfa_recovery_codes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    codeHash: text("code_hash").notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("mfa_recovery_codes_user_idx").on(t.userId)],
+);
+
+/** A password-verified sign-in waiting for the second step. Only the token hash is stored. */
+export const mfaChallenges = pgTable(
+  "mfa_challenges",
+  {
+    id: text("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("mfa_challenges_user_idx").on(t.userId)],
 );
 
 /** A user's access to one school, with that school's roles. Protected by row-level security. */

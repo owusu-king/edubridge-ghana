@@ -36,6 +36,20 @@
       "when": 1793463979424,
       "tag": "0004_invitation_campus_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793464748754,
+      "tag": "0005_mfa",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793464749287,
+      "tag": "0006_mfa_grants",
+      "breakpoints": true
     }
   ]
 }
