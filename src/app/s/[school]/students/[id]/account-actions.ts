@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/server/db/client";
 import { reverseEntry } from "@/server/fees/ledger";
+import { recordAdjustment, setOpeningBalance } from "@/server/fees/opening-balances";
 import { recordPayment } from "@/server/fees/payments";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
@@ -50,4 +51,60 @@ export async function recordPaymentAction(
   }
   revalidatePath(schoolPath(slug, `students/${studentId}`));
   redirect(schoolPath(slug, `fees/receipts/${paymentId}`));
+}
+
+async function runForStudent(
+  slug: string,
+  studentId: string,
+  formData: FormData,
+  fn: (ctx: Awaited<ReturnType<typeof requireTenant>>["ctx"]) => Promise<unknown>,
+  message: string,
+): Promise<FormState> {
+  const { ctx } = await requireTenant(slug);
+  try {
+    await fn(ctx);
+  } catch (error) {
+    return toFormError(error, formData);
+  }
+  revalidatePath(schoolPath(slug, `students/${studentId}`));
+  return { status: "success", message };
+}
+
+export async function recordAdjustmentAction(
+  slug: string,
+  studentId: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  return runForStudent(
+    slug,
+    studentId,
+    formData,
+    (ctx) =>
+      recordAdjustment(db(), ctx, studentId, {
+        direction: formData.get("direction"),
+        amount: formData.get("amount") ?? "",
+        description: formData.get("description"),
+      }),
+    "Added to the account.",
+  );
+}
+
+export async function setOpeningBalanceAction(
+  slug: string,
+  studentId: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  return runForStudent(
+    slug,
+    studentId,
+    formData,
+    (ctx) =>
+      setOpeningBalance(db(), ctx, studentId, {
+        amount: formData.get("amount") ?? "",
+        asOf: formData.get("asOf"),
+      }),
+    "Opening balance recorded.",
+  );
 }

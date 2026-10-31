@@ -7,12 +7,14 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { platformAdmins, users } from "../src/server/db/schema";
+import { loadLocalEnv } from "./load-env";
 
 async function main() {
   const [action, email] = process.argv.slice(2);
   if ((action !== "grant" && action !== "revoke") || !email) {
     throw new Error("Usage: platform:admin -- <grant|revoke> <email>");
   }
+  loadLocalEnv();
   const url = process.env.MIGRATION_DATABASE_URL;
   if (!url) throw new Error("MIGRATION_DATABASE_URL is not set.");
   const pool = new Pool({ connectionString: url, max: 1 });

@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
+import { isEntrypoint, loadLocalEnv } from "./load-env";
 
 /** Applies migrations with the owner role. Usage: npm run db:migrate */
 export async function runMigrations(connectionString: string): Promise<void> {
@@ -12,8 +13,8 @@ export async function runMigrations(connectionString: string): Promise<void> {
   }
 }
 
-const isEntrypoint = import.meta.url === `file://${process.argv[1]}`;
-if (isEntrypoint) {
+if (isEntrypoint(import.meta.url)) {
+  loadLocalEnv();
   const url = process.env.MIGRATION_DATABASE_URL;
   if (!url) {
     console.error("MIGRATION_DATABASE_URL is not set.");

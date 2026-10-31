@@ -11,7 +11,8 @@ Android and iOS apps later, sharing the same `/api/v1`.
 
 ## Requirements
 
-Node.js 22+, PostgreSQL 16.
+Node.js 22+ and PostgreSQL 16, on Windows 10/11, macOS or Linux. The commands below work in any shell
+(PowerShell, Command Prompt, Terminal, bash) unless marked otherwise.
 
 ## Local setup
 
@@ -19,26 +20,51 @@ Node.js 22+, PostgreSQL 16.
 npm install
 ```
 
-Create the local database roles and database (once):
+### 1. Create the local database roles and database (once)
+
+**macOS / Linux:**
 
 ```bash
 sudo -u postgres psql -f scripts/db-bootstrap-local.sql
 ```
 
+**Windows:** install PostgreSQL 16 with the [EDB installer](https://www.postgresql.org/download/windows/)
+(keep the default port 5432 and note the `postgres` password you choose), then in PowerShell:
+
+```powershell
+& "C:\Program Files\PostgreSQL\16\bin\psql.exe" -U postgres -f scripts\db-bootstrap-local.sql
+```
+
+### 2. Create `.env.local`
+
+macOS / Linux:
+
 ```bash
 cp .env.example .env.local
+```
+
+Windows (PowerShell):
+
+```powershell
+Copy-Item .env.example .env.local
 ```
 
 Generate a local `MFA_ENCRYPTION_KEY` (encrypts two-step verification secrets) and paste it into `.env.local`:
 
 ```bash
-openssl rand -base64 32
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 ```
 
-Apply migrations and load synthetic data (the scripts read `MIGRATION_DATABASE_URL` from the environment):
+### 3. Migrate, seed and run
+
+The scripts read `.env.local` themselves, so no shell-specific setup is needed:
 
 ```bash
-set -a && . ./.env.local && set +a && npm run db:migrate && npm run db:seed
+npm run db:migrate
+```
+
+```bash
+npm run db:seed
 ```
 
 ```bash
@@ -48,7 +74,7 @@ npm run dev
 In another terminal, run the worker that delivers email and SMS (with retries):
 
 ```bash
-set -a && . ./.env.local && set +a && npm run worker
+npm run worker
 ```
 
 Without `BREVO_API_KEY` / `ARKESEL_API_KEY`, messages are written to `.dev-mailbox.jsonl` instead of being sent.
@@ -70,8 +96,10 @@ All seeded data is fictional.
 | `npm run lint`      | ESLint (includes the rule keeping `src/server` framework-agnostic)         |
 | `npm run format`    | Prettier                                                                   |
 
-CI runs all of these on every pull request.
+CI runs all of these on every pull request. Before the first `npm run test:e2e` on a new machine, install the
+browser once with `npx playwright install chromium`. On Windows, clone with Git's default settings:
+`.gitattributes` keeps files in LF so formatting checks pass.
 
 ## Development status
 
-R0 Foundation, milestone 1. See the [roadmap](docs/11-DEVELOPMENT-ROADMAP.md).
+R0 Foundation is complete; R1 is in progress (fees: phase C). See the [roadmap](docs/11-DEVELOPMENT-ROADMAP.md).

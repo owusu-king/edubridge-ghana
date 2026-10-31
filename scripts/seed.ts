@@ -32,6 +32,7 @@ import {
   userMfa,
   users,
 } from "../src/server/db/schema";
+import { loadLocalEnv } from "./load-env";
 
 export const DEV_PASSWORD = "edubridge-dev-only";
 /** Authenticator secret for platform@example.test in development only. */
@@ -78,6 +79,7 @@ const PEOPLE: { email: string; name: string; access: Record<string, Role[]> }[] 
 
 async function main() {
   if (process.env.NODE_ENV === "production") throw new Error("Refusing to seed a production environment.");
+  loadLocalEnv();
   const url = process.env.MIGRATION_DATABASE_URL;
   if (!url) throw new Error("MIGRATION_DATABASE_URL is not set.");
   const pool = new Pool({ connectionString: url, max: 1 });

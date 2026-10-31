@@ -6,8 +6,18 @@ import { formatCedis } from "@/lib/money";
 import { cn } from "@/lib/cn";
 import Link from "next/link";
 import { schoolPath } from "@/lib/routes";
-import { recordPaymentAction, reverseEntryAction } from "./account-actions";
-import { RecordPaymentDialog, ReverseEntryDialog } from "./account-controls";
+import {
+  recordAdjustmentAction,
+  recordPaymentAction,
+  reverseEntryAction,
+  setOpeningBalanceAction,
+} from "./account-actions";
+import {
+  AdjustmentDialog,
+  OpeningBalanceDialog,
+  RecordPaymentDialog,
+  ReverseEntryDialog,
+} from "./account-controls";
 
 function balanceText(pesewas: number): string {
   if (pesewas > 0) return `${formatCedis(pesewas)} owed`;
@@ -23,6 +33,7 @@ export function FeeAccount({
   canRecordPayment,
   payerName,
   today,
+  openingAsOf,
 }: {
   slug: string;
   account: StudentAccount;
@@ -30,6 +41,8 @@ export function FeeAccount({
   canRecordPayment: boolean;
   payerName?: string;
   today: string;
+  /** Set when the student has no opening balance yet and the user may add one. */
+  openingAsOf?: string;
 }) {
   return (
     <Section
@@ -50,6 +63,17 @@ export function FeeAccount({
         </div>
       }
     >
+      {canManage && (
+        <div className="-ml-3 flex flex-wrap gap-1">
+          <AdjustmentDialog action={recordAdjustmentAction.bind(null, slug, account.student.id)} />
+          {openingAsOf && (
+            <OpeningBalanceDialog
+              action={setOpeningBalanceAction.bind(null, slug, account.student.id)}
+              asOf={openingAsOf}
+            />
+          )}
+        </div>
+      )}
       {account.entries.length === 0 ? (
         <p className="text-base text-ink-3">No fees billed yet.</p>
       ) : (
