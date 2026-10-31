@@ -41,6 +41,9 @@ const GRANTS = {
   // Finance: the Proprietor and Accountant run fees; the Head teacher can look but not change anything.
   "fees.view": ["owner", "headteacher", "bursar"],
   "fees.manage": ["owner", "bursar"],
+  "payments.record": ["owner", "bursar"],
+  // Voiding a receipt is a fraud-sensitive control: only the Proprietor may do it (assumption to verify).
+  "payments.void": ["owner"],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type Permission = keyof typeof GRANTS;

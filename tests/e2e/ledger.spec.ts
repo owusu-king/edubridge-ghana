@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { ACCOUNTANT_TOTP_SECRET, SCHOOL, signIn } from "./helpers";
+import { ACCOUNTANT_AUTH, SCHOOL, signIn } from "./helpers";
 
 /** Bills whatever is outstanding this term (other specs add students; earlier runs may leave reversals). */
 async function billOutstanding(page: Page) {
@@ -35,33 +35,38 @@ test("the head teacher sees billing progress and a student's statement, read-onl
   await expect(page.getByRole("button", { name: /^Reverse / })).toHaveCount(0);
 });
 
-test("an accountant reverses a charge, then bills it again from the fee structure", async ({ page }) => {
-  await signIn(page, "bursar@example.test", undefined, ACCOUNTANT_TOTP_SECRET);
-  await billOutstanding(page);
-  await openStudent(page, "Akua Owusu");
-  // Measured from the current balance, so the test also holds after earlier runs.
-  const owed = page.getByText(/^GH₵[\d,]+\.\d{2} owed$/);
-  const before = await owed.innerText();
-  const cedis = (text: string) => Number(text.replace(/[^\d.]/g, ""));
-  const formatOwed = (value: number) =>
-    `GH₵${value.toLocaleString("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} owed`;
+test.describe("as the accountant", () => {
+  test.use({ storageState: ACCOUNTANT_AUTH });
 
-  await page.getByRole("button", { name: "Reverse PTA dues, Term 1 2026/2027" }).click();
-  const dialog = page.getByRole("dialog", { name: "Reverse this entry?" });
-  await dialog.getByRole("button", { name: "Reverse entry" }).click();
-  await expect(dialog.getByText("Say why this is being reversed.")).toBeVisible();
-  await dialog.getByLabel("Reason").fill("Charged in error");
-  await dialog.getByRole("button", { name: "Reverse entry" }).click();
-  await expect(dialog).toBeHidden();
-  await expect(page.getByText(formatOwed(cedis(before) - 50))).toBeVisible();
-  const statement = page.getByRole("table", { name: "Fee statement for Akua Owusu" });
-  await expect(
-    statement.getByRole("row", { name: /Reversed: PTA dues, Term 1 2026\/2027 \(Charged in error\)/ }).last(),
-  ).toBeVisible();
+  test("an accountant reverses a charge, then bills it again from the fee structure", async ({ page }) => {
+    await billOutstanding(page);
+    await openStudent(page, "Akua Owusu");
+    // Measured from the current balance, so the test also holds after earlier runs.
+    const owed = page.getByText(/^GH₵[\d,]+\.\d{2} owed$/);
+    const before = await owed.innerText();
+    const cedis = (text: string) => Number(text.replace(/[^\d.]/g, ""));
+    const formatOwed = (value: number) =>
+      `GH₵${value.toLocaleString("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} owed`;
 
-  // Billing again charges Akua's PTA dues afresh.
-  await billOutstanding(page);
+    await page.getByRole("button", { name: "Reverse PTA dues, Term 1 2026/2027" }).click();
+    const dialog = page.getByRole("dialog", { name: "Reverse this entry?" });
+    await dialog.getByRole("button", { name: "Reverse entry" }).click();
+    await expect(dialog.getByText("Say why this is being reversed.")).toBeVisible();
+    await dialog.getByLabel("Reason").fill("Charged in error");
+    await dialog.getByRole("button", { name: "Reverse entry" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText(formatOwed(cedis(before) - 50))).toBeVisible();
+    const statement = page.getByRole("table", { name: "Fee statement for Akua Owusu" });
+    await expect(
+      statement
+        .getByRole("row", { name: /Reversed: PTA dues, Term 1 2026\/2027 \(Charged in error\)/ })
+        .last(),
+    ).toBeVisible();
 
-  await openStudent(page, "Akua Owusu");
-  await expect(page.getByText(before)).toBeVisible();
+    // Billing again charges Akua's PTA dues afresh.
+    await billOutstanding(page);
+
+    await openStudent(page, "Akua Owusu");
+    await expect(page.getByText(before)).toBeVisible();
+  });
 });

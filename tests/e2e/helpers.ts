@@ -8,6 +8,8 @@ export const PASSWORD = "edubridge-dev-only";
 export const PLATFORM_TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
 export const ACCOUNTANT_TOTP_SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
 export const PLATFORM_AUTH = "playwright/.auth/platform.json";
+/** The seeded accountant, signed in once by the setup project (parallel two-step sign-ins would collide). */
+export const ACCOUNTANT_AUTH = "playwright/.auth/accountant.json";
 export const SCHOOL = { path: "/s/kpone-ridge", name: "Kpone Ridge International School" };
 
 /** Signs in with the seeded password, and a two-step code when the account has a TOTP secret. */

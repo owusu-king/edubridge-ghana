@@ -264,6 +264,8 @@ export interface AccountEntry {
   /** Balance after this entry. */
   balancePesewas: number;
   reversed: boolean;
+  /** Set for payments and voids: links to the receipt. */
+  paymentId: string | null;
   recordedBy: string | null;
   recordedAt: Date;
 }
@@ -294,6 +296,7 @@ export async function getStudentAccount(
         effectiveOn: ledgerEntries.effectiveOn,
         amountPesewas: ledgerEntries.amountPesewas,
         reversed: isReversed,
+        paymentId: ledgerEntries.paymentId,
         recordedBy: users.name,
         recordedAt: ledgerEntries.recordedAt,
       })
@@ -347,6 +350,8 @@ export async function reverseEntry(
       .where(and(eq(ledgerEntries.tenantId, ctx.tenant.id), eq(ledgerEntries.id, entryId)));
     if (!original || !(await loadFinanceStudent(tx, ctx, original.studentId)))
       throw new DomainError("not_found", "This entry no longer exists.");
+    if (original.kind === "payment")
+      throw new DomainError("use_void", "To cancel a payment, void its receipt instead.");
     if (original.kind === "reversal")
       throw new DomainError(
         "not_reversible",

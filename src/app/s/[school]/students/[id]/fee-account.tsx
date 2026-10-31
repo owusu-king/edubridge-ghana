@@ -4,8 +4,10 @@ import type { StudentAccount } from "@/server/fees/ledger";
 import { formatCalendarDate } from "@/lib/format";
 import { formatCedis } from "@/lib/money";
 import { cn } from "@/lib/cn";
-import { reverseEntryAction } from "./account-actions";
-import { ReverseEntryDialog } from "./account-controls";
+import Link from "next/link";
+import { schoolPath } from "@/lib/routes";
+import { recordPaymentAction, reverseEntryAction } from "./account-actions";
+import { RecordPaymentDialog, ReverseEntryDialog } from "./account-controls";
 
 function balanceText(pesewas: number): string {
   if (pesewas > 0) return `${formatCedis(pesewas)} owed`;
@@ -18,16 +20,34 @@ export function FeeAccount({
   slug,
   account,
   canManage,
+  canRecordPayment,
+  payerName,
+  today,
 }: {
   slug: string;
   account: StudentAccount;
   canManage: boolean;
+  canRecordPayment: boolean;
+  payerName?: string;
+  today: string;
 }) {
   return (
     <Section
       title="Fees"
       aside={
-        <p className="text-base font-semibold text-ink tabular-nums">{balanceText(account.balancePesewas)}</p>
+        <div className="flex items-center gap-3">
+          <p className="text-base font-semibold text-ink tabular-nums">
+            {balanceText(account.balancePesewas)}
+          </p>
+          {canRecordPayment && (
+            <RecordPaymentDialog
+              action={recordPaymentAction.bind(null, slug, account.student.id)}
+              studentName={account.student.name}
+              payerName={payerName}
+              today={today}
+            />
+          )}
+        </div>
       }
     >
       {account.entries.length === 0 ? (
@@ -56,9 +76,18 @@ export function FeeAccount({
                     {formatCalendarDate(entry.effectiveOn)}
                   </TD>
                   <TD>
-                    <span className={cn("text-ink", entry.reversed && "text-ink-3 line-through")}>
-                      {entry.description}
-                    </span>
+                    {entry.paymentId ? (
+                      <Link
+                        href={schoolPath(slug, `fees/receipts/${entry.paymentId}`)}
+                        className={cn("text-accent hover:underline", entry.reversed && "line-through")}
+                      >
+                        {entry.description}
+                      </Link>
+                    ) : (
+                      <span className={cn("text-ink", entry.reversed && "text-ink-3 line-through")}>
+                        {entry.description}
+                      </span>
+                    )}
                     <span className="block text-sm text-ink-3 sm:hidden">
                       {formatCalendarDate(entry.effectiveOn)}
                     </span>
@@ -72,7 +101,7 @@ export function FeeAccount({
                   </TD>
                   {canManage && (
                     <TD className="text-right">
-                      {!entry.reversed && entry.kind !== "reversal" && (
+                      {!entry.reversed && entry.kind !== "reversal" && entry.kind !== "payment" && (
                         <ReverseEntryDialog
                           action={reverseEntryAction.bind(null, slug, account.student.id, entry.id)}
                           description={entry.description}
