@@ -10,7 +10,7 @@ test("the current term shows on the overview", async ({ page }) => {
 
 test("a head teacher manages the academic calendar", async ({ page }) => {
   // A random far-future year keeps repeated runs from overlapping each other.
-  const y = 2100 + randomInt(0, 800);
+  const y = 2100 + randomInt(0, 7800);
   await signIn(page, "head@example.test");
   await page.goto(SCHOOL.path);
   await page.getByRole("navigation", { name: "School" }).getByRole("link", { name: "Settings" }).click();

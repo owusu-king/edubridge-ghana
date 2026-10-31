@@ -10,6 +10,7 @@ import { db } from "@/server/db/client";
 import { listGuardians, RELATIONSHIP_LABELS } from "@/server/students/guardians";
 import { getStudentAccount } from "@/server/fees/ledger";
 import { listConcessions } from "@/server/fees/concessions";
+import { getPaymentPlan } from "@/server/fees/payment-plans";
 import { hasOpeningBalance, suggestedAsOf } from "@/server/fees/opening-balances";
 import { listFeeItems } from "@/server/fees/structure";
 import { getStudent, listClassOptions } from "@/server/students/service";
@@ -52,7 +53,7 @@ export default async function StudentPage({ params }: { params: Promise<{ school
     canSeeFees ? getStudentAccount(db(), ctx, id) : Promise.resolve(null),
   ]);
   if (!student) notFound();
-  const [concessions, feeItemOptions] = account
+  const [concessions, feeItemOptions, plan] = account
     ? await Promise.all([
         listConcessions(db(), ctx, id),
         can(ctx.roles, "fees.manage")
@@ -60,8 +61,9 @@ export default async function StudentPage({ params }: { params: Promise<{ school
               items.filter((i) => i.status === "active").map((i) => ({ value: i.id, label: i.name })),
             )
           : Promise.resolve([]),
+        getPaymentPlan(db(), ctx, id),
       ])
-    : [[], []];
+    : [[], [], null];
   // Offer an opening balance only to finance staff, and only while the student has none.
   const openingAsOf =
     account && can(ctx.roles, "fees.manage") && !(await hasOpeningBalance(db(), ctx, id))
@@ -169,6 +171,7 @@ export default async function StudentPage({ params }: { params: Promise<{ school
               openingAsOf={openingAsOf}
               concessions={concessions}
               feeItems={feeItemOptions}
+              plan={plan}
             />
           )}
         </div>

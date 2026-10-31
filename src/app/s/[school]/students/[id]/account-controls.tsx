@@ -359,3 +359,91 @@ export function EndConcessionButton({ action, label }: { action: Action; label: 
     />
   );
 }
+
+export function PaymentPlanDialog({
+  action,
+  defaultTotal,
+  firstDue,
+}: {
+  action: Action;
+  defaultTotal: string;
+  firstDue: string;
+}) {
+  return (
+    <FormDialog
+      trigger="Agree a payment plan"
+      triggerVariant="ghost"
+      triggerSize="sm"
+      title="Agree a payment plan"
+      description="Spread what the family owes over equal instalments. Payments recorded from now on count towards it."
+      submitLabel="Agree plan"
+      action={action}
+    >
+      {(state) => (
+        <>
+          <Field label="Amount to spread (GH₵)" error={state.fieldErrors?.total}>
+            {(p) => (
+              <Input
+                {...p}
+                name="total"
+                inputMode="decimal"
+                autoComplete="off"
+                defaultValue={state.values?.total ?? defaultTotal}
+                required
+              />
+            )}
+          </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Instalments" error={state.fieldErrors?.count}>
+              {(p) => (
+                <Select {...p} name="count" defaultValue={state.values?.count ?? "3"}>
+                  {Array.from({ length: 11 }, (_, i) => i + 2).map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+            <Field label="Every" error={state.fieldErrors?.frequency}>
+              {(p) => (
+                <Select {...p} name="frequency" defaultValue={state.values?.frequency ?? "monthly"}>
+                  <option value="monthly">Month</option>
+                  <option value="fortnightly">Two weeks</option>
+                  <option value="weekly">Week</option>
+                </Select>
+              )}
+            </Field>
+          </div>
+          <Field label="First instalment due" error={state.fieldErrors?.firstDueOn}>
+            {(p) => (
+              <Input
+                {...p}
+                name="firstDueOn"
+                type="date"
+                min={firstDue}
+                defaultValue={state.values?.firstDueOn ?? firstDue}
+                required
+              />
+            )}
+          </Field>
+        </>
+      )}
+    </FormDialog>
+  );
+}
+
+export function CancelPlanButton({ action }: { action: Action }) {
+  return (
+    <FormDialog
+      trigger="Cancel plan"
+      triggerVariant="ghost"
+      triggerSize="sm"
+      title="Cancel this payment plan?"
+      description="The schedule is removed from the account. Payments and balances are not affected."
+      submitLabel="Cancel plan"
+      danger
+      action={action}
+    />
+  );
+}

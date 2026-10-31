@@ -6,6 +6,7 @@ import { db } from "@/server/db/client";
 import { reverseEntry } from "@/server/fees/ledger";
 import { addConcession, endConcession } from "@/server/fees/concessions";
 import { recordAdjustment, setOpeningBalance } from "@/server/fees/opening-balances";
+import { cancelPaymentPlan, createPaymentPlan } from "@/server/fees/payment-plans";
 import { recordPayment } from "@/server/fees/payments";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
@@ -143,5 +144,41 @@ export async function endConcessionAction(
     new FormData(),
     (ctx) => endConcession(db(), ctx, concessionId),
     "Discount ended.",
+  );
+}
+
+export async function createPaymentPlanAction(
+  slug: string,
+  studentId: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  return runForStudent(
+    slug,
+    studentId,
+    formData,
+    (ctx) =>
+      createPaymentPlan(db(), ctx, studentId, {
+        total: formData.get("total") ?? "",
+        count: formData.get("count"),
+        firstDueOn: formData.get("firstDueOn"),
+        frequency: formData.get("frequency"),
+      }),
+    "Payment plan agreed.",
+  );
+}
+
+export async function cancelPaymentPlanAction(
+  slug: string,
+  studentId: string,
+  planId: string,
+  _prev: FormState,
+): Promise<FormState> {
+  return runForStudent(
+    slug,
+    studentId,
+    new FormData(),
+    (ctx) => cancelPaymentPlan(db(), ctx, planId),
+    "Plan cancelled.",
   );
 }
