@@ -33,20 +33,27 @@ test("users with several schools are asked to choose", async ({ page }) => {
 });
 
 test("administrators can update the school profile", async ({ page }) => {
+  // Shared seed school: other tests read its name concurrently, so only the time zone is changed here.
   await signIn(page, "admin@example.test");
   await page.goto(`${SCHOOL.path}/settings`);
-  const name = page.getByLabel("School name");
 
-  await name.fill("");
+  await page.getByLabel("School name").fill("");
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByText("Enter the school's name.")).toBeVisible();
+  await expect(page.getByLabel("School name")).toHaveValue("");
 
-  await name.fill(`${SCHOOL.name} (renamed)`);
+  await page.getByLabel("School name").fill(SCHOOL.name);
+  await page.getByLabel("Time zone").selectOption("UTC");
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByText("School profile saved.")).toBeVisible();
 
-  // Restore the seed value so other tests are unaffected.
-  await page.getByLabel("School name").fill(SCHOOL.name);
+  await page.goto(`${SCHOOL.path}/settings/audit`);
+  await expect(
+    page.getByRole("row", { name: /School profile updated.*timezone: Africa\/Accra → UTC/ }).first(),
+  ).toBeVisible();
+
+  await page.goto(`${SCHOOL.path}/settings`);
+  await page.getByLabel("Time zone").selectOption("Africa/Accra");
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByText("School profile saved.")).toBeVisible();
 });

@@ -24,6 +24,9 @@ export default async function SettingsLayout({
     ...(can(ctx.roles, "plan.view")
       ? [{ label: "Plan", href: schoolPath(ctx.tenant.slug, "settings/plan") }]
       : []),
+    ...(can(ctx.roles, "audit.view")
+      ? [{ label: "Audit log", href: schoolPath(ctx.tenant.slug, "settings/audit") }]
+      : []),
   ];
   return (
     <div className="space-y-8">

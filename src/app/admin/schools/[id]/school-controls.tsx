@@ -7,7 +7,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/field";
 import type { FormState } from "@/web/forms";
 import type { InviteResult } from "../../actions";
-import { InviteResultPanel } from "../../invite-result";
+import { InviteLinkPanel } from "@/components/ui/invite-link";
 
 type Action<T = undefined> = (prev: FormState<T>, formData: FormData) => Promise<FormState<T>>;
 
@@ -136,7 +136,7 @@ export function ReissueInvitationForm({
   return (
     <div className="space-y-4">
       {state.status === "success" && state.data ? (
-        <InviteResultPanel result={state.data} />
+        <InviteLinkPanel result={state.data} />
       ) : (
         state.status === "error" && !state.fieldErrors && <Message state={state} />
       )}

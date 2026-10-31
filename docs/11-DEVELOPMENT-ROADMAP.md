@@ -12,8 +12,8 @@ Small, verified milestones. Each ends with passing tests, type checks, lint and 
 | --- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- | ------------------- |
 | 1   | Project foundation, design system, app shell, PostgreSQL + forced RLS, sessions, RBAC, audit log, CI                                 | TEN-02, IAM-04, IAM-05 (no campus yet), IAM-08 (partial) | Built; in review (PR #1) |
 | 2   | Platform admin: create school (TEN-01), entitlements (TEN-05); campuses (TEN-03) and campus-scoped permissions                       | TEN-01, TEN-03, TEN-05                                   | Built; in review (PR #2). Campus scope is stored and resolved; assigning it in the UI comes with milestone 3 |
-| 3   | Member management: invite, assign roles, deactivate with immediate session revocation, audit log view                                | IAM-07, IAM-08                                           | Next |
-| 4   | Account security: password reset (IAM-03), TOTP MFA required for owner/bursar/platform admin (IAM-06), phone-number sign-in (IAM-01) | IAM-01, IAM-03, IAM-06                                   |                     |
+| 3   | Member management: invite, assign roles, deactivate with immediate session revocation, audit log view                                | IAM-07, IAM-08                                           | Built; in review (PR #3). Suspension takes effect on the next request (no session revocation needed: access is re-checked per request) |
+| 4   | Account security: password reset (IAM-03), TOTP MFA required for owner/bursar/platform admin (IAM-06), phone-number sign-in (IAM-01) | IAM-01, IAM-03, IAM-06                                   | Next |
 | 5   | Background jobs (pg-boss + outbox), structured logging, error monitoring hooks                                                       | `02` §8, §14                                             |                     |
 
 SMS OTP (IAM-02) and email delivery need a provider; they wait for approval of the provider and cost.
