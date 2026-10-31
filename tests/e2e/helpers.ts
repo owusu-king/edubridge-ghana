@@ -6,15 +6,18 @@ import { base32Decode, timeStep, totpAt } from "../../src/server/auth/totp";
 /** Matches scripts/seed.ts (synthetic accounts). */
 export const PASSWORD = "edubridge-dev-only";
 export const PLATFORM_TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
+export const ACCOUNTANT_TOTP_SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
 export const PLATFORM_AUTH = "playwright/.auth/platform.json";
 export const SCHOOL = { path: "/s/kpone-ridge", name: "Kpone Ridge International School" };
 
-export async function signIn(page: Page, email: string, next?: string) {
+/** Signs in with the seeded password, and a two-step code when the account has a TOTP secret. */
+export async function signIn(page: Page, email: string, next?: string, totpSecret?: string) {
   await page.goto(next ? `/login?next=${encodeURIComponent(next)}` : "/login");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).not.toHaveURL(/\/login/);
+  if (totpSecret) await completeTwoStep(page, totpSecret);
+  else await expect(page).not.toHaveURL(/\/login/);
 }
 
 /**

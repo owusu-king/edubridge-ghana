@@ -56,7 +56,9 @@ Without `BREVO_API_KEY` / `ARKESEL_API_KEY`, messages are written to `.dev-mailb
 Sign in at http://localhost:3000 (staff pages live under `/s/{school}`) with any seeded account, password `edubridge-dev-only`:
 `owner@example.test` (proprietor of two schools), `head@` (head teacher), `admin@`, `bursar@` (accountant), `teacher@`, `parent@`, `student@example.test`.
 `platform@example.test` is a platform admin (no schools) and requires two-step verification: add the
-dev-only secret `JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP` to an authenticator app. All seeded data is fictional.
+dev-only secret `JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP` to an authenticator app. `bursar@` also uses two-step
+verification (Kpone Ridge requires it for accountants), with the dev-only secret `GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ`.
+All seeded data is fictional.
 
 ## Checks
 

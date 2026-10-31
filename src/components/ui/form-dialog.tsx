@@ -22,6 +22,7 @@ export function FormDialog({
   description,
   submitLabel,
   danger = false,
+  size,
   action,
   children,
 }: {
@@ -34,6 +35,7 @@ export function FormDialog({
   description?: string;
   submitLabel: string;
   danger?: boolean;
+  size?: "md" | "lg";
   action: Action;
   children?: (state: FormState) => ReactNode;
 }) {
@@ -49,7 +51,7 @@ export function FormDialog({
         {trigger}
       </Button>
       {open && (
-        <Dialog open onOpenChange={setOpen} title={title} description={description}>
+        <Dialog open onOpenChange={setOpen} title={title} description={description} size={size}>
           <DialogForm action={action} submitLabel={submitLabel} danger={danger} onDone={() => setOpen(false)}>
             {children}
           </DialogForm>

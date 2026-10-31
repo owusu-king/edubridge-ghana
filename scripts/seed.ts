@@ -13,6 +13,8 @@ import {
   campuses,
   classes,
   enrolments,
+  feeItems,
+  feeStructureLines,
   guardians,
   levels,
   loginAttempts,
@@ -30,6 +32,8 @@ import {
 export const DEV_PASSWORD = "edubridge-dev-only";
 /** Authenticator secret for platform@example.test in development only. */
 export const DEV_PLATFORM_TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
+/** Kpone Ridge requires two-step verification for accountants. Dev-only, published secret (see README). */
+export const DEV_ACCOUNTANT_TOTP_SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
 
 const SCHOOLS = [
   {
@@ -129,6 +133,16 @@ async function main() {
         .values({ email: person.email, name: person.name, passwordHash })
         .onConflictDoUpdate({ target: users.email, set: { name: person.name, passwordHash } })
         .returning({ id: users.id });
+      if (person.email === "bursar@example.test") {
+        const sealedSecret = seal(DEV_ACCOUNTANT_TOTP_SECRET);
+        await db
+          .insert(userMfa)
+          .values({ userId: user!.id, secretSealed: sealedSecret, enabledAt: new Date() })
+          .onConflictDoUpdate({
+            target: userMfa.userId,
+            set: { secretSealed: sealedSecret, enabledAt: new Date(), lastUsedStep: null },
+          });
+      }
       for (const [slug, roles] of Object.entries(person.access)) {
         const tenantId = tenantIds.get(slug)!;
         await db.transaction(async (tx) => {
@@ -320,6 +334,61 @@ async function main() {
           })
           .onConflictDoNothing();
       }
+    });
+
+    // Kpone Ridge fees for the current term (synthetic amounts). Later terms are left empty to show copying.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
+      const [existingItem] = await tx
+        .select({ id: feeItems.id })
+        .from(feeItems)
+        .where(eq(feeItems.tenantId, kpone));
+      const [term] = await tx
+        .select({ id: terms.id })
+        .from(terms)
+        .where(and(eq(terms.tenantId, kpone), eq(terms.isCurrent, true)));
+      if (existingItem || !term) return;
+      const items = await tx
+        .insert(feeItems)
+        .values(
+          ["Tuition", "PTA dues", "Books and stationery", "ICT"].map((name, i) => ({
+            tenantId: kpone,
+            name,
+            sequence: (i + 1) * 10,
+          })),
+        )
+        .returning({ id: feeItems.id, name: feeItems.name });
+      const item = (name: string) => items.find((i) => i.name === name)!.id;
+      // Pesewas per stage: tuition, PTA dues, books, ICT (0 = not charged).
+      const amounts: Record<string, [number, number, number, number]> = {
+        creche: [65000, 5000, 12000, 0],
+        nursery: [65000, 5000, 12000, 0],
+        kindergarten: [65000, 5000, 12000, 0],
+        primary: [85000, 5000, 18000, 6000],
+        jhs: [110000, 5000, 24000, 8000],
+      };
+      const levelRows = await tx
+        .select({ id: levels.id, stage: levels.stage })
+        .from(levels)
+        .where(eq(levels.tenantId, kpone));
+      const names = ["Tuition", "PTA dues", "Books and stationery", "ICT"];
+      await tx.insert(feeStructureLines).values(
+        levelRows.flatMap((level) =>
+          amounts[level.stage]!.flatMap((amountPesewas, i) =>
+            amountPesewas > 0
+              ? [
+                  {
+                    tenantId: kpone,
+                    termId: term.id,
+                    levelId: level.id,
+                    feeItemId: item(names[i]!),
+                    amountPesewas,
+                  },
+                ]
+              : [],
+          ),
+        ),
+      );
     });
 
     // Clear sign-in throttling for the synthetic accounts so local runs start clean.

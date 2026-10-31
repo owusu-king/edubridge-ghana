@@ -1,5 +1,14 @@
 import type { Route } from "next";
-import { Building2, GraduationCap, LayoutGrid, School, Settings, Users, type LucideIcon } from "lucide-react";
+import {
+  Building2,
+  GraduationCap,
+  LayoutGrid,
+  School,
+  Settings,
+  Users,
+  Wallet,
+  type LucideIcon,
+} from "lucide-react";
 import { can, type Permission, type Role } from "@/server/authz/permissions";
 import { schoolPath } from "@/lib/routes";
 
@@ -44,6 +53,7 @@ const SCHOOL_NAV: readonly { label: string; segment: string; icon: LucideIcon; p
   { label: "Overview", segment: "", icon: LayoutGrid, permission: "school.view" },
   { label: "Students", segment: "students", icon: GraduationCap, permission: "students.view" },
   { label: "Classes", segment: "classes", icon: School, permission: "classes.view" },
+  { label: "Fees", segment: "fees", icon: Wallet, permission: "fees.view" },
   { label: "Members", segment: "members", icon: Users, permission: "members.view" },
 ];
 

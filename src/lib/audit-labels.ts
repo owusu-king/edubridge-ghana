@@ -1,3 +1,5 @@
+import { formatCedis } from "./money";
+
 /** Human-readable descriptions of audit actions. Unknown actions fall back to the raw key. */
 const LABELS: Record<string, string> = {
   "school.created": "School created",
@@ -24,6 +26,13 @@ const LABELS: Record<string, string> = {
   "student.withdrawn": "Student withdrawn",
   "student.graduated": "Student graduated",
   "student.reactivated": "Student reactivated",
+  "fee_item.created": "Fee item added",
+  "fee_items.set_up": "Fee items set up",
+  "fee_item.renamed": "Fee item renamed",
+  "fee_item.archived": "Fee item archived",
+  "fee_item.restored": "Fee item restored",
+  "fees.structure_updated": "Fees changed for a level",
+  "fees.structure_copied": "Fees copied from another term",
   "guardian.linked": "Guardian added",
   "guardian.updated": "Guardian details changed",
   "guardian.made_primary": "Primary contact changed",
@@ -61,6 +70,9 @@ export function auditSummary(metadata: Record<string, unknown>): string {
       const change = value as { from: unknown; to: unknown };
       if (JSON.stringify(change.from) !== JSON.stringify(change.to))
         parts.push(`${key}: ${scalar(change.from)} → ${scalar(change.to)}`);
+    } else if (key.endsWith("Pesewas") && typeof value === "number") {
+      // Money is stored in pesewas; show it in cedis.
+      parts.push(`${key.slice(0, -"Pesewas".length)}: ${formatCedis(value)}`);
     } else if (typeof value !== "object" || Array.isArray(value) || value === null) {
       parts.push(`${key}: ${scalar(value)}`);
     }
