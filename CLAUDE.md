@@ -50,6 +50,7 @@ Build for real paying customers, not demonstrations.
 EduBridge must look and feel like premium international enterprise software.
 
 Prioritize:
+
 - Timeless visual design.
 - Exceptional typography.
 - Consistent spacing.
@@ -61,6 +62,7 @@ Prioritize:
 - Thoughtful empty, loading and error states.
 
 Avoid:
+
 - Generic AI-generated dashboard designs.
 - Excessive gradients.
 - Unnecessary card layouts.
@@ -120,6 +122,7 @@ Financial functionality requires exceptional care.
 I am the product owner.
 
 Ask for approval before:
+
 - Major architectural changes.
 - Destructive database operations.
 - Introducing significant paid services.
@@ -130,10 +133,10 @@ Challenge weak technical decisions and recommend better alternatives.
 
 ## 10. Current development stage
 
-Current stage: Phase 0 — Product discovery and architecture.
+Current stage: R0 Foundation (bible Phase 1). The founder instructed on 2026-10-31 to build the foundation in small, verified milestones.
 
-Do not start building application functionality until the founder approves the architecture and roadmap.
+Decisions in `docs/02-SOFTWARE-ARCHITECTURE.md` and `docs/01-PRODUCT-REQUIREMENTS.md` marked as awaiting approval still need the founder's approval. Where code differs from `02`, record it in `docs/11-DEVELOPMENT-ROADMAP.md`.
 
-The immediate objective is to produce comprehensive architecture and product documentation under `/docs`.
+Keep documentation minimal and do not duplicate the numbered documents in `/docs`.
 
 Always prioritize product quality, security, maintainability and commercial viability.
