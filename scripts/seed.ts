@@ -2,7 +2,7 @@
  * Seeds synthetic development data. Every person, school and email here is fictional.
  * Usage: npm run db:seed   (uses MIGRATION_DATABASE_URL; refuses to run in production)
  */
-import { inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { hashPassword } from "../src/server/auth/password";
@@ -11,6 +11,8 @@ import type { Role } from "../src/server/authz/permissions";
 import {
   academicYears,
   campuses,
+  classes,
+  levels,
   loginAttempts,
   memberships,
   platformAdmins,
@@ -175,6 +177,62 @@ async function main() {
           },
         ]);
       }
+    });
+
+    // Kpone Ridge: Ghanaian default levels and a few classes. Adenta Hall has none (shows the setup state).
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
+      const [existingLevel] = await tx
+        .select({ id: levels.id })
+        .from(levels)
+        .where(eq(levels.tenantId, kpone))
+        .limit(1);
+      if (existingLevel) return;
+      const names: [string, "creche" | "nursery" | "kindergarten" | "primary" | "jhs"][] = [
+        ["Creche", "creche"],
+        ["Nursery 1", "nursery"],
+        ["Nursery 2", "nursery"],
+        ["KG 1", "kindergarten"],
+        ["KG 2", "kindergarten"],
+        ["Basic 1", "primary"],
+        ["Basic 2", "primary"],
+        ["Basic 3", "primary"],
+        ["Basic 4", "primary"],
+        ["Basic 5", "primary"],
+        ["Basic 6", "primary"],
+        ["JHS 1", "jhs"],
+        ["JHS 2", "jhs"],
+        ["JHS 3", "jhs"],
+      ];
+      const created = await tx
+        .insert(levels)
+        .values(names.map(([name, stage], i) => ({ tenantId: kpone, name, stage, sequence: (i + 1) * 10 })))
+        .returning({ id: levels.id, name: levels.name });
+      const levelId = (name: string) => created.find((l) => l.name === name)!.id;
+      const campusRows = await tx
+        .select({ id: campuses.id, name: campuses.name })
+        .from(campuses)
+        .where(eq(campuses.tenantId, kpone));
+      const main = campusRows.find((c) => c.name === "Main campus")!.id;
+      const sakumono = campusRows.find((c) => c.name === "Sakumono")!.id;
+      const [teacher] = await tx
+        .select({ id: memberships.id })
+        .from(memberships)
+        .innerJoin(users, eq(users.id, memberships.userId))
+        .where(and(eq(memberships.tenantId, kpone), eq(users.email, "teacher@example.test")));
+      await tx.insert(classes).values([
+        { tenantId: kpone, levelId: levelId("KG 1"), campusId: main, name: "KG 1" },
+        {
+          tenantId: kpone,
+          levelId: levelId("Basic 4"),
+          campusId: main,
+          name: "Basic 4A",
+          classTeacherMembershipId: teacher?.id ?? null,
+        },
+        { tenantId: kpone, levelId: levelId("Basic 4"), campusId: main, name: "Basic 4B" },
+        { tenantId: kpone, levelId: levelId("JHS 1"), campusId: main, name: "JHS 1" },
+        { tenantId: kpone, levelId: levelId("Basic 1"), campusId: sakumono, name: "Basic 1 Sakumono" },
+      ]);
     });
 
     // Clear sign-in throttling for the synthetic accounts so local runs start clean.
