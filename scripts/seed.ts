@@ -7,14 +7,28 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { hashPassword } from "../src/server/auth/password";
 import type { Role } from "../src/server/authz/permissions";
-import { memberships, tenants, users } from "../src/server/db/schema";
+import {
+  campuses,
+  memberships,
+  platformAdmins,
+  tenantEntitlements,
+  tenants,
+  users,
+} from "../src/server/db/schema";
 
 export const DEV_PASSWORD = "edubridge-dev-only";
 
 const SCHOOLS = [
-  { slug: "kpone-ridge", name: "Kpone Ridge International School" },
-  { slug: "adenta-hall", name: "Adenta Hall Academy" },
+  {
+    slug: "kpone-ridge",
+    name: "Kpone Ridge International School",
+    maxCampuses: 3,
+    campuses: ["Main campus", "Sakumono"],
+  },
+  { slug: "adenta-hall", name: "Adenta Hall Academy", maxCampuses: 1, campuses: ["Main campus"] },
 ];
+
+const PLATFORM_ADMIN = { email: "platform@example.test", name: "Selorm Agbeko" };
 
 const PEOPLE: { email: string; name: string; access: Record<string, Role[]> }[] = [
   {
@@ -42,14 +56,38 @@ async function main() {
   const passwordHash = await hashPassword(DEV_PASSWORD);
 
   try {
+    const [platformAdmin] = await db
+      .insert(users)
+      .values({ ...PLATFORM_ADMIN, passwordHash })
+      .onConflictDoUpdate({ target: users.email, set: { name: PLATFORM_ADMIN.name, passwordHash } })
+      .returning({ id: users.id });
+    await db.insert(platformAdmins).values({ userId: platformAdmin!.id }).onConflictDoNothing();
+
     const tenantIds = new Map<string, string>();
     for (const school of SCHOOLS) {
       const [row] = await db
         .insert(tenants)
-        .values(school)
+        .values({ slug: school.slug, name: school.name })
         .onConflictDoUpdate({ target: tenants.slug, set: { name: school.name } })
         .returning({ id: tenants.id });
-      tenantIds.set(school.slug, row!.id);
+      const tenantId = row!.id;
+      tenantIds.set(school.slug, tenantId);
+      // Plan limits may only be written as a platform administrator (enforced by row-level security).
+      await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select set_config('app.tenant_id', ${tenantId}, true), set_config('app.user_id', ${platformAdmin!.id}, true)`,
+        );
+        await tx
+          .insert(tenantEntitlements)
+          .values({ tenantId, planName: "Pilot", maxCampuses: school.maxCampuses })
+          .onConflictDoUpdate({
+            target: tenantEntitlements.tenantId,
+            set: { maxCampuses: school.maxCampuses },
+          });
+        for (const name of school.campuses) {
+          await tx.insert(campuses).values({ tenantId, name }).onConflictDoNothing();
+        }
+      });
     }
 
     for (const person of PEOPLE) {
@@ -73,7 +111,7 @@ async function main() {
       }
     }
     console.log(
-      `Seeded ${SCHOOLS.length} schools and ${PEOPLE.length} users. Password for all: ${DEV_PASSWORD}`,
+      `Seeded ${SCHOOLS.length} schools, ${PEOPLE.length} school users and ${PLATFORM_ADMIN.email}. Password for all: ${DEV_PASSWORD}`,
     );
   } finally {
     await pool.end();

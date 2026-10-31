@@ -10,6 +10,7 @@ import {
   type SessionUser,
 } from "@/server/auth/sessions";
 import { db } from "@/server/db/client";
+import { isPlatformAdmin } from "@/server/platform/service";
 import { resolveTenantContext, type TenantContext } from "@/server/tenancy/service";
 import { SESSION_COOKIE, sessionCookieOptions } from "./session-cookie";
 
@@ -70,3 +71,10 @@ export async function getClientInfo(): Promise<{ ipAddress: string | null; userA
   const forwarded = h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? h.get("x-real-ip") ?? "";
   return { ipAddress: isIP(forwarded) ? forwarded : null, userAgent: h.get("user-agent") };
 }
+
+/** The signed-in platform administrator. Everyone else gets a 404, so the area is not disclosed. */
+export const requirePlatformAdmin = cache(async (): Promise<SessionUser> => {
+  const user = await requireUser();
+  if (!(await isPlatformAdmin(db(), user.id))) notFound();
+  return user;
+});

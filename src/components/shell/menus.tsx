@@ -4,10 +4,11 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { Check, ChevronsUpDown, LogOut } from "lucide-react";
 import Link from "next/link";
 import { useRef } from "react";
-import type { Route } from "next";
 import { Avatar } from "@/components/ui/layout";
 import { SchoolMonogram } from "@/components/ui/monogram";
 import { initials } from "@/lib/format";
+import { Wordmark } from "@/components/ui/wordmark";
+import type { SchoolOption, ShellArea } from "./navigation";
 import { schoolPath } from "@/lib/routes";
 
 const menuContent =
@@ -15,11 +16,6 @@ const menuContent =
 const menuItem =
   "flex h-9 cursor-default items-center gap-2.5 rounded-md px-2.5 text-ink-2 outline-none select-none " +
   "data-[highlighted]:bg-subtle data-[highlighted]:text-ink";
-
-export interface SchoolOption {
-  slug: string;
-  name: string;
-}
 
 export function SchoolSwitcher({ current, schools }: { current: SchoolOption; schools: SchoolOption[] }) {
   const identity = (
@@ -64,11 +60,13 @@ export function UserMenu({
   name,
   email,
   signOut,
+  isPlatformAdmin = false,
   compact = false,
 }: {
   name: string;
   email: string;
   signOut: () => Promise<void>;
+  isPlatformAdmin?: boolean;
   compact?: boolean;
 }) {
   // The form lives outside the menu: Radix unmounts menu content on select, before a nested form submits.
@@ -107,6 +105,11 @@ export function UserMenu({
           <DropdownMenu.Item asChild className={menuItem}>
             <Link href="/schools">All schools</Link>
           </DropdownMenu.Item>
+          {isPlatformAdmin && (
+            <DropdownMenu.Item asChild className={menuItem}>
+              <Link href="/admin">Platform administration</Link>
+            </DropdownMenu.Item>
+          )}
           <DropdownMenu.Item className={menuItem} onSelect={() => signOutForm.current?.requestSubmit()}>
             <LogOut aria-hidden="true" className="size-4" />
             Sign out
@@ -115,4 +118,17 @@ export function UserMenu({
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
   );
+}
+
+/** Top-left identity: the school (with switcher) or the platform. */
+export function ShellIdentity({ area }: { area: ShellArea }) {
+  if (area.kind === "platform") {
+    return (
+      <div className="flex items-center justify-between gap-2 px-1.5 py-1">
+        <Wordmark />
+        <span className="text-xs font-medium tracking-wide text-ink-3 uppercase">Platform</span>
+      </div>
+    );
+  }
+  return <SchoolSwitcher current={area.school} schools={area.schools} />;
 }

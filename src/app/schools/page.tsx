@@ -7,6 +7,7 @@ import { SchoolMonogram } from "@/components/ui/monogram";
 import { Wordmark } from "@/components/ui/wordmark";
 import { ROLE_LABELS } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
+import { isPlatformAdmin } from "@/server/platform/service";
 import { listUserSchools } from "@/server/tenancy/service";
 import { requireUser } from "@/web/auth";
 import { signOut } from "../actions/sign-out";
@@ -16,7 +17,10 @@ export const metadata: Metadata = { title: "Your schools" };
 
 export default async function SchoolsPage() {
   const user = await requireUser();
-  const schools = await listUserSchools(db(), user.id);
+  const [schools, platformAdmin] = await Promise.all([
+    listUserSchools(db(), user.id),
+    isPlatformAdmin(db(), user.id),
+  ]);
 
   return (
     <div className="flex min-h-dvh flex-col px-5 py-6 sm:px-8">
@@ -57,6 +61,13 @@ export default async function SchoolsPage() {
               </li>
             ))}
           </ul>
+        )}
+        {platformAdmin && (
+          <p className="mt-8 text-base text-ink-2">
+            <Link href={"/admin" as Route} className="font-medium text-accent hover:underline">
+              Platform administration
+            </Link>
+          </p>
         )}
       </main>
     </div>

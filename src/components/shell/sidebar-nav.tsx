@@ -2,28 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { Route } from "next";
-import type { Role } from "@/server/authz/permissions";
 import { cn } from "@/lib/cn";
-import { navHref, visibleNavItems } from "./navigation";
+import { navLinks, type ShellArea } from "./navigation";
 
-export function SidebarNav({
-  slug,
-  roles,
-  onNavigate,
-}: {
-  slug: string;
-  roles: Role[];
-  onNavigate?: () => void;
-}) {
+export function SidebarNav({ area, onNavigate }: { area: ShellArea; onNavigate?: () => void }) {
   const pathname = usePathname();
-  const items = visibleNavItems(roles);
   return (
-    <nav aria-label="School">
+    <nav aria-label={area.kind === "platform" ? "Platform" : "School"}>
       <ul className="space-y-0.5">
-        {items.map(({ label, segment, icon: Icon }) => {
-          const href = navHref(slug, segment);
-          const active = segment ? pathname === href || pathname.startsWith(`${href}/`) : pathname === href;
+        {navLinks(area).map(({ label, href, icon: Icon, exact }) => {
+          const active = exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
           return (
             <li key={label}>
               <Link

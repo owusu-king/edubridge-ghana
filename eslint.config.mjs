@@ -15,6 +15,11 @@ const config = [
     ],
   },
   {
+    rules: {
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+    },
+  },
+  {
     // Domain code must stay framework-agnostic so it can serve web, API and future mobile clients.
     files: ["src/server/**/*.ts"],
     rules: {

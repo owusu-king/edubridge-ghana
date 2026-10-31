@@ -1,20 +1,20 @@
 import type { ReactNode } from "react";
-import type { Role } from "@/server/authz/permissions";
 import { MobileNav } from "./mobile-nav";
-import { SchoolSwitcher, UserMenu, type SchoolOption } from "./menus";
+import { ShellIdentity, UserMenu } from "./menus";
+import { areaTitle, type ShellArea } from "./navigation";
 import { SidebarNav } from "./sidebar-nav";
 
 export interface AppShellProps {
-  school: SchoolOption;
-  schools: SchoolOption[];
-  roles: Role[];
+  area: ShellArea;
   user: { name: string; email: string };
+  isPlatformAdmin: boolean;
   signOut: () => Promise<void>;
   children: ReactNode;
 }
 
 /** Desktop: fixed sidebar. Mobile: top bar with a navigation drawer. */
-export function AppShell({ school, schools, roles, user, signOut, children }: AppShellProps) {
+export function AppShell({ area, user, isPlatformAdmin, signOut, children }: AppShellProps) {
+  const menu = { name: user.name, email: user.email, signOut, isPlatformAdmin };
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[15.5rem_1fr]">
       <a
@@ -25,20 +25,20 @@ export function AppShell({ school, schools, roles, user, signOut, children }: Ap
       </a>
 
       <aside className="sticky top-0 hidden h-dvh flex-col border-r border-line bg-canvas px-3 py-3 lg:flex">
-        <SchoolSwitcher current={school} schools={schools} />
+        <ShellIdentity area={area} />
         <div className="mt-6 flex-1 overflow-y-auto">
-          <SidebarNav slug={school.slug} roles={roles} />
+          <SidebarNav area={area} />
         </div>
         <div className="border-t border-line pt-3">
-          <UserMenu name={user.name} email={user.email} signOut={signOut} />
+          <UserMenu {...menu} />
         </div>
       </aside>
 
       <div className="flex min-h-dvh min-w-0 flex-col">
         <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-canvas/95 px-4 backdrop-blur lg:hidden">
-          <MobileNav current={school} schools={schools} roles={roles} />
-          <span className="min-w-0 flex-1 truncate text-base font-semibold">{school.name}</span>
-          <UserMenu name={user.name} email={user.email} signOut={signOut} compact />
+          <MobileNav area={area} />
+          <span className="min-w-0 flex-1 truncate text-base font-semibold">{areaTitle(area)}</span>
+          <UserMenu {...menu} compact />
         </header>
         <main id="main" className="flex-1 bg-surface lg:min-h-dvh">
           <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-10">

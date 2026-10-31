@@ -21,6 +21,8 @@ const GRANTS = {
   "school.view": [...STAFF, "parent", "student"],
   "school.settings.manage": ["owner", "admin"],
   "members.view": ["owner", "admin"],
+  "campuses.manage": ["owner", "admin"],
+  "plan.view": ["owner", "admin"],
   "audit.view": ["owner", "admin"],
 } as const satisfies Record<string, readonly Role[]>;
 

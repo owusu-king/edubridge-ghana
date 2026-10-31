@@ -19,7 +19,8 @@
     "test:e2e": "playwright test",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
-    "db:seed": "tsx scripts/seed.ts"
+    "db:seed": "tsx scripts/seed.ts",
+    "platform:admin": "tsx scripts/platform-admin.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.3.1",
