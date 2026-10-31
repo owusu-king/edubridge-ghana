@@ -25,6 +25,10 @@ const STAFF: readonly Role[] = ["owner", "headteacher", "admin", "bursar", "teac
 const GRANTS = {
   "school.view": [...STAFF, "parent", "student"],
   "classes.view": STAFF,
+  // Teachers see only students in their own classes; these roles see every student.
+  "students.view": STAFF,
+  "students.view_all": ["owner", "headteacher", "admin", "bursar"],
+  "students.manage": ["owner", "headteacher", "admin"],
   "school.settings.manage": ["owner", "admin"],
   "academics.manage": ["owner", "headteacher", "admin"],
   // Head teachers oversee staff and academics; finance access (read-only) arrives with the fees module.
