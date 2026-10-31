@@ -9,12 +9,14 @@ import { hashPassword } from "../src/server/auth/password";
 import { seal } from "../src/server/auth/secret-box";
 import type { Role } from "../src/server/authz/permissions";
 import {
+  academicYears,
   campuses,
   loginAttempts,
   memberships,
   platformAdmins,
   tenantEntitlements,
   tenants,
+  terms,
   userMfa,
   users,
 } from "../src/server/db/schema";
@@ -135,6 +137,46 @@ async function main() {
         });
       }
     }
+    // Kpone Ridge has a calendar with a current term; Adenta Hall starts empty (shows the setup state).
+    const kpone = tenantIds.get("kpone-ridge")!;
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
+      const [year] = await tx
+        .insert(academicYears)
+        .values({ tenantId: kpone, name: "2026/2027", startsOn: "2026-09-08", endsOn: "2027-07-30" })
+        .onConflictDoNothing()
+        .returning({ id: academicYears.id });
+      if (year) {
+        await tx.insert(terms).values([
+          {
+            tenantId: kpone,
+            academicYearId: year.id,
+            name: "Term 1",
+            sequence: 1,
+            startsOn: "2026-09-08",
+            endsOn: "2026-12-18",
+            isCurrent: true,
+          },
+          {
+            tenantId: kpone,
+            academicYearId: year.id,
+            name: "Term 2",
+            sequence: 2,
+            startsOn: "2027-01-11",
+            endsOn: "2027-04-09",
+          },
+          {
+            tenantId: kpone,
+            academicYearId: year.id,
+            name: "Term 3",
+            sequence: 3,
+            startsOn: "2027-05-03",
+            endsOn: "2027-07-30",
+          },
+        ]);
+      }
+    });
+
     // Clear sign-in throttling for the synthetic accounts so local runs start clean.
     await db
       .delete(loginAttempts)

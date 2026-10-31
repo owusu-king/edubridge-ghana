@@ -73,7 +73,14 @@ test("head teachers see staff but cannot manage them or the school's settings", 
   await page.goto(SCHOOL.path);
   const nav = page.getByRole("navigation", { name: "School" });
   await expect(nav.getByRole("link", { name: "Members" })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "Settings" })).toHaveCount(0);
+  // Settings opens on the calendar only; the school profile stays with proprietors and administrators.
+  await expect(nav.getByRole("link", { name: "Settings" })).toHaveAttribute(
+    "href",
+    `${SCHOOL.path}/settings/calendar`,
+  );
+  await page.goto(`${SCHOOL.path}/settings`);
+  await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
+  await page.goto(SCHOOL.path);
   await nav.getByRole("link", { name: "Members" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Members" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Invite member" })).toHaveCount(0);

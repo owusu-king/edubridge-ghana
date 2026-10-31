@@ -1,7 +1,9 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   check,
+  date,
   customType,
   foreignKey,
   index,
@@ -284,6 +286,55 @@ export const campuses = pgTable(
     unique("campuses_tenant_name_unique").on(t.tenantId, t.name),
     unique("campuses_tenant_id_unique").on(t.tenantId, t.id),
     check("campuses_name_length", sql`char_length(${t.name}) between 2 and 80`),
+  ],
+);
+
+/**
+ * Academic years and their terms. Dates are school-local calendar dates (no time zone). The database
+ * rejects overlapping years or terms within a school, and allows one current term per school.
+ */
+export const academicYears = pgTable(
+  "academic_years",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+    startsOn: date("starts_on", { mode: "string" }).notNull(),
+    endsOn: date("ends_on", { mode: "string" }).notNull(),
+    ...timestamps,
+  },
+  (t) => [
+    unique("academic_years_tenant_name_unique").on(t.tenantId, t.name),
+    unique("academic_years_tenant_id_unique").on(t.tenantId, t.id),
+    check("academic_years_dates", sql`${t.endsOn} > ${t.startsOn}`),
+  ],
+);
+
+export const terms = pgTable(
+  "terms",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    academicYearId: uuid("academic_year_id").notNull(),
+    name: text("name").notNull(),
+    sequence: integer("sequence").notNull(),
+    startsOn: date("starts_on", { mode: "string" }).notNull(),
+    endsOn: date("ends_on", { mode: "string" }).notNull(),
+    isCurrent: boolean("is_current").notNull().default(false),
+    ...timestamps,
+  },
+  (t) => [
+    foreignKey({
+      name: "terms_academic_year_fk",
+      columns: [t.tenantId, t.academicYearId],
+      foreignColumns: [academicYears.tenantId, academicYears.id],
+    }).onDelete("cascade"),
+    unique("terms_year_sequence_unique").on(t.academicYearId, t.sequence),
+    unique("terms_tenant_id_unique").on(t.tenantId, t.id),
+    check("terms_dates", sql`${t.endsOn} > ${t.startsOn}`),
+    check("terms_sequence_range", sql`${t.sequence} between 1 and 6`),
   ],
 );
 

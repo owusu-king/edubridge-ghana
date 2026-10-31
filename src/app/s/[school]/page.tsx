@@ -5,7 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { can, ROLE_LABELS, ROLES } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { countMembersByRole } from "@/server/tenancy/service";
-import { countryName } from "@/lib/format";
+import { countryName, formatCalendarDate } from "@/lib/format";
+import { getCurrentTerm } from "@/server/academics/calendar";
 import { requireTenant } from "@/web/auth";
 import { schoolPath } from "@/lib/routes";
 
@@ -14,7 +15,10 @@ export const metadata: Metadata = { title: "Overview" };
 export default async function OverviewPage({ params }: { params: Promise<{ school: string }> }) {
   const { school } = await params;
   const { user, ctx } = await requireTenant(school);
-  const counts = can(ctx.roles, "members.view") ? await countMembersByRole(db(), ctx) : null;
+  const [counts, currentTerm] = await Promise.all([
+    can(ctx.roles, "members.view") ? countMembersByRole(db(), ctx) : null,
+    getCurrentTerm(db(), ctx),
+  ]);
   const firstName = user.name.split(" ")[0] ?? user.name;
 
   return (
@@ -51,6 +55,14 @@ export default async function OverviewPage({ params }: { params: Promise<{ schoo
       <Section title="School details">
         <DescriptionList
           items={[
+            {
+              term: "Current term",
+              detail: currentTerm ? (
+                `${currentTerm.name}, ${currentTerm.yearName} · ${formatCalendarDate(currentTerm.startsOn)} – ${formatCalendarDate(currentTerm.endsOn)}`
+              ) : (
+                <span className="text-ink-3">Not set</span>
+              ),
+            },
             { term: "Country", detail: countryName(ctx.tenant.countryCode) },
             { term: "Time zone", detail: ctx.tenant.timezone.replace("_", " ") },
             { term: "Currency", detail: ctx.tenant.currencyCode },

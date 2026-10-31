@@ -27,6 +27,7 @@ PostgreSQL 16. Schema in `src/server/db/schema.ts`; migrations are reviewed SQL 
 | `phone_verifications` | global | 6-digit SMS codes (hashed with the verification id), 10 minutes, 5 attempts, 3 per user per hour. |
 | `password_resets` | global | 30-minute, single-use, hashed tokens; 3 requests per account and 20 per IP per hour. |
 | `memberships`    | tenant | User ↔ school with `roles text[]` (validated by a check constraint). Never deleted by the app; suspend. A user can also see their own memberships in other schools. |
+| `academic_years`, `terms` | tenant | School-local `date` columns. `EXCLUDE USING gist` blocks overlapping years/terms per school (`btree_gist`); a partial unique index allows one current term per school; terms reference years by composite FK. |
 | `audit_events`   | tenant | Append-only: the app role has INSERT and SELECT only.                                                                                                               |
 
 ## Tenant context

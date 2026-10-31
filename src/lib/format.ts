@@ -40,3 +40,13 @@ export function safeRedirectPath(value: unknown, fallback = "/"): string {
   }
   return value;
 }
+
+/** Formats a calendar date stored as YYYY-MM-DD (no time zone), e.g. "8 Sep 2026". */
+export function formatCalendarDate(iso: string): string {
+  return new Intl.DateTimeFormat(LOCALE, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${iso}T00:00:00Z`));
+}
