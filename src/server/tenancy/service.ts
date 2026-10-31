@@ -5,7 +5,7 @@ import { recordAudit } from "../audit/record";
 import { assertCan, isRole, type Role } from "../authz/permissions";
 import type { Database } from "../db/client";
 import { withTenant, withUser } from "../db/context";
-import { memberships, tenants, users } from "../db/schema";
+import { membershipCampuses, memberships, tenants, users } from "../db/schema";
 
 export interface Tenant {
   id: string;
@@ -21,6 +21,8 @@ export interface TenantContext {
   tenant: Tenant;
   userId: string;
   roles: Role[];
+  /** Campuses this membership is limited to; null means every campus. */
+  campusIds: string[] | null;
 }
 
 const tenantColumns = {
@@ -54,7 +56,7 @@ export async function resolveTenantContext(
 
   const membership = await withTenant(database, { tenantId: tenant.id, userId }, async (tx) => {
     const [row] = await tx
-      .select({ roles: memberships.roles })
+      .select({ id: memberships.id, roles: memberships.roles })
       .from(memberships)
       .where(
         and(
@@ -64,12 +66,17 @@ export async function resolveTenantContext(
         ),
       )
       .limit(1);
-    return row;
+    if (!row) return undefined;
+    const scope = await tx
+      .select({ campusId: membershipCampuses.campusId })
+      .from(membershipCampuses)
+      .where(and(eq(membershipCampuses.tenantId, tenant.id), eq(membershipCampuses.membershipId, row.id)));
+    return { roles: row.roles, campusIds: scope.length > 0 ? scope.map((r) => r.campusId) : null };
   });
   if (!membership) return null;
   const roles = toRoles(membership.roles);
   if (roles.length === 0) return null;
-  return { tenant, userId, roles };
+  return { tenant, userId, roles, campusIds: membership.campusIds };
 }
 
 export interface UserSchool {
@@ -143,6 +150,11 @@ export async function countMembersByRole(database: Database, ctx: TenantContext)
   return counts;
 }
 
+/** Whether the context may act on a campus (unrestricted memberships cover every campus). */
+export function canAccessCampus(ctx: TenantContext, campusId: string): boolean {
+  return ctx.campusIds === null || ctx.campusIds.includes(campusId);
+}
+
 export const SUPPORTED_TIMEZONES = [
   "Africa/Accra",
   "Africa/Lagos",
@@ -161,7 +173,8 @@ export type SchoolProfileInput = z.infer<typeof schoolProfileSchema>;
 export async function updateSchoolProfile(
   database: Database,
   ctx: TenantContext,
-  input: SchoolProfileInput,
+  /** Unvalidated input, e.g. form data; parsed here. */
+  input: unknown,
   meta: { ipAddress?: string | null } = {},
 ): Promise<Tenant> {
   assertCan(ctx.roles, "school.settings.manage");

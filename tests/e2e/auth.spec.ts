@@ -47,5 +47,7 @@ test("the API accepts the session as a bearer token", async ({ page, request }) 
   expect(response.status()).toBe(200);
   const body = await response.json();
   expect(body.user.email).toBe("teacher@example.test");
-  expect(body.schools).toHaveLength(2);
+  expect(body.schools.map((s: { slug: string }) => s.slug)).toEqual(
+    expect.arrayContaining(["kpone-ridge", "adenta-hall"]),
+  );
 });

@@ -2,40 +2,28 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/server/db/client";
-import { schoolProfileSchema, updateSchoolProfile } from "@/server/tenancy/service";
-import { can } from "@/server/authz/permissions";
+import { updateSchoolProfile } from "@/server/tenancy/service";
 import { getClientInfo, requireTenant } from "@/web/auth";
+import { toFormError, type FormState } from "@/web/forms";
 import { schoolPath } from "@/lib/routes";
-
-export interface ProfileFormState {
-  status: "idle" | "saved" | "error";
-  message?: string;
-  fieldErrors?: Partial<Record<"name" | "timezone", string>>;
-}
 
 export async function saveSchoolProfile(
   slug: string,
-  _prev: ProfileFormState,
+  _prev: FormState,
   formData: FormData,
-): Promise<ProfileFormState> {
+): Promise<FormState> {
   const { ctx } = await requireTenant(slug);
-  if (!can(ctx.roles, "school.settings.manage")) {
-    return { status: "error", message: "You do not have permission to change these settings." };
+  try {
+    const { ipAddress } = await getClientInfo();
+    await updateSchoolProfile(
+      db(),
+      ctx,
+      { name: formData.get("name"), timezone: formData.get("timezone") },
+      { ipAddress },
+    );
+  } catch (error) {
+    return toFormError(error, formData);
   }
-  const parsed = schoolProfileSchema.safeParse({
-    name: formData.get("name"),
-    timezone: formData.get("timezone"),
-  });
-  if (!parsed.success) {
-    const fieldErrors: ProfileFormState["fieldErrors"] = {};
-    for (const issue of parsed.error.issues) {
-      const key = issue.path[0];
-      if ((key === "name" || key === "timezone") && !fieldErrors[key]) fieldErrors[key] = issue.message;
-    }
-    return { status: "error", message: "Check the highlighted fields.", fieldErrors };
-  }
-  const { ipAddress } = await getClientInfo();
-  await updateSchoolProfile(db(), ctx, parsed.data, { ipAddress });
   revalidatePath(schoolPath(slug), "layout");
-  return { status: "saved", message: "School profile saved." };
+  return { status: "success", message: "School profile saved." };
 }

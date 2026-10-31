@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { createDatabase, type Database } from "@/server/db/client";
-import { memberships, tenants, users } from "@/server/db/schema";
+import { memberships, platformAdmins, tenants, users } from "@/server/db/schema";
 import { hashPassword } from "@/server/auth/password";
 import type { Role } from "@/server/authz/permissions";
 import { APP_URL, OWNER_URL } from "./db-urls";
@@ -49,3 +49,9 @@ export async function addMember(owner: Database, tenantId: string, userId: strin
     return row!;
   });
 }
+
+export async function makePlatformAdmin(owner: Database, userId: string) {
+  await owner.insert(platformAdmins).values({ userId });
+}
+
+export const uniqueSlug = (prefix = "school") => `${prefix}-${unique()}`;

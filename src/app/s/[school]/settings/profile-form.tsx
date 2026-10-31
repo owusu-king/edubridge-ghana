@@ -4,27 +4,27 @@ import { useActionState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
-import type { ProfileFormState } from "./actions";
+import type { FormState } from "@/web/forms";
 
 interface Props {
-  action: (prev: ProfileFormState, formData: FormData) => Promise<ProfileFormState>;
+  action: (prev: FormState, formData: FormData) => Promise<FormState>;
   defaults: { name: string; timezone: string };
   timezones: readonly string[];
 }
 
 export function ProfileForm({ action, defaults, timezones }: Props) {
-  const [state, formAction, pending] = useActionState(action, { status: "idle" });
+  const [state, formAction, pending] = useActionState<FormState, FormData>(action, { status: "idle" });
   return (
     <form action={formAction} className="space-y-5" noValidate>
       {state.status !== "idle" && state.message && (
-        <Alert tone={state.status === "saved" ? "positive" : "critical"}>{state.message}</Alert>
+        <Alert tone={state.status === "success" ? "positive" : "critical"}>{state.message}</Alert>
       )}
       <Field label="School name" error={state.fieldErrors?.name}>
         {(props) => (
           <Input
             {...props}
             name="name"
-            defaultValue={defaults.name}
+            defaultValue={state.values?.name ?? defaults.name}
             required
             maxLength={120}
             autoComplete="organization"
@@ -37,7 +37,7 @@ export function ProfileForm({ action, defaults, timezones }: Props) {
         error={state.fieldErrors?.timezone}
       >
         {(props) => (
-          <Select {...props} name="timezone" defaultValue={defaults.timezone}>
+          <Select {...props} name="timezone" defaultValue={state.values?.timezone ?? defaults.timezone}>
             {timezones.map((tz) => (
               <option key={tz} value={tz}>
                 {tz.replace("_", " ")}

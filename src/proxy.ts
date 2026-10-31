@@ -4,6 +4,7 @@ import { buildCsp } from "@/web/csp";
 import { SESSION_COOKIE, sessionCookieOptions } from "@/web/session-cookie";
 
 const PUBLIC_PATHS = ["/login"];
+const PUBLIC_PREFIXES = ["/invite/"];
 
 /**
  * No database access here: real session validation happens on the server in src/web/auth.ts.
@@ -15,7 +16,8 @@ export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const token = request.cookies.get(SESSION_COOKIE)?.value;
 
-  if (!token && !PUBLIC_PATHS.includes(pathname)) {
+  const isPublic = PUBLIC_PATHS.includes(pathname) || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
+  if (!token && !isPublic) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.search = pathname === "/" ? "" : `?next=${encodeURIComponent(pathname + search)}`;

@@ -15,6 +15,20 @@
       "when": 1793460809106,
       "tag": "0001_tenant_isolation",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793463106818,
+      "tag": "0002_platform_campuses_invitations",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793463113877,
+      "tag": "0003_platform_campuses_rls",
+      "breakpoints": true
     }
   ]
 }
