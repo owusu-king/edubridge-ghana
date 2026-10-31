@@ -11,6 +11,8 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   typedRoutes: true,
+  // Student imports send a spreadsheet (up to 2 MB) and its parsed rows to server actions.
+  experimental: { serverActions: { bodySizeLimit: "4mb" } },
   serverExternalPackages: ["pg"],
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
