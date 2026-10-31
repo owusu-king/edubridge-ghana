@@ -9,6 +9,7 @@ import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/tab
 import { can } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { listClassOptions, listStudents, PAGE_SIZE } from "@/server/students/service";
+import { formatPhone } from "@/lib/phone";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 import { addStudentAction } from "./actions";
@@ -137,7 +138,7 @@ export default async function StudentsPage({
                   <TH>Name</TH>
                   <TH className="hidden sm:table-cell">Admission no.</TH>
                   <TH>Class</TH>
-                  <TH className="hidden md:table-cell">Sex</TH>
+                  <TH className="hidden md:table-cell">Primary contact</TH>
                 </tr>
               </THead>
               <TBody>
@@ -156,7 +157,20 @@ export default async function StudentsPage({
                     </TD>
                     <TD className="hidden font-mono text-sm sm:table-cell">{s.admissionNumber}</TD>
                     <TD>{s.className ?? <span className="text-ink-3">Not in a class</span>}</TD>
-                    <TD className="hidden capitalize md:table-cell">{s.sex}</TD>
+                    <TD className="hidden md:table-cell">
+                      {s.primaryContact ? (
+                        <>
+                          {s.primaryContact.name}
+                          {s.primaryContact.phone && (
+                            <span className="block text-sm text-ink-3">
+                              {formatPhone(s.primaryContact.phone)}
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-ink-3">None recorded</span>
+                      )}
+                    </TD>
                   </TR>
                 ))}
               </TBody>

@@ -2,10 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/server/db/client";
+import { addGuardianSchema } from "@/server/students/guardians";
 import { assignClass, createStudent, setStudentStatus, updateStudent } from "@/server/students/service";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
-import { toFormError, type FormState } from "@/web/forms";
+import { fieldErrorState, toFormError, type FormState } from "@/web/forms";
 
 const fields = (formData: FormData) => ({
   firstName: formData.get("firstName"),
@@ -16,14 +17,46 @@ const fields = (formData: FormData) => ({
   admissionNumber: formData.get("admissionNumber"),
 });
 
+/** Guardian fields use their own names so their errors show next to the right inputs. */
+function guardianFromForm(formData: FormData): { guardian?: unknown; errors?: Record<string, string> } {
+  const name = String(formData.get("guardianFullName") ?? "").trim();
+  const phone = String(formData.get("guardianPhone") ?? "").trim();
+  if (!name && !phone) return {};
+  const input = {
+    fullName: name,
+    phone,
+    relationship: formData.get("guardianRelationship"),
+    isPrimary: true,
+  };
+  const parsed = addGuardianSchema.safeParse(input);
+  if (parsed.success) return { guardian: input };
+  const keys: Record<string, string> = {
+    fullName: "guardianFullName",
+    phone: "guardianPhone",
+    relationship: "guardianRelationship",
+  };
+  const errors: Record<string, string> = {};
+  for (const issue of parsed.error.issues) {
+    const key = keys[String(issue.path[0])];
+    if (key && !errors[key]) errors[key] = issue.message;
+  }
+  return { errors };
+}
+
 export async function addStudentAction(
   slug: string,
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
   const { ctx } = await requireTenant(slug);
+  const { guardian, errors } = guardianFromForm(formData);
+  if (errors) return fieldErrorState(errors, formData);
   try {
-    const created = await createStudent(db(), ctx, { ...fields(formData), classId: formData.get("classId") });
+    const created = await createStudent(db(), ctx, {
+      ...fields(formData),
+      classId: formData.get("classId"),
+      guardian,
+    });
     revalidatePath(schoolPath(slug, "students"));
     return { status: "success", message: `Student added with admission number ${created.admissionNumber}.` };
   } catch (error) {

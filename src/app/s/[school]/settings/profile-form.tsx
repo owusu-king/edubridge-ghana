@@ -1,9 +1,9 @@
 "use client";
 
-import { useActionState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
+import { useFormAction } from "@/components/ui/use-form-action";
 import type { FormState } from "@/web/forms";
 
 interface Props {
@@ -13,9 +13,9 @@ interface Props {
 }
 
 export function ProfileForm({ action, defaults, timezones }: Props) {
-  const [state, formAction, pending] = useActionState<FormState, FormData>(action, { status: "idle" });
+  const { state, pending, onSubmit } = useFormAction(action);
   return (
-    <form action={formAction} className="space-y-5" noValidate>
+    <form onSubmit={onSubmit} className="space-y-5" noValidate>
       {state.status !== "idle" && state.message && (
         <Alert tone={state.status === "success" ? "positive" : "critical"}>{state.message}</Alert>
       )}

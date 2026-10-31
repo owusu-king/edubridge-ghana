@@ -138,6 +138,98 @@ function ClassSelect({
   );
 }
 
+const RELATIONSHIPS = [
+  ["mother", "Mother"],
+  ["father", "Father"],
+  ["guardian", "Guardian"],
+  ["grandparent", "Grandparent"],
+  ["sibling", "Older sibling"],
+  ["other", "Other"],
+] as const;
+
+/** Guardian name, phone and relationship. `prefix` namespaces the field names (e.g. guardianFullName). */
+export function GuardianFields({
+  state,
+  prefix = "",
+  legend,
+  defaults = {},
+  withRelationship = true,
+  withEmail = false,
+}: {
+  state: FormState;
+  prefix?: string;
+  legend?: string;
+  defaults?: { fullName?: string; phone?: string | null; email?: string | null };
+  withRelationship?: boolean;
+  withEmail?: boolean;
+}) {
+  const name = (field: string) => (prefix ? `${prefix}${field[0]!.toUpperCase()}${field.slice(1)}` : field);
+  const v = state.values ?? {};
+  const e = state.fieldErrors ?? {};
+  const fields = (
+    <>
+      <Field label="Full name" error={e[name("fullName")]}>
+        {(p) => (
+          <Input
+            {...p}
+            name={name("fullName")}
+            defaultValue={v[name("fullName")] ?? defaults.fullName ?? ""}
+            maxLength={120}
+            autoComplete="off"
+          />
+        )}
+      </Field>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Phone number" description="For example 024 123 4567." error={e[name("phone")]}>
+          {(p) => (
+            <Input
+              {...p}
+              name={name("phone")}
+              type="tel"
+              inputMode="tel"
+              defaultValue={v[name("phone")] ?? defaults.phone ?? ""}
+              autoComplete="off"
+            />
+          )}
+        </Field>
+        {withRelationship && (
+          <Field label="Relationship" error={e[name("relationship")]}>
+            {(p) => (
+              <Select {...p} name={name("relationship")} defaultValue={v[name("relationship")] ?? "mother"}>
+                {RELATIONSHIPS.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+        )}
+      </div>
+      {withEmail && (
+        <Field label="Email" description="Optional." error={e[name("email")]}>
+          {(p) => (
+            <Input
+              {...p}
+              name={name("email")}
+              type="email"
+              defaultValue={v[name("email")] ?? defaults.email ?? ""}
+              autoComplete="off"
+            />
+          )}
+        </Field>
+      )}
+    </>
+  );
+  if (!legend) return fields;
+  return (
+    <fieldset className="space-y-4 border-t border-line pt-5">
+      <legend className="pr-2 text-sm font-medium text-ink">{legend}</legend>
+      {fields}
+    </fieldset>
+  );
+}
+
 export function AddStudentDialog({
   action,
   classes,
@@ -164,6 +256,7 @@ export function AddStudentDialog({
         <>
           <StudentFields state={state} autoNumber />
           <ClassSelect classes={classes} state={state} defaultValue={defaultClassId} allowNone />
+          <GuardianFields state={state} prefix="guardian" legend="Primary contact (optional)" />
         </>
       )}
     </FormDialog>

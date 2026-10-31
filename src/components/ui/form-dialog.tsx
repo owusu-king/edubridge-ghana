@@ -1,9 +1,10 @@
 "use client";
 
-import { useActionState, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Alert } from "./alert";
 import { Button, type ButtonSize, type ButtonVariant } from "./button";
 import { Dialog } from "./dialog";
+import { useFormAction } from "./use-form-action";
 import type { FormState } from "@/web/forms";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
@@ -71,18 +72,15 @@ function DialogForm({
   onDone: () => void;
   children?: (state: FormState) => ReactNode;
 }) {
-  const [state, formAction, pending] = useActionState<FormState, FormData>(
-    async (prev, formData) => {
-      const result = await action(prev, formData);
-      if (result.status === "success") onDone();
-      return result;
-    },
-    { status: "idle" },
-  );
+  const { state, pending, onSubmit } = useFormAction<undefined>(async (prev, formData) => {
+    const result = await action(prev, formData);
+    if (result.status === "success") onDone();
+    return result;
+  });
   const showGeneralError =
     state.status === "error" && state.message && !Object.keys(state.fieldErrors ?? {}).length;
   return (
-    <form action={formAction} className="space-y-5" noValidate>
+    <form onSubmit={onSubmit} className="space-y-5" noValidate>
       {showGeneralError && <Alert tone="critical">{state.message}</Alert>}
       {children?.(state)}
       <div className="flex justify-end gap-2 border-t border-line pt-5">
