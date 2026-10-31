@@ -8,7 +8,9 @@ import {
   SESSION_LIFETIME_MS,
   validateSessionToken,
   type SessionUser,
+  type ValidatedSession,
 } from "@/server/auth/sessions";
+import { hasMfa } from "@/server/auth/mfa";
 import { db } from "@/server/db/client";
 import { isPlatformAdmin } from "@/server/platform/service";
 import { resolveTenantContext, type TenantContext } from "@/server/tenancy/service";
@@ -28,13 +30,22 @@ export async function clearSessionCookie(): Promise<void> {
   (await cookies()).delete(SESSION_COOKIE);
 }
 
-/** Current user for this request, or null. Memoised per request. */
-export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
+/** Current session for this request, or null. Memoised per request. */
+export const getCurrentSession = cache(async (): Promise<ValidatedSession | null> => {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return null;
-  const session = await validateSessionToken(db(), token);
-  return session?.user ?? null;
+  return validateSessionToken(db(), token);
 });
+
+export async function getCurrentUser(): Promise<SessionUser | null> {
+  return (await getCurrentSession())?.user ?? null;
+}
+
+export async function requireSession(): Promise<ValidatedSession> {
+  const session = await getCurrentSession();
+  if (!session) redirect("/login");
+  return session;
+}
 
 export async function requireUser(): Promise<SessionUser> {
   const user = await getCurrentUser();
@@ -76,5 +87,7 @@ export async function getClientInfo(): Promise<{ ipAddress: string | null; userA
 export const requirePlatformAdmin = cache(async (): Promise<SessionUser> => {
   const user = await requireUser();
   if (!(await isPlatformAdmin(db(), user.id))) notFound();
+  // Platform administrators can reach every school: two-step verification is mandatory (D-03).
+  if (!(await hasMfa(db(), user.id))) redirect("/account/security?required=platform");
   return user;
 });

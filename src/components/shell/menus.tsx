@@ -103,6 +103,9 @@ export function UserMenu({
           </div>
           <DropdownMenu.Separator className="my-1 h-px bg-line" />
           <DropdownMenu.Item asChild className={menuItem}>
+            <Link href="/account">Your account</Link>
+          </DropdownMenu.Item>
+          <DropdownMenu.Item asChild className={menuItem}>
             <Link href="/schools">All schools</Link>
           </DropdownMenu.Item>
           {isPlatformAdmin && (

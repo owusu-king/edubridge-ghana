@@ -2,21 +2,26 @@
  * Seeds synthetic development data. Every person, school and email here is fictional.
  * Usage: npm run db:seed   (uses MIGRATION_DATABASE_URL; refuses to run in production)
  */
-import { sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { hashPassword } from "../src/server/auth/password";
+import { seal } from "../src/server/auth/secret-box";
 import type { Role } from "../src/server/authz/permissions";
 import {
   campuses,
+  loginAttempts,
   memberships,
   platformAdmins,
   tenantEntitlements,
   tenants,
+  userMfa,
   users,
 } from "../src/server/db/schema";
 
 export const DEV_PASSWORD = "edubridge-dev-only";
+/** Authenticator secret for platform@example.test in development only. */
+export const DEV_PLATFORM_TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
 
 const SCHOOLS = [
   {
@@ -62,6 +67,15 @@ async function main() {
       .onConflictDoUpdate({ target: users.email, set: { name: PLATFORM_ADMIN.name, passwordHash } })
       .returning({ id: users.id });
     await db.insert(platformAdmins).values({ userId: platformAdmin!.id }).onConflictDoNothing();
+    // Platform administrators must use two-step verification. Dev-only, published secret (see README).
+    const sealed = seal(DEV_PLATFORM_TOTP_SECRET);
+    await db
+      .insert(userMfa)
+      .values({ userId: platformAdmin!.id, secretSealed: sealed, enabledAt: new Date() })
+      .onConflictDoUpdate({
+        target: userMfa.userId,
+        set: { secretSealed: sealed, enabledAt: new Date(), lastUsedStep: null },
+      });
 
     const tenantIds = new Map<string, string>();
     for (const school of SCHOOLS) {
@@ -110,6 +124,10 @@ async function main() {
         });
       }
     }
+    // Clear sign-in throttling for the synthetic accounts so local runs start clean.
+    await db
+      .delete(loginAttempts)
+      .where(inArray(loginAttempts.email, [PLATFORM_ADMIN.email, ...PEOPLE.map((p) => p.email)]));
     console.log(
       `Seeded ${SCHOOLS.length} schools, ${PEOPLE.length} school users and ${PLATFORM_ADMIN.email}. Password for all: ${DEV_PASSWORD}`,
     );

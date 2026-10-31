@@ -63,7 +63,7 @@ describe("sign-in", () => {
     const user = await createUser(conn.owner);
     const result = await signIn(conn.app, { email: user.email, password: TEST_PASSWORD });
     expect(result.ok).toBe(true);
-    if (result.ok) expect(await validateSessionToken(conn.app, result.token)).not.toBeNull();
+    if (result.ok === true) expect(await validateSessionToken(conn.app, result.token)).not.toBeNull();
     const [row] = await conn.owner.select().from(users).where(eq(users.id, user.id));
     expect(row?.lastLoginAt).not.toBeNull();
   });

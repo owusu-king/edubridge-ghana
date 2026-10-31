@@ -32,6 +32,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Generate a throwaway encryption key for this run
+        run: echo "MFA_ENCRYPTION_KEY=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
       - name: Create database roles
         run: psql -h localhost -U postgres -f scripts/db-bootstrap-local.sql
       - run: npm run format:check

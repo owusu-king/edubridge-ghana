@@ -29,6 +29,12 @@ sudo -u postgres psql -f scripts/db-bootstrap-local.sql
 cp .env.example .env.local
 ```
 
+Generate a local `MFA_ENCRYPTION_KEY` (encrypts two-step verification secrets) and paste it into `.env.local`:
+
+```bash
+openssl rand -base64 32
+```
+
 Apply migrations and load synthetic data (the scripts read `MIGRATION_DATABASE_URL` from the environment):
 
 ```bash
@@ -41,7 +47,8 @@ npm run dev
 
 Sign in at http://localhost:3000 (staff pages live under `/s/{school}`) with any seeded account, password `edubridge-dev-only`:
 `owner@example.test` (two schools), `admin@`, `bursar@`, `teacher@`, `parent@`, `student@example.test`.
-All seeded data is fictional.
+`platform@example.test` is a platform admin (no schools) and requires two-step verification: add the
+dev-only secret `JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP` to an authenticator app. All seeded data is fictional.
 
 ## Checks
 

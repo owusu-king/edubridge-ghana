@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { Database } from "../db/client";
 import { loginAttempts, users } from "../db/schema";
 import { getDummyHash, PASSWORD_MAX_LENGTH, verifyPassword } from "./password";
+import { createChallenge, hasMfa } from "./mfa";
 import { createSession, type ClientInfo } from "./sessions";
 
 export const signInSchema = z.object({
@@ -18,6 +19,8 @@ export const MAX_FAILURES_PER_IP = 50;
 
 export type SignInResult =
   | { ok: true; token: string; expiresAt: Date; userId: string }
+  /** Password accepted; the second step must be completed with this challenge. */
+  | { ok: "mfa"; challengeToken: string; expiresAt: Date }
   | { ok: false; reason: "invalid_credentials" | "throttled" };
 
 async function isThrottled(
@@ -67,6 +70,11 @@ export async function signIn(
     return { ok: false, reason: "invalid_credentials" };
   }
 
+  if (await hasMfa(database, user.id)) {
+    // Failures are only cleared after the second step succeeds.
+    const challenge = await createChallenge(database, user.id, now);
+    return { ok: "mfa", challengeToken: challenge.token, expiresAt: challenge.expiresAt };
+  }
   await database.delete(loginAttempts).where(eq(loginAttempts.email, input.email));
   await database.update(users).set({ lastLoginAt: now }).where(eq(users.id, user.id));
   const session = await createSession(database, user.id, client, now);

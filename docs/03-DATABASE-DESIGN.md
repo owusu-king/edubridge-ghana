@@ -22,6 +22,7 @@ PostgreSQL 16. Schema in `src/server/db/schema.ts`; migrations are reviewed SQL 
 | `users`          | global | Identities. One user can belong to several schools. `citext` email.                                                                                                 |
 | `sessions`       | global | `id` = SHA-256 of the session token.                                                                                                                                |
 | `login_attempts` | global | Failed sign-ins for throttling. Safe to purge rows older than 15 minutes.                                                                                           |
+| `user_mfa`, `mfa_recovery_codes`, `mfa_challenges` | global | TOTP seed sealed with AES-256-GCM (`MFA_ENCRYPTION_KEY`); last accepted step stored to block replays; recovery codes and challenge tokens stored as SHA-256. |
 | `memberships`    | tenant | User ↔ school with `roles text[]` (validated by a check constraint). Never deleted by the app; suspend. A user can also see their own memberships in other schools. |
 | `audit_events`   | tenant | Append-only: the app role has INSERT and SELECT only.                                                                                                               |
 

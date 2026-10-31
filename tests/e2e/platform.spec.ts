@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
-import { signIn } from "./helpers";
+import { PLATFORM_AUTH, signIn } from "./helpers";
 
 const suffix = () => randomUUID().slice(0, 8);
 
@@ -20,12 +20,13 @@ async function createSchool(
   return new URL(link).pathname;
 }
 
-test("a platform admin onboards a school and its owner sets it up", async ({ page, browser }) => {
+test("a platform admin onboards a school and its owner sets it up", async ({ browser }) => {
+  const page = await (await browser.newContext({ storageState: PLATFORM_AUTH })).newPage();
   const id = suffix();
   const slug = `e2e-${id}`;
   const ownerEmail = `owner-${id}@example.test`;
 
-  await signIn(page, "platform@example.test");
+  await page.goto("/");
   await expect(page).toHaveURL("/admin");
   const invitePath = await createSchool(page, {
     name: `E2E Academy ${id}`,
@@ -88,8 +89,8 @@ test("a platform admin onboards a school and its owner sets it up", async ({ pag
   await ownerContext.close();
 });
 
-test("rejects a duplicate school address", async ({ page }) => {
-  await signIn(page, "platform@example.test");
+test("rejects a duplicate school address", async ({ browser }) => {
+  const page = await (await browser.newContext({ storageState: PLATFORM_AUTH })).newPage();
   await page.goto("/admin/schools/new");
   await page.getByLabel("School name").fill("Duplicate Address School");
   await page.getByLabel("Address").fill("kpone-ridge");
@@ -107,8 +108,8 @@ test("platform administration is invisible to everyone else", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
 });
 
-test("an existing user signs in to accept an invitation", async ({ page, browser }) => {
-  await signIn(page, "platform@example.test");
+test("an existing user signs in to accept an invitation", async ({ browser }) => {
+  const page = await (await browser.newContext({ storageState: PLATFORM_AUTH })).newPage();
   const invitePath = await createSchool(page, {
     name: `Second School ${suffix()}`,
     slug: `e2e-${suffix()}`,
