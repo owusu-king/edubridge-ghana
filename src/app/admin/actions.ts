@@ -11,13 +11,11 @@ import {
 import { requirePlatformAdmin } from "@/web/auth";
 import { toFormError, type FormState } from "@/web/forms";
 import { appOrigin } from "@/web/origin";
+import type { InviteLink } from "@/components/ui/invite-link";
 
-export interface InviteResult {
+export interface InviteResult extends InviteLink {
   schoolId?: string;
   slug?: string;
-  inviteUrl: string;
-  email: string;
-  expiresAt: string;
 }
 
 function fields(formData: FormData, names: string[]): Record<string, FormDataEntryValue | null> {

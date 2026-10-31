@@ -10,7 +10,7 @@ test("redirects signed-out visitors to sign in, then back to where they were goi
   await signIn(page, "owner@example.test", `${SCHOOL.path}/members`);
   await expect(page).toHaveURL(`${SCHOOL.path}/members`);
   await expect(page.getByRole("heading", { level: 1, name: "Members" })).toBeVisible();
-  await expect(page.getByRole("cell", { name: /Yaw Boateng/ })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Yaw Boateng/ })).toBeVisible();
 });
 
 test("shows one generic error for bad credentials", async ({ page }) => {

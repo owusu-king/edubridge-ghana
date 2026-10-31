@@ -8,7 +8,7 @@ import { generateToken, hashToken } from "../auth/tokens";
 import { isRole, type Role } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { setTenantContext } from "../db/context";
-import { invitations, memberships, tenants, users } from "../db/schema";
+import { invitations, membershipCampuses, memberships, tenants, users } from "../db/schema";
 import { DomainError, PG_UNIQUE_VIOLATION, pgErrorCode } from "../errors";
 
 export const INVITATION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
@@ -26,7 +26,13 @@ export interface IssuedInvitation {
  */
 export async function issueInvitation(
   tx: Transaction,
-  input: { tenantId: string; email: string; roles: Role[]; invitedByUserId: string },
+  input: {
+    tenantId: string;
+    email: string;
+    roles: Role[];
+    invitedByUserId: string;
+    campusIds?: string[] | null;
+  },
   now = new Date(),
 ): Promise<IssuedInvitation> {
   await tx
@@ -48,6 +54,7 @@ export async function issueInvitation(
       tenantId: input.tenantId,
       email: input.email,
       roles: input.roles,
+      campusIds: input.campusIds && input.campusIds.length > 0 ? input.campusIds : null,
       tokenHash: hashToken(token),
       expiresAt,
       invitedByUserId: input.invitedByUserId,
@@ -59,7 +66,7 @@ export async function issueInvitation(
     action: "invitation.issued",
     entityType: "invitation",
     entityId: row!.id,
-    metadata: { email: input.email, roles: input.roles },
+    metadata: { email: input.email, roles: input.roles, campusIds: input.campusIds ?? null },
   });
   return { id: row!.id, token, expiresAt };
 }
@@ -71,6 +78,7 @@ export interface InvitationDetails {
   schoolName: string;
   email: string;
   roles: Role[];
+  campusIds: string[] | null;
   /** Whether an account with this email already exists (it must sign in to accept). */
   accountExists: boolean;
 }
@@ -102,6 +110,7 @@ export async function findInvitation(
         schoolName: tenants.name,
         email: invitations.email,
         roles: invitations.roles,
+        campusIds: invitations.campusIds,
         expiresAt: invitations.expiresAt,
         acceptedAt: invitations.acceptedAt,
         revokedAt: invitations.revokedAt,
@@ -126,6 +135,7 @@ export async function findInvitation(
       schoolName: row.schoolName,
       email: row.email,
       roles: row.roles.filter(isRole),
+      campusIds: row.campusIds,
       accountExists: Boolean(existing),
     };
   });
@@ -204,8 +214,13 @@ export async function acceptInvitation(
       if (!claimed)
         throw new DomainError("invitation_invalid", "This invitation link is invalid or has expired.");
 
-      // Re-inviting a former member reactivates them and adds the invited roles.
-      await tx
+      const [existing] = await tx
+        .select({ id: memberships.id })
+        .from(memberships)
+        .where(and(eq(memberships.tenantId, invitation.tenantId), eq(memberships.userId, userId)));
+
+      // Re-inviting a former member reactivates them and adds the invited roles; their campus scope is kept.
+      const [membership] = await tx
         .insert(memberships)
         .values({ tenantId: invitation.tenantId, userId, roles: invitation.roles })
         .onConflictDoUpdate({
@@ -215,7 +230,18 @@ export async function acceptInvitation(
             status: "active",
             updatedAt: now,
           },
-        });
+        })
+        .returning({ id: memberships.id });
+      if (!existing && invitation.campusIds && invitation.campusIds.length > 0) {
+        // Composite foreign keys guarantee every campus belongs to this school.
+        await tx.insert(membershipCampuses).values(
+          invitation.campusIds.map((campusId) => ({
+            tenantId: invitation.tenantId,
+            membershipId: membership!.id,
+            campusId,
+          })),
+        );
+      }
       await recordAudit(tx, {
         tenantId: invitation.tenantId,
         actorUserId: userId,

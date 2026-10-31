@@ -29,6 +29,13 @@
       "when": 1793463113877,
       "tag": "0003_platform_campuses_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793463979424,
+      "tag": "0004_invitation_campus_scope",
+      "breakpoints": true
     }
   ]
 }

@@ -9,7 +9,7 @@ import { Field, Input, Select } from "@/components/ui/field";
 import { Section } from "@/components/ui/layout";
 import type { FormState } from "@/web/forms";
 import { createSchoolAction, type InviteResult } from "../../actions";
-import { InviteResultPanel } from "../../invite-result";
+import { InviteLinkPanel } from "@/components/ui/invite-link";
 
 interface Options {
   countries: { code: string; name: string }[];
@@ -40,7 +40,7 @@ export function CreateSchoolForm({ countries, currencies, timezones }: Options) 
     return (
       <div className="max-w-2xl space-y-6">
         <Alert tone="positive">School created with a Main campus and its plan.</Alert>
-        <InviteResultPanel result={state.data} />
+        <InviteLinkPanel result={state.data} />
         <div className="flex gap-2">
           <Link href={`/admin/schools/${state.data.schoolId}` as Route} className={buttonStyles("primary")}>
             View school

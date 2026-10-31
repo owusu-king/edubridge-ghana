@@ -207,6 +207,8 @@ export const invitations = pgTable(
       .references(() => tenants.id, { onDelete: "restrict" }),
     email: citext("email").notNull(),
     roles: text("roles").array().notNull(),
+    /** Campuses the new membership will be limited to; null means every campus. */
+    campusIds: uuid("campus_ids").array(),
     tokenHash: text("token_hash").notNull().unique(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     invitedByUserId: uuid("invited_by_user_id").references(() => users.id, { onDelete: "restrict" }),

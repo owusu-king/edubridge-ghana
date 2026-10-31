@@ -2,10 +2,16 @@
 
 import { Alert } from "@/components/ui/alert";
 import { CopyField } from "@/components/ui/copy-field";
-import type { InviteResult } from "./actions";
+
+export interface InviteLink {
+  inviteUrl: string;
+  email: string;
+  /** ISO timestamp. */
+  expiresAt: string;
+}
 
 /** Shows a freshly issued invitation link. It is displayed once and cannot be retrieved again. */
-export function InviteResultPanel({ result }: { result: InviteResult }) {
+export function InviteLinkPanel({ result }: { result: InviteLink }) {
   const expires = new Intl.DateTimeFormat("en-GH", {
     day: "numeric",
     month: "short",

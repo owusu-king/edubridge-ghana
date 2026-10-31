@@ -106,6 +106,8 @@ export interface Member {
   name: string;
   email: string;
   roles: Role[];
+  /** Campuses the membership is limited to; null means every campus. */
+  campusIds: string[] | null;
   status: "active" | "suspended";
   joinedAt: Date;
   lastLoginAt: Date | null;
@@ -113,25 +115,41 @@ export interface Member {
 
 export async function listMembers(database: Database, ctx: TenantContext): Promise<Member[]> {
   assertCan(ctx.roles, "members.view");
-  const rows = await withTenant(database, { tenantId: ctx.tenant.id, userId: ctx.userId }, (tx) =>
-    tx
-      .select({
-        membershipId: memberships.id,
-        userId: users.id,
-        name: users.name,
-        email: users.email,
-        roles: memberships.roles,
-        status: memberships.status,
-        joinedAt: memberships.createdAt,
-        lastLoginAt: users.lastLoginAt,
-      })
-      .from(memberships)
-      .innerJoin(users, eq(users.id, memberships.userId))
-      // Explicit tenant filter: RLS also lets a user see their own memberships in other schools.
-      .where(eq(memberships.tenantId, ctx.tenant.id))
-      .orderBy(asc(users.name)),
+  const { rows, scopes } = await withTenant(
+    database,
+    { tenantId: ctx.tenant.id, userId: ctx.userId },
+    async (tx) => {
+      const rows = await tx
+        .select({
+          membershipId: memberships.id,
+          userId: users.id,
+          name: users.name,
+          email: users.email,
+          roles: memberships.roles,
+          status: memberships.status,
+          joinedAt: memberships.createdAt,
+          lastLoginAt: users.lastLoginAt,
+        })
+        .from(memberships)
+        .innerJoin(users, eq(users.id, memberships.userId))
+        // Explicit tenant filter: RLS also lets a user see their own memberships in other schools.
+        .where(eq(memberships.tenantId, ctx.tenant.id))
+        .orderBy(asc(users.name));
+      const scopes = await tx
+        .select({ membershipId: membershipCampuses.membershipId, campusId: membershipCampuses.campusId })
+        .from(membershipCampuses)
+        .where(eq(membershipCampuses.tenantId, ctx.tenant.id));
+      return { rows, scopes };
+    },
   );
-  return rows.map((r) => ({ ...r, roles: toRoles(r.roles) }));
+  const byMembership = new Map<string, string[]>();
+  for (const s of scopes)
+    byMembership.set(s.membershipId, [...(byMembership.get(s.membershipId) ?? []), s.campusId]);
+  return rows.map((r) => ({
+    ...r,
+    roles: toRoles(r.roles),
+    campusIds: byMembership.get(r.membershipId) ?? null,
+  }));
 }
 
 export type RoleCounts = Record<Role, number>;

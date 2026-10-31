@@ -28,8 +28,9 @@ export function toFormError(error: unknown, formData?: FormData): FormState<neve
 function echoValues(formData: FormData): Record<string, string> {
   const values: Record<string, string> = {};
   for (const [key, value] of formData.entries()) {
-    if (typeof value === "string" && !key.startsWith("$") && !/password|token/i.test(key))
-      values[key] = value;
+    if (typeof value !== "string" || key.startsWith("$") || /password|token/i.test(key)) continue;
+    // Repeated fields (checkbox groups) are joined with commas.
+    values[key] = key in values ? `${values[key]},${value}` : value;
   }
   return values;
 }
