@@ -2,8 +2,7 @@ import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/ui/layout";
 import { SubNav } from "@/components/ui/sub-nav";
-import { can } from "@/server/authz/permissions";
-import { schoolPath } from "@/lib/routes";
+import { settingsTabs } from "@/components/shell/navigation";
 import { requireTenant } from "@/web/auth";
 
 export default async function SettingsLayout({
@@ -15,22 +14,8 @@ export default async function SettingsLayout({
 }) {
   const { school } = await params;
   const { ctx } = await requireTenant(school);
-  if (!can(ctx.roles, "school.settings.manage")) notFound();
-  const items = [
-    { label: "Profile", href: schoolPath(ctx.tenant.slug, "settings") },
-    ...(can(ctx.roles, "campuses.manage")
-      ? [{ label: "Campuses", href: schoolPath(ctx.tenant.slug, "settings/campuses") }]
-      : []),
-    ...(can(ctx.roles, "plan.view")
-      ? [{ label: "Plan", href: schoolPath(ctx.tenant.slug, "settings/plan") }]
-      : []),
-    ...(can(ctx.roles, "security.manage")
-      ? [{ label: "Security", href: schoolPath(ctx.tenant.slug, "settings/security") }]
-      : []),
-    ...(can(ctx.roles, "audit.view")
-      ? [{ label: "Audit log", href: schoolPath(ctx.tenant.slug, "settings/audit") }]
-      : []),
-  ];
+  const items = settingsTabs(ctx.tenant.slug, ctx.roles);
+  if (items.length === 0) notFound();
   return (
     <div className="space-y-8">
       <div className="space-y-6">

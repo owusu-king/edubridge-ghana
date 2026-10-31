@@ -10,8 +10,9 @@ export function SidebarNav({ area, onNavigate }: { area: ShellArea; onNavigate?:
   return (
     <nav aria-label={area.kind === "platform" ? "Platform" : "School"}>
       <ul className="space-y-0.5">
-        {navLinks(area).map(({ label, href, icon: Icon, exact }) => {
-          const active = exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
+        {navLinks(area).map(({ label, href, icon: Icon, exact, activePrefix }) => {
+          const base = activePrefix ?? href;
+          const active = exact ? pathname === href : pathname === base || pathname.startsWith(`${base}/`);
           return (
             <li key={label}>
               <Link
