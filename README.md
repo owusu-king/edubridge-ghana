@@ -1,25 +1,60 @@
 # EduBridge Ghana
 
-A premium, multi-tenant School Management
-and Education Operations Platform.
+A premium, multi-tenant school management and operations platform for international and private
+schools in Ghana, with future expansion across Africa. Responsive web app and installable PWA today;
+Android and iOS apps later, sharing the same `/api/v1`.
 
-## Vision
+- [Project bible](docs/00-PROJECT-BIBLE.md), [requirements](docs/01-PRODUCT-REQUIREMENTS.md),
+  [architecture](docs/02-SOFTWARE-ARCHITECTURE.md), [risks](docs/13-RISKS-AND-ASSUMPTIONS.md)
+- [Database](docs/03-DATABASE-DESIGN.md) — implemented tables, tenant isolation, migration workflow
+- [Roadmap](docs/11-DEVELOPMENT-ROADMAP.md) — milestones and how the code differs from `02`
 
-To build one of Africa's most trusted
-and useful school operating platforms.
+## Requirements
 
-## Initial Market
+Node.js 22+, PostgreSQL 16.
 
-Ghana, with future international expansion.
+## Local setup
 
-## Architecture
+```bash
+npm install
+```
 
-- Responsive Web Application
-- Progressive Web Application (PWA)
-- Multi-tenant SaaS
-- Shared backend and APIs
-- Future Android and iOS applications
+Create the local database roles and database (once):
 
-## Development Status
+```bash
+sudo -u postgres psql -f scripts/db-bootstrap-local.sql
+```
 
-Phase 0 - Product discovery and architecture.
+```bash
+cp .env.example .env.local
+```
+
+Apply migrations and load synthetic data (the scripts read `MIGRATION_DATABASE_URL` from the environment):
+
+```bash
+set -a && . ./.env.local && set +a && npm run db:migrate && npm run db:seed
+```
+
+```bash
+npm run dev
+```
+
+Sign in at http://localhost:3000 (staff pages live under `/s/{school}`) with any seeded account, password `edubridge-dev-only`:
+`owner@example.test` (two schools), `admin@`, `bursar@`, `teacher@`, `parent@`, `student@example.test`.
+All seeded data is fictional.
+
+## Checks
+
+| Command             | What it does                                                               |
+| ------------------- | -------------------------------------------------------------------------- |
+| `npm test`          | Unit tests + integration tests on a disposable `edubridge_test` database   |
+| `npm run test:e2e`  | Playwright against a production build (run `npm run build` and seed first) |
+| `npm run typecheck` | TypeScript, strict                                                         |
+| `npm run lint`      | ESLint (includes the rule keeping `src/server` framework-agnostic)         |
+| `npm run format`    | Prettier                                                                   |
+
+CI runs all of these on every pull request.
+
+## Development status
+
+R0 Foundation, milestone 1. See the [roadmap](docs/11-DEVELOPMENT-ROADMAP.md).
