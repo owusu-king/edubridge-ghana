@@ -103,7 +103,7 @@ async function visibleClassIds(tx: Transaction, ctx: TenantContext): Promise<str
 }
 
 /** Next admission number (0001, 0002, …), skipping any number already used, e.g. by imported records. */
-async function nextAdmissionNumber(tx: Transaction, tenantId: string): Promise<string> {
+export async function nextAdmissionNumber(tx: Transaction, tenantId: string): Promise<string> {
   for (;;) {
     const [row] = await tx
       .insert(tenantCounters)

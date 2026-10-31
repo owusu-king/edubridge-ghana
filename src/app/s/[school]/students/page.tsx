@@ -61,11 +61,16 @@ export default async function StudentsPage({
         }
         actions={
           canManage && (
-            <AddStudentDialog
-              action={addStudentAction.bind(null, slug)}
-              classes={classes}
-              defaultClassId={search.class}
-            />
+            <>
+              <Link href={schoolPath(slug, "students/import")} className={buttonStyles("secondary")}>
+                Import
+              </Link>
+              <AddStudentDialog
+                action={addStudentAction.bind(null, slug)}
+                classes={classes}
+                defaultClassId={search.class}
+              />
+            </>
           )
         }
       />

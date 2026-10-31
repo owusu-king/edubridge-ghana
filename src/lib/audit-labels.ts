@@ -17,6 +17,7 @@ const LABELS: Record<string, string> = {
   "class.archived": "Class archived",
   "class.restored": "Class restored",
   "student.created": "Student added",
+  "students.imported": "Students imported",
   "student.updated": "Student details changed",
   "student.enrolled": "Student placed in a class",
   "student.class_changed": "Student moved to another class",

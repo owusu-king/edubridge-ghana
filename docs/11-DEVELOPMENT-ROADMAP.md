@@ -38,6 +38,23 @@ Differences from `02` (D-09 is decided; the rest are still open):
 | Composite FKs       | `(tenant_id, x_id)` between tenant tables                                                    | Not needed yet: current tenant tables only reference global tables                                                                                     | Applies from the first tenant-to-tenant reference                                                                                                   |
 | Testcontainers      | Ephemeral Postgres per test run                                                              | Disposable `edubridge_test` database on a local or CI Postgres service                                                                                 | Same isolation guarantee; no Docker needed                                                                                                          |
 
+## R1 — Competitive wedge (approved plan, 2026-10-31)
+
+| Phase | Scope | Status |
+| --- | --- | --- |
+| A | Roles (Proprietor, Head teacher, Accountant), calendar, levels and classes, students, guardians | Done (#7–#11) |
+| B | Import students, classes this term and guardians from Excel/CSV | Built; in review |
+| C | Fee structures, ledger, part payments, cash/bank entry, arrears, receipts | Next |
+| D | Mobile Money behind a provider-agnostic interface (mock first) | |
+| E | Who-owes-what, reminders, receipt/statement PDFs, WhatsApp share links | |
+| F | Parent view: SMS-code sign-in, balances | |
+| G | Assessment and bulk report cards | |
+| H | Attendance and offline sync | |
+| I | Setup wizard, demo data, outcome dashboard | |
+| J | Data export, billing records, feature flags | |
+
+Import limitations: names must be in separate first-name and surname columns; fee balances and past scores are imported in phases C and G.
+
 ## Later releases
 
 R1 pilot (students, guardians, fees, ledger, receipts, parent portal, one payment provider, finance SMS/email),
