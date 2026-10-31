@@ -2,13 +2,16 @@ import { Section } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import type { StudentAccount } from "@/server/fees/ledger";
 import { formatCalendarDate } from "@/lib/format";
-import { formatCedis } from "@/lib/money";
+import { formatCedis, pesewasToInput } from "@/lib/money";
 import { cn } from "@/lib/cn";
 import Link from "next/link";
 import { schoolPath } from "@/lib/routes";
 import { formatPercent, type Concession } from "@/server/fees/concessions";
+import type { PaymentPlan } from "@/server/fees/payment-plans";
+import { PaymentPlanView } from "./payment-plan";
 import {
   addConcessionAction,
+  createPaymentPlanAction,
   endConcessionAction,
   recordAdjustmentAction,
   recordPaymentAction,
@@ -22,6 +25,7 @@ import {
   ReverseEntryDialog,
   AddConcessionDialog,
   EndConcessionButton,
+  PaymentPlanDialog,
 } from "./account-controls";
 
 function balanceText(pesewas: number): string {
@@ -41,6 +45,7 @@ export function FeeAccount({
   openingAsOf,
   concessions,
   feeItems,
+  plan,
 }: {
   slug: string;
   account: StudentAccount;
@@ -53,6 +58,7 @@ export function FeeAccount({
   concessions: Concession[];
   /** Active fee items, for adding discounts. */
   feeItems: { value: string; label: string }[];
+  plan: PaymentPlan | null;
 }) {
   const activeConcessions = concessions.filter((c) => c.status === "active");
   return (
@@ -83,6 +89,13 @@ export function FeeAccount({
               items={feeItems}
             />
           )}
+          {!plan && account.balancePesewas > 0 && (
+            <PaymentPlanDialog
+              action={createPaymentPlanAction.bind(null, slug, account.student.id)}
+              defaultTotal={pesewasToInput(account.balancePesewas)}
+              firstDue={today}
+            />
+          )}
           {openingAsOf && (
             <OpeningBalanceDialog
               action={setOpeningBalanceAction.bind(null, slug, account.student.id)}
@@ -90,6 +103,9 @@ export function FeeAccount({
             />
           )}
         </div>
+      )}
+      {plan && (
+        <PaymentPlanView slug={slug} studentId={account.student.id} plan={plan} canManage={canManage} />
       )}
       {activeConcessions.length > 0 && (
         <div className="space-y-1.5">

@@ -8,9 +8,12 @@ test("the head teacher sees balances but cannot record payments", async ({ page 
   await page.goto(`${SCHOOL.path}/fees/accounts`);
   await expect(page.getByText("Owed to the school")).toBeVisible();
   const balances = page.getByRole("table", { name: "Student balances" });
-  // Seeded: Kwame paid the full term by Mobile Money.
+  // Seeded: Kwame paid the full term by Mobile Money. Search, as other tests add students to the list.
+  const search = page.getByLabel("Search by name or admission number");
+  await search.fill("Kwame Mensah");
+  await page.getByRole("button", { name: "Search" }).click();
   await expect(balances.getByRole("row", { name: /Kwame Mensah.*Paid up/ })).toBeVisible();
-  await page.getByLabel("Search by name or admission number").fill("Fiifi");
+  await search.fill("Fiifi");
   await page.getByRole("button", { name: "Search" }).click();
   await expect(balances.getByRole("row")).toHaveCount(2);
 

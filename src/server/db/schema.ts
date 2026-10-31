@@ -875,3 +875,60 @@ export const feeConcessions = pgTable(
     check("fee_concessions_ended", sql`(${t.status} = 'ended') = (${t.endedAt} is not null)`),
   ],
 );
+
+/**
+ * An instalment schedule agreed with a family for what they owe. It does not change the ledger: progress
+ * is measured against payments recorded since the plan started. Plans can be cancelled, not edited.
+ */
+export const paymentPlans = pgTable(
+  "payment_plans",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    studentId: uuid("student_id").notNull(),
+    totalPesewas: bigint("total_pesewas", { mode: "number" }).notNull(),
+    /** The day the plan was agreed. Payments recorded after it count towards the plan. */
+    startsOn: date("starts_on", { mode: "string" }).notNull(),
+    status: text("status", { enum: ["active", "cancelled"] })
+      .notNull()
+      .default("active"),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelledByUserId: uuid("cancelled_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    ...timestamps,
+  },
+  (t) => [
+    foreignKey({
+      name: "payment_plans_student_fk",
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }),
+    unique("payment_plans_tenant_id_unique").on(t.tenantId, t.id),
+    index("payment_plans_student_idx").on(t.tenantId, t.studentId),
+    check("payment_plans_total_range", sql`${t.totalPesewas} between 1 and 1000000000`),
+    check("payment_plans_cancelled", sql`(${t.status} = 'cancelled') = (${t.cancelledAt} is not null)`),
+  ],
+);
+
+export const paymentPlanInstalments = pgTable(
+  "payment_plan_instalments",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    planId: uuid("plan_id").notNull(),
+    sequence: integer("sequence").notNull(),
+    dueOn: date("due_on", { mode: "string" }).notNull(),
+    amountPesewas: bigint("amount_pesewas", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.planId, t.sequence] }),
+    foreignKey({
+      name: "payment_plan_instalments_plan_fk",
+      columns: [t.tenantId, t.planId],
+      foreignColumns: [paymentPlans.tenantId, paymentPlans.id],
+    }),
+    check("payment_plan_instalments_sequence_range", sql`${t.sequence} between 1 and 12`),
+    check("payment_plan_instalments_amount_range", sql`${t.amountPesewas} between 1 and 1000000000`),
+  ],
+);
