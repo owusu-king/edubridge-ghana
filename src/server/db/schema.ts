@@ -17,6 +17,7 @@ import {
   unique,
   uuid,
 } from "drizzle-orm/pg-core";
+import { MOBILE_MONEY_NETWORKS } from "../../lib/mobile-money";
 
 /** Case-insensitive text (requires the `citext` extension, enabled in the first migration). */
 const citext = customType<{ data: string }>({ dataType: () => "citext" });
@@ -930,5 +931,84 @@ export const paymentPlanInstalments = pgTable(
     }),
     check("payment_plan_instalments_sequence_range", sql`${t.sequence} between 1 and 12`),
     check("payment_plan_instalments_amount_range", sql`${t.amountPesewas} between 1 and 1000000000`),
+  ],
+);
+
+export const MOBILE_MONEY_REQUEST_STATUSES = [
+  "pending",
+  "successful",
+  "failed",
+  "expired",
+  "needs_review",
+] as const;
+
+/**
+ * A prompt sent to a payer's phone to approve a Mobile Money payment. The payment itself is recorded in
+ * `payments` (with its receipt and ledger entry) only once the provider confirms it for the requested
+ * amount. Details never change after creation; only the outcome is filled in, once (a trigger enforces
+ * this). "expired" means nobody answered in time locally; a late confirmation is still recorded.
+ */
+export const mobileMoneyRequests = pgTable(
+  "mobile_money_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    studentId: uuid("student_id").notNull(),
+    provider: text("provider").notNull(),
+    network: text("network", { enum: MOBILE_MONEY_NETWORKS }).notNull(),
+    msisdn: text("msisdn").notNull(),
+    amountPesewas: bigint("amount_pesewas", { mode: "number" }).notNull(),
+    currency: text("currency").notNull().default("GHS"),
+    status: text("status", { enum: MOBILE_MONEY_REQUEST_STATUSES }).notNull().default("pending"),
+    /** The provider's id for the request, once it has accepted it. */
+    providerReference: text("provider_reference"),
+    /** The network's transaction id for a confirmed payment. */
+    transactionId: text("transaction_id"),
+    /** Why the request failed or needs review; safe to show staff. */
+    statusReason: text("status_reason"),
+    paymentId: uuid("payment_id"),
+    /** Sent with the form so a double submission sends one prompt. */
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestedByUserId: uuid("requested_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    foreignKey({
+      name: "mobile_money_requests_student_fk",
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }),
+    foreignKey({
+      name: "mobile_money_requests_payment_fk",
+      columns: [t.tenantId, t.paymentId],
+      foreignColumns: [payments.tenantId, payments.id],
+    }),
+    unique("mobile_money_requests_tenant_id_unique").on(t.tenantId, t.id),
+    unique("mobile_money_requests_tenant_idempotency_unique").on(t.tenantId, t.idempotencyKey),
+    unique("mobile_money_requests_payment_unique").on(t.paymentId),
+    index("mobile_money_requests_student_idx").on(t.tenantId, t.studentId, t.createdAt),
+    check("mobile_money_requests_amount_range", sql`${t.amountPesewas} between 1 and 1000000000`),
+    check("mobile_money_requests_currency", sql`${t.currency} = 'GHS'`),
+    check("mobile_money_requests_msisdn", sql`${t.msisdn} ~ '^[+]233[25][0-9]{8}$'`),
+    check("mobile_money_requests_paid", sql`(${t.status} = 'successful') = (${t.paymentId} is not null)`),
+    check(
+      "mobile_money_requests_reason",
+      sql`(${t.status} in ('failed', 'needs_review')) = (${t.statusReason} is not null)`,
+    ),
+    check(
+      "mobile_money_requests_completed",
+      sql`(${t.status} in ('successful', 'failed', 'needs_review')) = (${t.completedAt} is not null)`,
+    ),
+    check(
+      "mobile_money_requests_lengths",
+      sql`char_length(${t.provider}) between 1 and 40
+        and (${t.providerReference} is null or char_length(${t.providerReference}) between 1 and 120)
+        and (${t.transactionId} is null or char_length(${t.transactionId}) between 1 and 60)
+        and (${t.statusReason} is null or char_length(${t.statusReason}) between 1 and 200)`,
+    ),
   ],
 );

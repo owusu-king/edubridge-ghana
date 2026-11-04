@@ -13,6 +13,7 @@ import { listConcessions } from "@/server/fees/concessions";
 import { getPaymentPlan } from "@/server/fees/payment-plans";
 import { hasOpeningBalance, suggestedAsOf } from "@/server/fees/opening-balances";
 import { listFeeItems } from "@/server/fees/structure";
+import { listMobileMoneyRequests, mobileMoneySetup } from "@/server/mobile-money/requests";
 import { getStudent, listClassOptions } from "@/server/students/service";
 import { formatCalendarDate, todayIn } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
@@ -53,7 +54,7 @@ export default async function StudentPage({ params }: { params: Promise<{ school
     canSeeFees ? getStudentAccount(db(), ctx, id) : Promise.resolve(null),
   ]);
   if (!student) notFound();
-  const [concessions, feeItemOptions, plan] = account
+  const [concessions, feeItemOptions, plan, mobileMoneyRequests] = account
     ? await Promise.all([
         listConcessions(db(), ctx, id),
         can(ctx.roles, "fees.manage")
@@ -62,8 +63,9 @@ export default async function StudentPage({ params }: { params: Promise<{ school
             )
           : Promise.resolve([]),
         getPaymentPlan(db(), ctx, id),
+        listMobileMoneyRequests(db(), ctx, id),
       ])
-    : [[], [], null];
+    : [[], [], null, []];
   // Offer an opening balance only to finance staff, and only while the student has none.
   const openingAsOf =
     account && can(ctx.roles, "fees.manage") && !(await hasOpeningBalance(db(), ctx, id))
@@ -172,6 +174,15 @@ export default async function StudentPage({ params }: { params: Promise<{ school
               concessions={concessions}
               feeItems={feeItemOptions}
               plan={plan}
+              mobileMoney={{
+                ...mobileMoneySetup(),
+                requests: mobileMoneyRequests,
+                // Primary contact first; the dialog suggests the first number.
+                phones: [...links]
+                  .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
+                  .flatMap((g) => (g.phone ? [{ name: g.fullName, phone: formatPhone(g.phone) }] : [])),
+                timeZone: ctx.tenant.timezone,
+              }}
             />
           )}
         </div>

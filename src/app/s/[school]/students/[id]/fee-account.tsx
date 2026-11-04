@@ -8,13 +8,17 @@ import Link from "next/link";
 import { schoolPath } from "@/lib/routes";
 import { formatPercent, type Concession } from "@/server/fees/concessions";
 import type { PaymentPlan } from "@/server/fees/payment-plans";
+import type { MobileMoneyRequestRow } from "@/server/mobile-money/requests";
 import { PaymentPlanView } from "./payment-plan";
+import { MobileMoneyRequests } from "./mobile-money";
+import { MobileMoneyDialog, type PayerPhone } from "./mobile-money-controls";
 import {
   addConcessionAction,
   createPaymentPlanAction,
   endConcessionAction,
   recordAdjustmentAction,
   recordPaymentAction,
+  requestMobileMoneyAction,
   reverseEntryAction,
   setOpeningBalanceAction,
 } from "./account-actions";
@@ -46,6 +50,7 @@ export function FeeAccount({
   concessions,
   feeItems,
   plan,
+  mobileMoney,
 }: {
   slug: string;
   account: StudentAccount;
@@ -59,16 +64,33 @@ export function FeeAccount({
   /** Active fee items, for adding discounts. */
   feeItems: { value: string; label: string }[];
   plan: PaymentPlan | null;
+  mobileMoney: {
+    /** Whether prompts can be sent (a provider is configured). */
+    enabled: boolean;
+    testMode: boolean;
+    requests: MobileMoneyRequestRow[];
+    phones: PayerPhone[];
+    timeZone: string;
+  };
 }) {
   const activeConcessions = concessions.filter((c) => c.status === "active");
   return (
     <Section
       title="Fees"
       aside={
-        <div className="flex items-center gap-3">
-          <p className="text-base font-semibold text-ink tabular-nums">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-x-3 gap-y-2">
+          <p className="text-base font-semibold whitespace-nowrap text-ink tabular-nums">
             {balanceText(account.balancePesewas)}
           </p>
+          {canRecordPayment && mobileMoney.enabled && (
+            <MobileMoneyDialog
+              action={requestMobileMoneyAction.bind(null, slug, account.student.id)}
+              studentName={account.student.name}
+              defaultAmount={account.balancePesewas > 0 ? pesewasToInput(account.balancePesewas) : ""}
+              phones={mobileMoney.phones}
+              testMode={mobileMoney.testMode}
+            />
+          )}
           {canRecordPayment && (
             <RecordPaymentDialog
               action={recordPaymentAction.bind(null, slug, account.student.id)}
@@ -106,6 +128,15 @@ export function FeeAccount({
       )}
       {plan && (
         <PaymentPlanView slug={slug} studentId={account.student.id} plan={plan} canManage={canManage} />
+      )}
+      {mobileMoney.requests.length > 0 && (
+        <MobileMoneyRequests
+          slug={slug}
+          studentId={account.student.id}
+          requests={mobileMoney.requests}
+          timeZone={mobileMoney.timeZone}
+          canCheck={canRecordPayment}
+        />
       )}
       {activeConcessions.length > 0 && (
         <div className="space-y-1.5">

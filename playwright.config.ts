@@ -31,6 +31,8 @@ export default defineConfig({
     // Messages go to a local mailbox file that tests read; nothing is sent.
     env: {
       NOTIFICATIONS_TRANSPORT: "log",
+      // Mobile Money uses the test-mode mock: no prompt is sent and no money moves.
+      MOBILE_MONEY_PROVIDER: "mock",
       DEV_MAILBOX_FILE: ".dev-mailbox.jsonl",
       // Every test request comes from 127.0.0.1, so repeated local runs would hit the per-IP reset limit.
       PASSWORD_RESET_LIMIT_PER_IP_HOUR: "100000",

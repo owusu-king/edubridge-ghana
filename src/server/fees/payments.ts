@@ -107,6 +107,69 @@ function replay(
   return { paymentId: existing.id, receiptNumber: existing.receiptNumber, replayed: true };
 }
 
+export interface NewPayment {
+  tenantId: string;
+  studentId: string;
+  amountPesewas: number;
+  method: PaymentMethod;
+  reference: string | null;
+  payerName: string | null;
+  paidOn: string;
+  idempotencyKey: string;
+  /** Null when the system recorded it (e.g. a Mobile Money confirmation processed by the worker). */
+  recordedByUserId: string | null;
+}
+
+/**
+ * The one way a payment is written: receipt number, payment row, ledger credit and audit event, inside
+ * the caller's tenant transaction. Callers check permissions, scope and validation first.
+ */
+export async function insertPayment(
+  tx: Transaction,
+  p: NewPayment,
+): Promise<{ paymentId: string; receiptNumber: string }> {
+  const [term] = await tx
+    .select({ id: terms.id })
+    .from(terms)
+    .where(and(eq(terms.tenantId, p.tenantId), eq(terms.isCurrent, true)));
+  const receiptNumber = await nextReceiptNumber(tx, p.tenantId);
+  const [payment] = await tx
+    .insert(payments)
+    .values({
+      tenantId: p.tenantId,
+      studentId: p.studentId,
+      receiptNumber,
+      amountPesewas: p.amountPesewas,
+      method: p.method,
+      reference: p.reference,
+      payerName: p.payerName,
+      paidOn: p.paidOn,
+      idempotencyKey: p.idempotencyKey,
+      recordedByUserId: p.recordedByUserId,
+    })
+    .returning({ id: payments.id });
+  await tx.insert(ledgerEntries).values({
+    tenantId: p.tenantId,
+    studentId: p.studentId,
+    termId: term?.id ?? null,
+    kind: "payment",
+    description: `Payment, receipt ${receiptNumber} (${METHOD_LABELS[p.method]})`,
+    amountPesewas: -p.amountPesewas,
+    paymentId: payment!.id,
+    effectiveOn: p.paidOn,
+    recordedByUserId: p.recordedByUserId,
+  });
+  await recordAudit(tx, {
+    tenantId: p.tenantId,
+    actorUserId: p.recordedByUserId,
+    action: "payment.recorded",
+    entityType: "payment",
+    entityId: payment!.id,
+    metadata: { receipt: receiptNumber, amountPesewas: p.amountPesewas, method: p.method },
+  });
+  return { paymentId: payment!.id, receiptNumber };
+}
+
 /**
  * Records money received and credits the student's account in one transaction. Submitting the same
  * form twice (same idempotency key) returns the first payment instead of recording another.
@@ -129,46 +192,18 @@ export async function recordPayment(
     return await withTenant(database, scope(ctx), async (tx) => {
       const student = await loadFinanceStudent(tx, ctx, data.studentId);
       if (!student) throw new DomainError("student_not_found", "Student not found.");
-      const [term] = await tx
-        .select({ id: terms.id })
-        .from(terms)
-        .where(and(eq(terms.tenantId, ctx.tenant.id), eq(terms.isCurrent, true)));
-      const receiptNumber = await nextReceiptNumber(tx, ctx.tenant.id);
-      const [payment] = await tx
-        .insert(payments)
-        .values({
-          tenantId: ctx.tenant.id,
-          studentId: student.id,
-          receiptNumber,
-          amountPesewas: data.amount,
-          method: data.method,
-          reference: data.reference ?? null,
-          payerName: data.payerName ?? null,
-          paidOn: data.paidOn,
-          idempotencyKey: data.idempotencyKey,
-          recordedByUserId: ctx.userId,
-        })
-        .returning({ id: payments.id });
-      await tx.insert(ledgerEntries).values({
+      const recorded = await insertPayment(tx, {
         tenantId: ctx.tenant.id,
         studentId: student.id,
-        termId: term?.id ?? null,
-        kind: "payment",
-        description: `Payment, receipt ${receiptNumber} (${METHOD_LABELS[data.method]})`,
-        amountPesewas: -data.amount,
-        paymentId: payment!.id,
-        effectiveOn: data.paidOn,
+        amountPesewas: data.amount,
+        method: data.method,
+        reference: data.reference ?? null,
+        payerName: data.payerName ?? null,
+        paidOn: data.paidOn,
+        idempotencyKey: data.idempotencyKey,
         recordedByUserId: ctx.userId,
       });
-      await recordAudit(tx, {
-        tenantId: ctx.tenant.id,
-        actorUserId: ctx.userId,
-        action: "payment.recorded",
-        entityType: "payment",
-        entityId: payment!.id,
-        metadata: { receipt: receiptNumber, amountPesewas: data.amount, method: data.method },
-      });
-      return { paymentId: payment!.id, receiptNumber, replayed: false };
+      return { ...recorded, replayed: false };
     });
   } catch (error) {
     // Two submissions raced: the loser's transaction rolled back (and its receipt number with it).
