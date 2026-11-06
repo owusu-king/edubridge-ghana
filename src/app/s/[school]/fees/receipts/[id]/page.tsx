@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, FileDown, MessageCircle } from "lucide-react";
+import { buttonStyles } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { can } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { getReceipt, METHOD_LABELS } from "@/server/fees/payments";
+import { getReminderState } from "@/server/fees/reminders";
+import { receiptMessage, whatsappLink } from "@/lib/fee-messages";
 import { formatCalendarDate, formatDateTime } from "@/lib/format";
 import { formatCedis } from "@/lib/money";
 import { schoolPath } from "@/lib/routes";
@@ -32,6 +35,21 @@ export default async function ReceiptPage({ params }: { params: Promise<{ school
   const slug = ctx.tenant.slug;
   const tz = ctx.tenant.timezone;
   const balance = receipt.balanceAfterPesewas;
+  const contact = (await getReminderState(db(), ctx, receipt.student.id))?.contact;
+  const shareHref =
+    contact?.phone && !receipt.voided
+      ? whatsappLink(
+          contact.phone,
+          receiptMessage({
+            schoolName: ctx.tenant.name,
+            receiptNumber: receipt.receiptNumber,
+            amountPesewas: receipt.amountPesewas,
+            studentName: receipt.student.name,
+            paidOn: receipt.paidOn,
+            balanceAfterPesewas: balance,
+          }),
+        )
+      : null;
 
   return (
     <div className="mx-auto max-w-xl space-y-6">
@@ -43,7 +61,26 @@ export default async function ReceiptPage({ params }: { params: Promise<{ school
           <ArrowLeft aria-hidden="true" className="size-4" />
           {receipt.student.name}
         </Link>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {shareHref && (
+            <a
+              href={shareHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={buttonStyles("ghost", "sm")}
+              title={`Send to ${contact!.name}`}
+            >
+              <MessageCircle aria-hidden="true" />
+              Share on WhatsApp
+            </a>
+          )}
+          <a
+            href={schoolPath(slug, `fees/receipts/${receipt.id}/pdf`)}
+            className={buttonStyles("secondary", "sm")}
+          >
+            <FileDown aria-hidden="true" />
+            Download PDF
+          </a>
           {!receipt.voided && can(ctx.roles, "payments.void") && (
             <VoidReceiptDialog
               action={voidPaymentAction.bind(null, slug, receipt.id)}

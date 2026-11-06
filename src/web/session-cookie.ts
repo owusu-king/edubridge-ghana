@@ -25,3 +25,19 @@ export function mfaCookieOptions(lifetimeMs: number) {
     maxAge: Math.floor(lifetimeMs / 1000),
   };
 }
+
+/** Parent sessions (SMS code sign-in) use their own cookie, separate from staff sessions. */
+export const PARENT_COOKIE = isProduction ? "__Host-eb_parent" : "eb_parent";
+
+/** The pending parent sign-in code request, readable only by /p/login routes. */
+export const PARENT_CODE_COOKIE = isProduction ? "__Secure-eb_parent_code" : "eb_parent_code";
+
+export function parentCodeCookieOptions(lifetimeMs: number) {
+  return {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: "strict" as const,
+    path: "/p/login",
+    maxAge: Math.floor(lifetimeMs / 1000),
+  };
+}

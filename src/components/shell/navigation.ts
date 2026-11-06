@@ -1,6 +1,7 @@
 import type { Route } from "next";
 import {
   Building2,
+  ClipboardList,
   GraduationCap,
   LayoutGrid,
   School,
@@ -53,6 +54,7 @@ const SCHOOL_NAV: readonly { label: string; segment: string; icon: LucideIcon; p
   { label: "Overview", segment: "", icon: LayoutGrid, permission: "school.view" },
   { label: "Students", segment: "students", icon: GraduationCap, permission: "students.view" },
   { label: "Classes", segment: "classes", icon: School, permission: "classes.view" },
+  { label: "Assessment", segment: "assessment", icon: ClipboardList, permission: "assessment.enter" },
   { label: "Fees", segment: "fees", icon: Wallet, permission: "fees.view" },
   { label: "Members", segment: "members", icon: Users, permission: "members.view" },
 ];

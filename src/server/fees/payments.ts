@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { todayIn } from "@/lib/format";
 import { parseCedis, sumPesewas } from "@/lib/money";
@@ -21,7 +21,7 @@ import {
 } from "../db/schema";
 import { DomainError, PG_UNIQUE_VIOLATION, pgErrorCode } from "../errors";
 import type { TenantContext } from "../tenancy/service";
-import { loadFinanceStudent } from "./access";
+import { campusScopeFilter, loadFinanceStudent } from "./access";
 
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
@@ -305,75 +305,83 @@ export async function getReceipt(
   assertCan(ctx.roles, "fees.view");
   if (!z.string().uuid().safeParse(paymentId).success) return null;
   return withTenant(database, scope(ctx), async (tx) => {
-    const [row] = await tx
-      .select({ payment: payments, recordedBy: users.name })
-      .from(payments)
-      .leftJoin(users, eq(users.id, payments.recordedByUserId))
-      .where(and(eq(payments.tenantId, ctx.tenant.id), eq(payments.id, paymentId)));
-    if (!row) return null;
-    const student = await loadFinanceStudent(tx, ctx, row.payment.studentId);
-    if (!student) return null;
-    const [entry] = await tx
-      .select({ entryNumber: ledgerEntries.entryNumber })
-      .from(ledgerEntries)
-      .where(and(eq(ledgerEntries.paymentId, paymentId), eq(ledgerEntries.kind, "payment")));
-    const [balance] = await tx
-      .select({ total: sql<string>`coalesce(sum(${ledgerEntries.amountPesewas}), 0)` })
-      .from(ledgerEntries)
-      .where(
-        and(
-          eq(ledgerEntries.tenantId, ctx.tenant.id),
-          eq(ledgerEntries.studentId, student.id),
-          sql`${ledgerEntries.entryNumber} <= ${entry!.entryNumber}`,
-        ),
-      );
-    const [cls] = await tx
-      .select({ name: classes.name })
-      .from(enrolments)
-      .innerJoin(terms, eq(terms.id, enrolments.termId))
-      .innerJoin(classes, eq(classes.id, enrolments.classId))
-      .where(and(eq(enrolments.studentId, student.id), eq(terms.isCurrent, true)));
-    const [voided] = await tx
-      .select({ reason: paymentVoids.reason, at: paymentVoids.voidedAt, by: users.name })
-      .from(paymentVoids)
-      .leftJoin(users, eq(users.id, paymentVoids.voidedByUserId))
-      .where(eq(paymentVoids.paymentId, paymentId));
-    const p = row.payment;
-    return {
-      id: p.id,
-      receiptNumber: p.receiptNumber,
-      amountPesewas: p.amountPesewas,
-      method: p.method,
-      reference: p.reference,
-      payerName: p.payerName,
-      paidOn: p.paidOn,
-      recordedBy: row.recordedBy,
-      recordedAt: p.recordedAt,
-      student: {
-        id: student.id,
-        name: `${student.firstName} ${student.lastName}`,
-        admissionNumber: student.admissionNumber,
-        className: cls?.name ?? null,
-      },
-      balanceAfterPesewas: Number(balance!.total),
-      voided: voided ?? null,
-    };
+    const receipt = await readReceipt(tx, ctx.tenant.id, paymentId);
+    if (!receipt || !(await loadFinanceStudent(tx, ctx, receipt.student.id))) return null;
+    return receipt;
   });
 }
 
-/** Staff limited to some campuses see only students whose class this term is at those campuses. */
-function campusFilter(
-  ctx: TenantContext,
-  studentId: typeof students.id | typeof payments.studentId,
-): SQL | undefined {
-  if (ctx.campusIds === null) return undefined;
-  const campusIds = ctx.campusIds.length ? ctx.campusIds : ["00000000-0000-0000-0000-000000000000"];
-  return sql`exists (
-    select 1 from ${enrolments}
-    join ${terms} on ${terms.id} = ${enrolments.termId} and ${terms.isCurrent}
-    join ${classes} on ${classes.id} = ${enrolments.classId}
-    where ${enrolments.studentId} = ${studentId} and ${inArray(classes.campusId, campusIds)}
-  )`;
+/**
+ * A receipt inside a tenant transaction, without any access check: callers check that the student is
+ * visible (staff scope, or a parent's link to the student).
+ */
+export async function readReceipt(
+  tx: Transaction,
+  tenantId: string,
+  paymentId: string,
+): Promise<Receipt | null> {
+  if (!z.string().uuid().safeParse(paymentId).success) return null;
+  const [row] = await tx
+    .select({ payment: payments, recordedBy: users.name })
+    .from(payments)
+    .leftJoin(users, eq(users.id, payments.recordedByUserId))
+    .where(and(eq(payments.tenantId, tenantId), eq(payments.id, paymentId)));
+  if (!row) return null;
+  const [student] = await tx
+    .select({
+      id: students.id,
+      firstName: students.firstName,
+      lastName: students.lastName,
+      admissionNumber: students.admissionNumber,
+    })
+    .from(students)
+    .where(and(eq(students.tenantId, tenantId), eq(students.id, row.payment.studentId)));
+  if (!student) return null;
+  const [entry] = await tx
+    .select({ entryNumber: ledgerEntries.entryNumber })
+    .from(ledgerEntries)
+    .where(and(eq(ledgerEntries.paymentId, paymentId), eq(ledgerEntries.kind, "payment")));
+  const [balance] = await tx
+    .select({ total: sql<string>`coalesce(sum(${ledgerEntries.amountPesewas}), 0)` })
+    .from(ledgerEntries)
+    .where(
+      and(
+        eq(ledgerEntries.tenantId, tenantId),
+        eq(ledgerEntries.studentId, student.id),
+        sql`${ledgerEntries.entryNumber} <= ${entry!.entryNumber}`,
+      ),
+    );
+  const [cls] = await tx
+    .select({ name: classes.name })
+    .from(enrolments)
+    .innerJoin(terms, eq(terms.id, enrolments.termId))
+    .innerJoin(classes, eq(classes.id, enrolments.classId))
+    .where(and(eq(enrolments.studentId, student.id), eq(terms.isCurrent, true)));
+  const [voided] = await tx
+    .select({ reason: paymentVoids.reason, at: paymentVoids.voidedAt, by: users.name })
+    .from(paymentVoids)
+    .leftJoin(users, eq(users.id, paymentVoids.voidedByUserId))
+    .where(eq(paymentVoids.paymentId, paymentId));
+  const p = row.payment;
+  return {
+    id: p.id,
+    receiptNumber: p.receiptNumber,
+    amountPesewas: p.amountPesewas,
+    method: p.method,
+    reference: p.reference,
+    payerName: p.payerName,
+    paidOn: p.paidOn,
+    recordedBy: row.recordedBy,
+    recordedAt: p.recordedAt,
+    student: {
+      id: student.id,
+      name: `${student.firstName} ${student.lastName}`,
+      admissionNumber: student.admissionNumber,
+      className: cls?.name ?? null,
+    },
+    balanceAfterPesewas: Number(balance!.total),
+    voided: voided ?? null,
+  };
 }
 
 export interface DayPayment {
@@ -425,7 +433,7 @@ export async function listPaymentsOn(
         and(
           eq(payments.tenantId, ctx.tenant.id),
           eq(payments.paidOn, day),
-          campusFilter(ctx, payments.studentId),
+          campusScopeFilter(ctx, payments.studentId),
         ),
       )
       .orderBy(asc(payments.receiptNumber));
@@ -502,7 +510,7 @@ export async function listAccounts(
     const conditions: (SQL | undefined)[] = [
       eq(students.tenantId, ctx.tenant.id),
       or(eq(students.status, "active"), sql`${balance} <> 0`),
-      campusFilter(ctx, students.id),
+      campusScopeFilter(ctx, students.id),
       filters.classId ? eq(current.classId, filters.classId) : undefined,
       filters.owing ? sql`${balance} > 0` : undefined,
     ];

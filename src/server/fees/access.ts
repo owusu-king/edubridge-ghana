@@ -1,5 +1,6 @@
 import "server-only";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { assertCan } from "../authz/permissions";
 import type { Transaction } from "../db/client";
 import { classes, enrolments, students, terms } from "../db/schema";
@@ -48,4 +49,19 @@ export async function loadFinanceStudent(tx: Transaction, ctx: TenantContext, st
       ),
     );
   return inScope ? student : null;
+}
+
+/**
+ * A WHERE condition for list queries: staff limited to some campuses see only students whose class this
+ * term is at one of those campuses. Undefined (no condition) for staff with every campus.
+ */
+export function campusScopeFilter(ctx: TenantContext, studentId: AnyPgColumn): SQL | undefined {
+  if (ctx.campusIds === null) return undefined;
+  const campusIds = ctx.campusIds.length ? ctx.campusIds : ["00000000-0000-0000-0000-000000000000"];
+  return sql`exists (
+    select 1 from ${enrolments}
+    join ${terms} on ${terms.id} = ${enrolments.termId} and ${terms.isCurrent}
+    join ${classes} on ${classes.id} = ${enrolments.classId}
+    where ${enrolments.studentId} = ${studentId} and ${inArray(classes.campusId, campusIds)}
+  )`;
 }

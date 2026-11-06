@@ -6,11 +6,14 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { hashPassword } from "../src/server/auth/password";
+import { DEFAULT_COMPONENTS, DEFAULT_SUBJECTS } from "../src/server/assessment/defaults";
 import { planBilling } from "../src/server/fees/billing-plan";
 import { seal } from "../src/server/auth/secret-box";
 import type { Role } from "../src/server/authz/permissions";
 import {
   academicYears,
+  assessmentSchemes,
+  assessmentScores,
   campuses,
   classes,
   enrolments,
@@ -18,7 +21,9 @@ import {
   feeItems,
   feeStructureLines,
   ledgerEntries,
+  levelSubjects,
   payments,
+  subjects,
   tenantCounters,
   guardians,
   levels,
@@ -513,6 +518,82 @@ async function main() {
         .insert(tenantCounters)
         .values({ tenantId: kpone, key: "receipt_number", value: n })
         .onConflictDoUpdate({ target: [tenantCounters.tenantId, tenantCounters.key], set: { value: n } });
+    });
+
+    // Subjects for every Kpone Ridge level (GES defaults) and this term's marks for Basic 4A, so score sheets
+    // and draft report cards have something to show. One mark is left out (Yaw Darko's Computing exam) to show
+    // a subject that is not graded yet. Nothing is published: that is the head teacher's step.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
+      const [existing] = await tx
+        .select({ id: subjects.id })
+        .from(subjects)
+        .where(eq(subjects.tenantId, kpone))
+        .limit(1);
+      if (existing) return;
+      const levelRows = await tx
+        .select({ id: levels.id, name: levels.name, stage: levels.stage })
+        .from(levels)
+        .where(eq(levels.tenantId, kpone));
+      const names = [...new Set(levelRows.flatMap((l) => DEFAULT_SUBJECTS[l.stage]))];
+      const created = await tx
+        .insert(subjects)
+        .values(names.map((name) => ({ tenantId: kpone, name })))
+        .returning({ id: subjects.id, name: subjects.name });
+      const subjectId = (name: string) => created.find((c) => c.name === name)!.id;
+      await tx.insert(levelSubjects).values(
+        levelRows.flatMap((level) =>
+          DEFAULT_SUBJECTS[level.stage].map((name, i) => ({
+            tenantId: kpone,
+            levelId: level.id,
+            subjectId: subjectId(name),
+            sequence: (i + 1) * 10,
+          })),
+        ),
+      );
+      const [term] = await tx
+        .select({ id: terms.id })
+        .from(terms)
+        .where(and(eq(terms.tenantId, kpone), eq(terms.isCurrent, true)));
+      const [basic4a] = await tx
+        .select({ id: classes.id })
+        .from(classes)
+        .where(and(eq(classes.tenantId, kpone), eq(classes.name, "Basic 4A")));
+      if (!term || !basic4a) return;
+      await tx
+        .insert(assessmentSchemes)
+        .values({ tenantId: kpone, termId: term.id, components: DEFAULT_COMPONENTS });
+      const roster = await tx
+        .select({ id: students.id, admissionNumber: students.admissionNumber })
+        .from(enrolments)
+        .innerJoin(students, eq(students.id, enrolments.studentId))
+        .where(and(eq(enrolments.termId, term.id), eq(enrolments.classId, basic4a.id)));
+      const primary = DEFAULT_SUBJECTS.primary;
+      const rows = roster.flatMap((student, si) =>
+        primary.flatMap((name, ji) =>
+          DEFAULT_COMPONENTS.flatMap((component, ci) => {
+            if (student.admissionNumber === "S0004" && name === "Computing" && component.key === "exam")
+              return [];
+            // Plausible, fixed marks: class scores 28–49 of 50, exams 45–94 of 100, half marks included.
+            const spread = (si * 37 + ji * 17 + ci * 11) % 22;
+            const tenths =
+              component.key === "class"
+                ? (28 + spread) * 10 + ((si + ji) % 2) * 5
+                : (45 + ((si * 53 + ji * 29 + 7) % 50)) * 10;
+            return [
+              {
+                tenantId: kpone,
+                termId: term.id,
+                studentId: student.id,
+                subjectId: subjectId(name),
+                componentKey: component.key,
+                scoreTenths: tenths,
+              },
+            ];
+          }),
+        ),
+      );
+      if (rows.length) await tx.insert(assessmentScores).values(rows);
     });
 
     // A sibling discount for Efua (Grace Mensah's second child), left for the accountant to bill.

@@ -1,26 +1,37 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_LIFETIME_MS } from "@/server/auth/policy";
+import { PARENT_SESSION_LIFETIME_MS } from "@/server/parents/policy";
 import { buildCsp } from "@/web/csp";
-import { SESSION_COOKIE, sessionCookieOptions } from "@/web/session-cookie";
+import { PARENT_COOKIE, SESSION_COOKIE, sessionCookieOptions } from "@/web/session-cookie";
 
-const PUBLIC_PATHS = ["/login", "/login/verify", "/forgot-password"];
-const PUBLIC_PREFIXES = ["/invite/", "/reset-password/"];
+const PUBLIC_PATHS = ["/login", "/login/verify", "/forgot-password", "/p/login", "/p/login/verify"];
+/** Balance links (/b/) are read-only and carry their own secret. */
+const PUBLIC_PREFIXES = ["/invite/", "/reset-password/", "/b/"];
 
 /**
  * No database access here: real session validation happens on the server in src/web/auth.ts.
- *  1. Send visitors without a session cookie to /login, remembering where they were going.
+ *  1. Send visitors without a session cookie to sign in, remembering where they were going. The parent
+ *     area (/p) has its own session cookie and sign-in page.
  *  2. Refresh the cookie's expiry on navigation; the database row remains the source of truth.
  *  3. Attach a nonce-based Content-Security-Policy to every page.
  */
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
-  const token = request.cookies.get(SESSION_COOKIE)?.value;
+  const parentArea = pathname === "/p" || pathname.startsWith("/p/");
+  const cookie = parentArea ? PARENT_COOKIE : SESSION_COOKIE;
+  const token = request.cookies.get(cookie)?.value;
 
   const isPublic = PUBLIC_PATHS.includes(pathname) || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
   if (!token && !isPublic) {
     const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    url.search = pathname === "/" ? "" : `?next=${encodeURIComponent(pathname + search)}`;
+    // A parent (signed in to the parent view only) opening the site's home goes to their children.
+    if (pathname === "/" && request.cookies.get(PARENT_COOKIE)) {
+      url.pathname = "/p";
+      return NextResponse.redirect(url);
+    }
+    url.pathname = parentArea ? "/p/login" : "/login";
+    url.search =
+      pathname === "/" || pathname === "/p" ? "" : `?next=${encodeURIComponent(pathname + search)}`;
     return NextResponse.redirect(url);
   }
 
@@ -31,7 +42,8 @@ export function proxy(request: NextRequest) {
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set("content-security-policy", csp);
   if (token && request.method === "GET") {
-    response.cookies.set(SESSION_COOKIE, token, sessionCookieOptions(SESSION_LIFETIME_MS));
+    const lifetime = parentArea ? PARENT_SESSION_LIFETIME_MS : SESSION_LIFETIME_MS;
+    response.cookies.set(cookie, token, sessionCookieOptions(lifetime));
   }
   return response;
 }

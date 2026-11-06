@@ -27,6 +27,8 @@ export interface GuardianLink {
   email: string | null;
   relationship: Relationship;
   isPrimary: boolean;
+  /** When the school stopped this guardian using the parent view; null when they may use it. */
+  portalBlockedAt: Date | null;
   /** Other students (siblings) linked to the same guardian. */
   otherStudents: { id: string; name: string; className: string | null }[];
 }
@@ -50,6 +52,7 @@ export async function listGuardians(
         email: guardians.email,
         relationship: studentGuardians.relationship,
         isPrimary: studentGuardians.isPrimary,
+        portalBlockedAt: guardians.portalBlockedAt,
       })
       .from(studentGuardians)
       .innerJoin(guardians, eq(guardians.id, studentGuardians.guardianId))
@@ -239,6 +242,46 @@ export async function unlinkGuardian(
       entityType: "student",
       entityId: student.id,
       metadata: { guardianId },
+    });
+  });
+}
+
+/**
+ * Stops (or allows again) a guardian using the parent view, for every child they are linked to. Parent
+ * access is checked on every request, so a block applies to their next page, and their balance links stop
+ * working too.
+ */
+export async function setParentAccess(
+  database: Database,
+  ctx: TenantContext,
+  guardianId: string,
+  input: { blocked: boolean },
+): Promise<void> {
+  assertCan(ctx.roles, "parents.access.manage");
+  if (!z.string().uuid().safeParse(guardianId).success)
+    throw new DomainError("guardian_not_found", "Guardian not found.");
+  await withTenant(database, scope(ctx), async (tx) => {
+    const [guardian] = await tx
+      .select({ id: guardians.id, portalBlockedAt: guardians.portalBlockedAt })
+      .from(guardians)
+      .where(and(eq(guardians.tenantId, ctx.tenant.id), eq(guardians.id, guardianId)))
+      .for("update");
+    if (!guardian) throw new DomainError("guardian_not_found", "Guardian not found.");
+    if ((guardian.portalBlockedAt !== null) === input.blocked) return;
+    await tx
+      .update(guardians)
+      .set(
+        input.blocked
+          ? { portalBlockedAt: new Date(), portalBlockedByUserId: ctx.userId }
+          : { portalBlockedAt: null, portalBlockedByUserId: null },
+      )
+      .where(eq(guardians.id, guardian.id));
+    await recordAudit(tx, {
+      tenantId: ctx.tenant.id,
+      actorUserId: ctx.userId,
+      action: input.blocked ? "guardian.parent_access_blocked" : "guardian.parent_access_allowed",
+      entityType: "guardian",
+      entityId: guardian.id,
     });
   });
 }

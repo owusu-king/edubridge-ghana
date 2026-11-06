@@ -1,7 +1,9 @@
 /**
- * Message templates. Plain, readable, and free of tracking. Sensitive data (balances, medical details)
- * never goes into SMS; links carry single-use tokens only.
+ * Message templates. Plain, readable, and free of tracking. Medical, safeguarding and statement details
+ * never go into SMS (a fee reminder carries only the balance owed); links carry single-use tokens only.
  */
+import { feeReminderSms } from "@/lib/fee-messages";
+
 export interface RenderedEmail {
   subject: string;
   html: string;
@@ -25,6 +27,11 @@ function layout(heading: string, paragraphs: string[], action?: { label: string;
 function appUrl(path: string): string {
   const origin = (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
   return `${origin}${path}`;
+}
+
+/** The address of a balance link (short: it goes in an SMS). */
+export function balanceLinkUrl(token: string): string {
+  return appUrl(`/b/${token}`);
 }
 
 export const TEMPLATES = {
@@ -73,6 +80,17 @@ export const TEMPLATES = {
       html: "",
       text: `EduBridge code: ${payload.code}. It expires in 10 minutes. Never share it.`,
     };
+  },
+
+  /** A polite fee reminder to a guardian, with the balance when it was sent and a 7-day balance link. */
+  fee_reminder(payload: {
+    schoolName: string;
+    studentFirstName: string;
+    balancePesewas?: number;
+    balanceLinkToken?: string;
+  }): RenderedEmail {
+    const link = payload.balanceLinkToken ? balanceLinkUrl(payload.balanceLinkToken) : undefined;
+    return { subject: "", html: "", text: feeReminderSms({ ...payload, link }) };
   },
 
   password_reset_sms(payload: { token: string; expiresMinutes: number }): RenderedEmail {

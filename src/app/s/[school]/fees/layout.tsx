@@ -30,7 +30,9 @@ export default async function FeesLayout({
           items={[
             { label: "Fee structure", href: schoolPath(slug, "fees") },
             { label: "Accounts", href: schoolPath(slug, "fees/accounts") },
+            { label: "Owing", href: schoolPath(slug, "fees/owing") },
             { label: "Payments", href: schoolPath(slug, "fees/payments") },
+            { label: "Mobile Money", href: schoolPath(slug, "fees/mobile-money") },
             { label: "Families", href: schoolPath(slug, "fees/families") },
             { label: "Fee items", href: schoolPath(slug, "fees/items") },
           ]}

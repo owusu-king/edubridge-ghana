@@ -367,37 +367,49 @@ export async function getStudentAccount(
   return withTenant(database, scope(ctx), async (tx) => {
     const student = await loadFinanceStudent(tx, ctx, studentId);
     if (!student) return null;
-    const rows = await tx
-      .select({
-        id: ledgerEntries.id,
-        kind: ledgerEntries.kind,
-        description: ledgerEntries.description,
-        effectiveOn: ledgerEntries.effectiveOn,
-        amountPesewas: ledgerEntries.amountPesewas,
-        reversed: isReversed,
-        paymentId: ledgerEntries.paymentId,
-        recordedBy: users.name,
-        recordedAt: ledgerEntries.recordedAt,
-      })
-      .from(ledgerEntries)
-      .leftJoin(users, eq(users.id, ledgerEntries.recordedByUserId))
-      .where(and(eq(ledgerEntries.tenantId, ctx.tenant.id), eq(ledgerEntries.studentId, studentId)))
-      .orderBy(asc(ledgerEntries.effectiveOn), asc(ledgerEntries.entryNumber));
-    let balance = 0;
-    const entries = rows.map((row) => {
-      balance = sumPesewas([balance, row.amountPesewas]);
-      return { ...row, balancePesewas: balance };
-    });
-    return {
-      student: {
-        id: student.id,
-        name: `${student.firstName} ${student.lastName}`,
-        admissionNumber: student.admissionNumber,
-      },
-      entries,
-      balancePesewas: balance,
-    };
+    return readStudentAccount(tx, ctx.tenant.id, student);
   });
+}
+
+/**
+ * The account of a student already checked to be visible, inside a tenant transaction. Staff and parents
+ * read accounts through this one function, so both always see the same statement.
+ */
+export async function readStudentAccount(
+  tx: Transaction,
+  tenantId: string,
+  student: { id: string; firstName: string; lastName: string; admissionNumber: string },
+): Promise<StudentAccount> {
+  const rows = await tx
+    .select({
+      id: ledgerEntries.id,
+      kind: ledgerEntries.kind,
+      description: ledgerEntries.description,
+      effectiveOn: ledgerEntries.effectiveOn,
+      amountPesewas: ledgerEntries.amountPesewas,
+      reversed: isReversed,
+      paymentId: ledgerEntries.paymentId,
+      recordedBy: users.name,
+      recordedAt: ledgerEntries.recordedAt,
+    })
+    .from(ledgerEntries)
+    .leftJoin(users, eq(users.id, ledgerEntries.recordedByUserId))
+    .where(and(eq(ledgerEntries.tenantId, tenantId), eq(ledgerEntries.studentId, student.id)))
+    .orderBy(asc(ledgerEntries.effectiveOn), asc(ledgerEntries.entryNumber));
+  let balance = 0;
+  const entries = rows.map((row) => {
+    balance = sumPesewas([balance, row.amountPesewas]);
+    return { ...row, balancePesewas: balance };
+  });
+  return {
+    student: {
+      id: student.id,
+      name: `${student.firstName} ${student.lastName}`,
+      admissionNumber: student.admissionNumber,
+    },
+    entries,
+    balancePesewas: balance,
+  };
 }
 
 const reverseSchema = z.object({

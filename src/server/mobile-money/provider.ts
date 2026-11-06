@@ -15,6 +15,22 @@ export interface MobileMoneyProvider {
   testMode: boolean;
   requestPayment(request: CollectionRequest): Promise<CollectionStarted>;
   getStatus(ref: CollectionRef): Promise<CollectionStatus>;
+  /**
+   * Checks that a callback really comes from the provider (signature) and says which request it is
+   * about. Returns null when it is not genuine. Its status, if any, is ignored: see getStatus.
+   */
+  verifyCallback(callback: IncomingCallback): CallbackRef | null;
+}
+
+export interface IncomingCallback {
+  headers: Headers;
+  rawBody: string;
+}
+
+/** Which request a callback is about; at least one reference is set. */
+export interface CallbackRef {
+  reference: string | null;
+  providerReference: string | null;
 }
 
 export interface CollectionRequest {
@@ -27,6 +43,8 @@ export interface CollectionRequest {
   network: MobileMoneyNetwork;
   /** Shown to the payer with the prompt. */
   payerMessage: string;
+  /** Where the provider should send its callback, when it supports per-request callback URLs. */
+  callbackUrl: string | null;
 }
 
 export interface CollectionStarted {

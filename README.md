@@ -97,7 +97,7 @@ npm run db:seed
 npm run dev
 ```
 
-In another terminal, run the worker that delivers email and SMS (with retries):
+In another terminal, run the worker that delivers email and SMS (with retries), settles Mobile Money prompts and finishes report-card print runs:
 
 ```bash
 npm run worker

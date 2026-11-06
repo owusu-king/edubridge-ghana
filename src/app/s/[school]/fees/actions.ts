@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/server/db/client";
 import { billTerm } from "@/server/fees/ledger";
+import { markMobileMoneyReviewed } from "@/server/mobile-money/requests";
 import {
   copyFeeStructure,
   createFeeItem,
@@ -123,4 +124,18 @@ export async function copyFeeStructureAction(
 
 export async function billTermAction(slug: string, termId: string, _prev: FormState) {
   return run(slug, null, (ctx) => billTerm(db(), ctx, termId), "Students billed.");
+}
+
+export async function markMobileMoneyReviewedAction(
+  slug: string,
+  requestId: string,
+  _prev: FormState,
+  formData: FormData,
+) {
+  return run(
+    slug,
+    formData,
+    (ctx) => markMobileMoneyReviewed(db(), ctx, requestId, { note: formData.get("note") ?? "" }),
+    "Marked as reviewed.",
+  );
 }

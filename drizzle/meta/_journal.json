@@ -239,6 +239,62 @@
       "when": 1793823676159,
       "tag": "0033_mobile_money_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1793829939880,
+      "tag": "0034_mobile_money_callbacks",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1793829943446,
+      "tag": "0035_mobile_money_callbacks_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793831591092,
+      "tag": "0036_fee_reminders",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1793831593163,
+      "tag": "0037_fee_reminders_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1793919436691,
+      "tag": "0038_parent_view",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1793919446605,
+      "tag": "0039_parent_view_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1793938394716,
+      "tag": "0040_assessment",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1793938406472,
+      "tag": "0041_assessment_rls",
+      "breakpoints": true
     }
   ]
 }

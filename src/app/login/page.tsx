@@ -40,6 +40,12 @@ export default async function LoginPage({
               Forgotten your password?
             </Link>
           </p>
+          <p className="mt-10 border-t border-line pt-6 text-sm text-ink-2">
+            Parent or guardian?{" "}
+            <Link href={"/p/login" as Route} className="font-medium text-accent hover:underline">
+              Sign in with a code sent to your phone
+            </Link>
+          </p>
         </div>
       </main>
       <footer className="text-xs text-ink-3">

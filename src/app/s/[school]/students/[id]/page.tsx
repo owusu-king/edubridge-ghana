@@ -14,6 +14,9 @@ import { getPaymentPlan } from "@/server/fees/payment-plans";
 import { hasOpeningBalance, suggestedAsOf } from "@/server/fees/opening-balances";
 import { listFeeItems } from "@/server/fees/structure";
 import { listMobileMoneyRequests, mobileMoneySetup } from "@/server/mobile-money/requests";
+import { getReminderState } from "@/server/fees/reminders";
+import { feeReminderMessage, feeReminderSms, whatsappLink } from "@/lib/fee-messages";
+import { balanceLinkUrl } from "@/server/notifications/templates";
 import { getStudent, listClassOptions } from "@/server/students/service";
 import { formatCalendarDate, todayIn } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
@@ -24,6 +27,7 @@ import { ChangeClassDialog, EditStudentDialog, StatusDialog } from "../student-f
 import {
   addGuardianAction,
   makePrimaryAction,
+  setParentAccessAction,
   unlinkGuardianAction,
   updateGuardianAction,
 } from "./guardian-actions";
@@ -31,6 +35,7 @@ import {
   AddGuardianDialog,
   EditGuardianDialog,
   MakePrimaryButton,
+  ParentAccessButton,
   RemoveGuardianButton,
 } from "./guardian-controls";
 import { FeeAccount } from "./fee-account";
@@ -54,7 +59,7 @@ export default async function StudentPage({ params }: { params: Promise<{ school
     canSeeFees ? getStudentAccount(db(), ctx, id) : Promise.resolve(null),
   ]);
   if (!student) notFound();
-  const [concessions, feeItemOptions, plan, mobileMoneyRequests] = account
+  const [concessions, feeItemOptions, plan, mobileMoneyRequests, reminderState] = account
     ? await Promise.all([
         listConcessions(db(), ctx, id),
         can(ctx.roles, "fees.manage")
@@ -64,8 +69,9 @@ export default async function StudentPage({ params }: { params: Promise<{ school
           : Promise.resolve([]),
         getPaymentPlan(db(), ctx, id),
         listMobileMoneyRequests(db(), ctx, id),
+        getReminderState(db(), ctx, id),
       ])
-    : [[], [], null, []];
+    : [[], [], null, [], null];
   // Offer an opening balance only to finance staff, and only while the student has none.
   const openingAsOf =
     account && can(ctx.roles, "fees.manage") && !(await hasOpeningBalance(db(), ctx, id))
@@ -74,6 +80,7 @@ export default async function StudentPage({ params }: { params: Promise<{ school
   const links = guardianLinks ?? [];
   const slug = ctx.tenant.slug;
   const canManage = can(ctx.roles, "students.manage");
+  const canManageParentAccess = can(ctx.roles, "parents.access.manage");
   const classes = canManage
     ? (await listClassOptions(db(), ctx)).map((c) => ({ id: c.id, name: c.name }))
     : [];
@@ -174,6 +181,33 @@ export default async function StudentPage({ params }: { params: Promise<{ school
               concessions={concessions}
               feeItems={feeItemOptions}
               plan={plan}
+              outreach={{
+                statementHref: schoolPath(slug, `students/${student.id}/statement`),
+                canRemind: can(ctx.roles, "fees.remind"),
+                reminder:
+                  account.balancePesewas > 0 && reminderState?.contact?.phone
+                    ? {
+                        contactName: reminderState.contact.name,
+                        phone: formatPhone(reminderState.contact.phone),
+                        remindedToday: reminderState.remindedToday,
+                        lastRemindedOn: reminderState.lastRemindedOn,
+                        smsPreview: feeReminderSms({
+                          schoolName: ctx.tenant.name,
+                          studentFirstName: student.firstName,
+                          balancePesewas: account.balancePesewas,
+                          link: balanceLinkUrl("…"),
+                        }),
+                        whatsappHref: whatsappLink(
+                          reminderState.contact.phone,
+                          feeReminderMessage({
+                            schoolName: ctx.tenant.name,
+                            studentName: student.fullName,
+                            balancePesewas: account.balancePesewas,
+                          }),
+                        ),
+                      }
+                    : null,
+              }}
               mobileMoney={{
                 ...mobileMoneySetup(),
                 requests: mobileMoneyRequests,
@@ -231,6 +265,7 @@ export default async function StudentPage({ params }: { params: Promise<{ school
                     <p className="flex flex-wrap items-center gap-2 text-base font-medium text-ink">
                       {g.fullName}
                       {g.isPrimary && <Badge tone="accent">Primary contact</Badge>}
+                      {g.portalBlockedAt && <Badge tone="critical">Blocked from parent view</Badge>}
                     </p>
                     <p className="text-sm text-ink-3">{RELATIONSHIP_LABELS[g.relationship]}</p>
                     {g.phone && (
@@ -256,22 +291,33 @@ export default async function StudentPage({ params }: { params: Promise<{ school
                         ))}
                       </p>
                     )}
-                    {canManage && (
+                    {(canManage || (canManageParentAccess && g.phone)) && (
                       <div className="-ml-3 flex flex-wrap gap-1 pt-1">
-                        <EditGuardianDialog
-                          action={updateGuardianAction.bind(null, slug, g.guardianId)}
-                          guardian={g}
-                        />
-                        {!g.isPrimary && (
-                          <MakePrimaryButton
-                            action={makePrimaryAction.bind(null, slug, student.id, g.guardianId)}
+                        {canManage && (
+                          <>
+                            <EditGuardianDialog
+                              action={updateGuardianAction.bind(null, slug, g.guardianId)}
+                              guardian={g}
+                            />
+                            {!g.isPrimary && (
+                              <MakePrimaryButton
+                                action={makePrimaryAction.bind(null, slug, student.id, g.guardianId)}
+                                name={g.fullName}
+                              />
+                            )}
+                            <RemoveGuardianButton
+                              action={unlinkGuardianAction.bind(null, slug, student.id, g.guardianId)}
+                              name={g.fullName}
+                            />
+                          </>
+                        )}
+                        {canManageParentAccess && g.phone && (
+                          <ParentAccessButton
+                            action={setParentAccessAction.bind(null, slug, g.guardianId, !g.portalBlockedAt)}
                             name={g.fullName}
+                            blocked={g.portalBlockedAt !== null}
                           />
                         )}
-                        <RemoveGuardianButton
-                          action={unlinkGuardianAction.bind(null, slug, student.id, g.guardianId)}
-                          name={g.fullName}
-                        />
                       </div>
                     )}
                   </li>

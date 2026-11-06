@@ -31,6 +31,10 @@ const GRANTS = {
   "students.manage": ["owner", "headteacher", "admin"],
   "school.settings.manage": ["owner", "admin"],
   "academics.manage": ["owner", "headteacher", "admin"],
+  // Scores and report-card remarks: teachers only for classes they are class teacher of (checked per class).
+  "assessment.enter": ["owner", "headteacher", "admin", "teacher"],
+  // Publishing report cards to families, and the head teacher's remark, are the head teacher's approval.
+  "reports.publish": ["owner", "headteacher"],
   // Head teachers oversee staff and academics, and see school finances without changing them.
   "members.view": ["owner", "headteacher", "admin"],
   "members.manage": ["owner", "admin"],
@@ -42,6 +46,10 @@ const GRANTS = {
   "fees.view": ["owner", "headteacher", "bursar"],
   "fees.manage": ["owner", "bursar"],
   "payments.record": ["owner", "bursar"],
+  // Fee reminders cost the school an SMS each, so only finance staff send them.
+  "fees.remind": ["owner", "bursar"],
+  // Stopping a guardian using the parent view (e.g. a custody change) is a safeguarding decision.
+  "parents.access.manage": ["owner", "headteacher", "admin"],
   // Voiding a receipt is a fraud-sensitive control: only the Proprietor may do it (assumption to verify).
   "payments.void": ["owner"],
 } as const satisfies Record<string, readonly Role[]>;

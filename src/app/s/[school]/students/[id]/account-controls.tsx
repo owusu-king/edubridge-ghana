@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { BadgePercent, Banknote, CalendarClock, History, Plus } from "lucide-react";
 import { Field, Input, Select } from "@/components/ui/field";
 import { FormDialog } from "@/components/ui/form-dialog";
 import type { FormState } from "@/web/forms";
@@ -62,7 +63,12 @@ export function RecordPaymentDialog({
 }) {
   return (
     <FormDialog
-      trigger="Record payment"
+      trigger={
+        <>
+          <Banknote aria-hidden="true" />
+          Record payment
+        </>
+      }
       triggerVariant="primary"
       triggerSize="sm"
       title="Record payment"
@@ -155,7 +161,12 @@ function PaymentFields({ state, payerName, today }: { state: FormState; payerNam
 export function AdjustmentDialog({ action }: { action: Action }) {
   return (
     <FormDialog
-      trigger="Add charge or credit"
+      trigger={
+        <>
+          <Plus aria-hidden="true" />
+          Add charge or credit
+        </>
+      }
       triggerVariant="ghost"
       triggerSize="sm"
       title="Add a charge or credit"
@@ -219,7 +230,12 @@ export function AdjustmentDialog({ action }: { action: Action }) {
 export function OpeningBalanceDialog({ action, asOf }: { action: Action; asOf: string }) {
   return (
     <FormDialog
-      trigger="Set opening balance"
+      trigger={
+        <>
+          <History aria-hidden="true" />
+          Set opening balance
+        </>
+      }
       triggerVariant="ghost"
       triggerSize="sm"
       title="Opening balance"
@@ -269,7 +285,12 @@ export function AddConcessionDialog({
 }) {
   return (
     <FormDialog
-      trigger="Add scholarship or discount"
+      trigger={
+        <>
+          <BadgePercent aria-hidden="true" />
+          Add scholarship or discount
+        </>
+      }
       triggerVariant="ghost"
       triggerSize="sm"
       title="Add a scholarship or discount"
@@ -371,7 +392,12 @@ export function PaymentPlanDialog({
 }) {
   return (
     <FormDialog
-      trigger="Agree a payment plan"
+      trigger={
+        <>
+          <CalendarClock aria-hidden="true" />
+          Agree a payment plan
+        </>
+      }
       triggerVariant="ghost"
       triggerSize="sm"
       title="Agree a payment plan"

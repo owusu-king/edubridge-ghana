@@ -18,6 +18,17 @@ const LABELS: Record<string, string> = {
   "class.updated": "Class changed",
   "class.archived": "Class archived",
   "class.restored": "Class restored",
+  "subjects.set_up": "Subjects set up",
+  "subject.created": "Subject added",
+  "subject.updated": "Subject changed",
+  "assessment_scheme.saved": "Term assessment changed",
+  "grading_scale.saved": "Grades changed",
+  "grading_scale.reset": "Default grades restored",
+  "assessment.scores_saved": "Scores entered",
+  "report_card.remarks_saved": "Report card remarks saved",
+  "report_cards.published": "Report cards published",
+  "report_card.withdrawn": "Report card withdrawn",
+  "report_cards.print_requested": "Report cards printed",
   "student.created": "Student added",
   "students.imported": "Students imported",
   "student.updated": "Student details changed",
@@ -42,6 +53,7 @@ const LABELS: Record<string, string> = {
   "mobile_money.failed": "Mobile Money prompt not paid",
   "mobile_money.expired": "Mobile Money prompt unanswered",
   "mobile_money.needs_review": "Mobile Money payment held for review",
+  "mobile_money.reviewed": "Held Mobile Money payment reviewed",
   "fees.opening_balances_imported": "Opening balances imported",
   "fees.opening_balance_set": "Opening balance recorded",
   "fees.charge_added": "One-off charge added",
@@ -50,10 +62,13 @@ const LABELS: Record<string, string> = {
   "fees.concession_ended": "Scholarship or discount ended",
   "fees.payment_plan_created": "Payment plan agreed",
   "fees.payment_plan_cancelled": "Payment plan cancelled",
+  "fees.reminders_sent": "Fee reminders sent by SMS",
   "guardian.linked": "Guardian added",
   "guardian.updated": "Guardian details changed",
   "guardian.made_primary": "Primary contact changed",
   "guardian.unlinked": "Guardian removed",
+  "guardian.parent_access_blocked": "Guardian blocked from the parent view",
+  "guardian.parent_access_allowed": "Guardian allowed to use the parent view again",
   "campus.created": "Campus added",
   "campus.renamed": "Campus renamed",
   "campus.archived": "Campus archived",
@@ -87,6 +102,9 @@ export function auditSummary(metadata: Record<string, unknown>): string {
       const change = value as { from: unknown; to: unknown };
       if (JSON.stringify(change.from) !== JSON.stringify(change.to))
         parts.push(`${key}: ${scalar(change.from)} → ${scalar(change.to)}`);
+    } else if (Array.isArray(value) && value.some((v) => v !== null && typeof v === "object")) {
+      // Detailed records (e.g. each mark changed) are kept in full but summarised as a count.
+      parts.push(`${key}: ${value.length}`);
     } else if (key.endsWith("Pesewas") && typeof value === "number") {
       // Money is stored in pesewas; show it in cedis.
       parts.push(`${key.slice(0, -"Pesewas".length)}: ${formatCedis(value)}`);

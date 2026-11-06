@@ -74,22 +74,36 @@ interface MailboxEntry {
   text: string;
 }
 
-/** Waits for the newest development-mailbox message to a recipient (written by the log provider). */
-export async function waitForMessage(to: string, match?: RegExp): Promise<MailboxEntry> {
+function readMailbox(to: string, match?: RegExp): MailboxEntry[] {
+  let lines: string[] = [];
+  try {
+    lines = readFileSync(".dev-mailbox.jsonl", "utf8").trim().split("\n");
+  } catch {
+    return [];
+  }
+  return lines
+    .filter(Boolean)
+    .map((l) => JSON.parse(l) as MailboxEntry)
+    .filter((m) => m.to === to && (!match || match.test(m.text)));
+}
+
+/** How many development-mailbox messages a recipient has (to wait for a newer one later). */
+export function mailboxCount(to: string, match?: RegExp): number {
+  return readMailbox(to, match).length;
+}
+
+/**
+ * Waits for the newest development-mailbox message to a recipient (written by the log provider). With
+ * `after`, only a message beyond that many earlier ones counts, so an older message is never mistaken
+ * for the one just sent.
+ */
+export async function waitForMessage(to: string, match?: RegExp, after = 0): Promise<MailboxEntry> {
   let found: MailboxEntry | undefined;
   await expect
     .poll(
       () => {
-        let lines: string[] = [];
-        try {
-          lines = readFileSync(".dev-mailbox.jsonl", "utf8").trim().split("\n");
-        } catch {
-          return false;
-        }
-        found = lines
-          .map((l) => JSON.parse(l) as MailboxEntry)
-          .filter((m) => m.to === to && (!match || match.test(m.text)))
-          .at(-1);
+        const messages = readMailbox(to, match);
+        found = messages.length > after ? messages.at(-1) : undefined;
         return Boolean(found);
       },
       { timeout: 10_000 },

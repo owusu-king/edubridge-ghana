@@ -5,7 +5,7 @@ import { todayIn } from "@/lib/format";
 import { parseCedis } from "@/lib/money";
 import { recordAudit } from "../audit/record";
 import { assertCan } from "../authz/permissions";
-import type { Database } from "../db/client";
+import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import { paymentPlanInstalments, paymentPlans, payments, paymentVoids, users } from "../db/schema";
 import { DomainError, PG_UNIQUE_VIOLATION, pgErrorCode } from "../errors";
@@ -33,51 +33,58 @@ export async function getPaymentPlan(
   if (!z.string().uuid().safeParse(studentId).success) return null;
   return withTenant(database, scope(ctx), async (tx) => {
     if (!(await loadFinanceStudent(tx, ctx, studentId))) return null;
-    const [plan] = await tx
-      .select({
-        id: paymentPlans.id,
-        totalPesewas: paymentPlans.totalPesewas,
-        startsOn: paymentPlans.startsOn,
-        createdAt: paymentPlans.createdAt,
-        createdBy: users.name,
-      })
-      .from(paymentPlans)
-      .leftJoin(users, eq(users.id, paymentPlans.createdByUserId))
-      .where(
-        and(
-          eq(paymentPlans.tenantId, ctx.tenant.id),
-          eq(paymentPlans.studentId, studentId),
-          eq(paymentPlans.status, "active"),
-        ),
-      );
-    if (!plan) return null;
-    const instalments = await tx
-      .select({
-        sequence: paymentPlanInstalments.sequence,
-        dueOn: paymentPlanInstalments.dueOn,
-        amountPesewas: paymentPlanInstalments.amountPesewas,
-      })
-      .from(paymentPlanInstalments)
-      .where(eq(paymentPlanInstalments.planId, plan.id))
-      .orderBy(asc(paymentPlanInstalments.sequence));
-    const [paid] = await tx
-      .select({ total: sql<string>`coalesce(sum(${payments.amountPesewas}), 0)` })
-      .from(payments)
-      .leftJoin(paymentVoids, eq(paymentVoids.paymentId, payments.id))
-      .where(
-        and(
-          eq(payments.tenantId, ctx.tenant.id),
-          eq(payments.studentId, studentId),
-          // Payments recorded after the plan was agreed (earlier ones are already in the plan's total).
-          gte(payments.recordedAt, plan.createdAt),
-          isNull(paymentVoids.paymentId),
-        ),
-      );
-    return {
-      ...plan,
-      progress: planProgress(instalments, Number(paid!.total), todayIn(ctx.tenant.timezone)),
-    };
+    return readPaymentPlan(tx, ctx.tenant.id, studentId, todayIn(ctx.tenant.timezone));
   });
+}
+
+/** The active plan of a student already checked to be visible, inside a tenant transaction. */
+export async function readPaymentPlan(
+  tx: Transaction,
+  tenantId: string,
+  studentId: string,
+  today: string,
+): Promise<PaymentPlan | null> {
+  const [plan] = await tx
+    .select({
+      id: paymentPlans.id,
+      totalPesewas: paymentPlans.totalPesewas,
+      startsOn: paymentPlans.startsOn,
+      createdAt: paymentPlans.createdAt,
+      createdBy: users.name,
+    })
+    .from(paymentPlans)
+    .leftJoin(users, eq(users.id, paymentPlans.createdByUserId))
+    .where(
+      and(
+        eq(paymentPlans.tenantId, tenantId),
+        eq(paymentPlans.studentId, studentId),
+        eq(paymentPlans.status, "active"),
+      ),
+    );
+  if (!plan) return null;
+  const instalments = await tx
+    .select({
+      sequence: paymentPlanInstalments.sequence,
+      dueOn: paymentPlanInstalments.dueOn,
+      amountPesewas: paymentPlanInstalments.amountPesewas,
+    })
+    .from(paymentPlanInstalments)
+    .where(eq(paymentPlanInstalments.planId, plan.id))
+    .orderBy(asc(paymentPlanInstalments.sequence));
+  const [paid] = await tx
+    .select({ total: sql<string>`coalesce(sum(${payments.amountPesewas}), 0)` })
+    .from(payments)
+    .leftJoin(paymentVoids, eq(paymentVoids.paymentId, payments.id))
+    .where(
+      and(
+        eq(payments.tenantId, tenantId),
+        eq(payments.studentId, studentId),
+        // Payments recorded after the plan was agreed (earlier ones are already in the plan's total).
+        gte(payments.recordedAt, plan.createdAt),
+        isNull(paymentVoids.paymentId),
+      ),
+    );
+  return { ...plan, progress: planProgress(instalments, Number(paid!.total), today) };
 }
 
 const createSchema = z.object({

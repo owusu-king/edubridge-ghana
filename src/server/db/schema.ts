@@ -17,10 +17,14 @@ import {
   unique,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { AssessmentComponent, GradeBand, ReportCardSnapshot } from "../../lib/assessment";
 import { MOBILE_MONEY_NETWORKS } from "../../lib/mobile-money";
 
 /** Case-insensitive text (requires the `citext` extension, enabled in the first migration). */
 const citext = customType<{ data: string }>({ dataType: () => "citext" });
+
+/** Binary data (generated PDFs). */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -492,6 +496,14 @@ export const guardians = pgTable(
     fullName: text("full_name").notNull(),
     phone: text("phone"),
     email: citext("email"),
+    /**
+     * Set when the school stops this guardian using the parent view (e.g. a custody change). Checked on
+     * every parent request, so it takes effect immediately.
+     */
+    portalBlockedAt: timestamp("portal_blocked_at", { withTimezone: true }),
+    portalBlockedByUserId: uuid("portal_blocked_by_user_id").references(() => users.id, {
+      onDelete: "restrict",
+    }),
     ...timestamps,
   },
   (t) => [
@@ -974,6 +986,10 @@ export const mobileMoneyRequests = pgTable(
     requestedByUserId: uuid("requested_by_user_id").references(() => users.id, { onDelete: "restrict" }),
     lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    /** A payment held for review is closed by staff once they have checked it, with what they found. */
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    reviewedByUserId: uuid("reviewed_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    reviewNote: text("review_note"),
     ...timestamps,
   },
   (t) => [
@@ -1004,11 +1020,434 @@ export const mobileMoneyRequests = pgTable(
       sql`(${t.status} in ('successful', 'failed', 'needs_review')) = (${t.completedAt} is not null)`,
     ),
     check(
+      "mobile_money_requests_review",
+      sql`(${t.reviewedAt} is null) = (${t.reviewNote} is null)
+        and (${t.reviewedAt} is null or ${t.status} = 'needs_review')
+        and (${t.reviewNote} is null or char_length(${t.reviewNote}) between 3 and 200)`,
+    ),
+    check(
       "mobile_money_requests_lengths",
       sql`char_length(${t.provider}) between 1 and 40
         and (${t.providerReference} is null or char_length(${t.providerReference}) between 1 and 120)
         and (${t.transactionId} is null or char_length(${t.transactionId}) between 1 and 60)
         and (${t.statusReason} is null or char_length(${t.statusReason}) between 1 and 200)`,
     ),
+  ],
+);
+
+/**
+ * Callbacks received from Mobile Money providers, stored before anything else happens so none is lost.
+ * A callback only says which request to look at: its content is never trusted, and the outcome always
+ * comes from asking the provider. The raw body is not kept (it may hold personal data); its SHA-256
+ * makes provider retries count once.
+ */
+export const mobileMoneyCallbacks = pgTable(
+  "mobile_money_callbacks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    provider: text("provider").notNull(),
+    /** Our request id, when the callback carries it. */
+    requestId: uuid("request_id"),
+    providerReference: text("provider_reference"),
+    bodySha256: text("body_sha256").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    attempts: integer("attempts").notNull().default(0),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    /** The request's status after processing, or "unknown_request". */
+    result: text("result"),
+  },
+  (t) => [
+    unique("mobile_money_callbacks_dedupe").on(t.tenantId, t.provider, t.bodySha256),
+    index("mobile_money_callbacks_unprocessed_idx").on(t.tenantId, t.receivedAt),
+    check(
+      "mobile_money_callbacks_lengths",
+      sql`char_length(${t.provider}) between 1 and 40
+        and (${t.providerReference} is null or char_length(${t.providerReference}) between 1 and 120)
+        and char_length(${t.bodySha256}) = 64
+        and (${t.result} is null or char_length(${t.result}) between 1 and 40)`,
+    ),
+    check(
+      "mobile_money_callbacks_ref",
+      sql`${t.requestId} is not null or ${t.providerReference} is not null`,
+    ),
+    check("mobile_money_callbacks_processed", sql`(${t.processedAt} is null) = (${t.result} is null)`),
+  ],
+);
+
+/**
+ * Fee reminders sent by SMS to a student's guardian. Insert-only, one per student per school day, so a
+ * family is never sent the same reminder twice in a day. The message is queued in the notification
+ * outbox in the same transaction, with the balance and a private balance link.
+ */
+export const feeReminders = pgTable(
+  "fee_reminders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    studentId: uuid("student_id").notNull(),
+    guardianId: uuid("guardian_id").notNull(),
+    channel: text("channel", { enum: ["sms"] }).notNull(),
+    /** E.164 number the reminder was sent to (kept even if the guardian's number changes later). */
+    recipient: text("recipient").notNull(),
+    /** The school day it was sent, in the school's time zone. */
+    sentOn: date("sent_on", { mode: "string" }).notNull(),
+    /** What the student owed when the reminder was sent (also in the message). */
+    balancePesewas: bigint("balance_pesewas", { mode: "number" }).notNull(),
+    sentByUserId: uuid("sent_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "fee_reminders_student_fk",
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }),
+    foreignKey({
+      name: "fee_reminders_guardian_fk",
+      columns: [t.tenantId, t.guardianId],
+      foreignColumns: [guardians.tenantId, guardians.id],
+    }),
+    unique("fee_reminders_once_a_day").on(t.tenantId, t.studentId, t.channel, t.sentOn),
+    check("fee_reminders_recipient", sql`${t.recipient} ~ '^[+][1-9][0-9]{7,14}$'`),
+    check("fee_reminders_balance", sql`${t.balancePesewas} between 1 and 1000000000`),
+  ],
+);
+
+/**
+ * Parent sign-in codes (SMS, 6 digits, hash only). Global: a phone number may belong to guardians at several
+ * schools. `tenant_ids` are the schools whose guardians had the number when the code was asked for; empty
+ * means the number is unknown and no SMS was sent. Used for the per-number, per-network and per-school limits.
+ */
+export const parentSignInCodes = pgTable(
+  "parent_sign_in_codes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    phone: text("phone").notNull(),
+    codeHash: text("code_hash").notNull(),
+    tenantIds: uuid("tenant_ids").array().notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    ipAddress: inet("ip_address"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("parent_sign_in_codes_phone_idx").on(t.phone, t.createdAt),
+    index("parent_sign_in_codes_created_idx").on(t.createdAt),
+    check("parent_sign_in_codes_phone", sql`${t.phone} ~ '^[+][1-9][0-9]{7,14}$'`),
+  ],
+);
+
+/**
+ * Parent sessions (30 days, renewed while in use). The parent is identified by a verified phone number;
+ * which children they see is worked out on each request from the guardians each school has on file.
+ * Only the SHA-256 hash of the token is stored.
+ */
+export const parentSessions = pgTable(
+  "parent_sessions",
+  {
+    id: text("id").primaryKey(),
+    phone: text("phone").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    userAgent: text("user_agent"),
+    ipAddress: inet("ip_address"),
+  },
+  (t) => [
+    index("parent_sessions_phone_idx").on(t.phone),
+    index("parent_sessions_expires_idx").on(t.expiresAt),
+    check("parent_sessions_phone", sql`${t.phone} ~ '^[+][1-9][0-9]{7,14}$'`),
+  ],
+);
+
+/**
+ * Read-only links to one student's balance, sent in fee reminders and valid for 7 days. A link works only
+ * while the guardian it was sent to still has that number, is still linked to the student, and is not
+ * blocked from the parent view. Insert-only; only the token's hash is stored.
+ */
+export const balanceLinks = pgTable(
+  "balance_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    studentId: uuid("student_id").notNull(),
+    guardianId: uuid("guardian_id").notNull(),
+    recipient: text("recipient").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "balance_links_student_fk",
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "balance_links_guardian_fk",
+      columns: [t.tenantId, t.guardianId],
+      foreignColumns: [guardians.tenantId, guardians.id],
+    }).onDelete("cascade"),
+    check("balance_links_recipient", sql`${t.recipient} ~ '^[+][1-9][0-9]{7,14}$'`),
+  ],
+);
+
+/** A subject a school teaches, e.g. "English Language". Which levels take it is in `level_subjects`. */
+export const subjects = pgTable(
+  "subjects",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    name: citext("name").notNull(),
+    status: text("status", { enum: ["active", "archived"] })
+      .notNull()
+      .default("active"),
+    ...timestamps,
+  },
+  (t) => [
+    unique("subjects_tenant_name_unique").on(t.tenantId, t.name),
+    unique("subjects_tenant_id_unique").on(t.tenantId, t.id),
+    check("subjects_name_length", sql`char_length(${t.name}) between 1 and 60`),
+  ],
+);
+
+/** The subjects a level takes, in report-card order. */
+export const levelSubjects = pgTable(
+  "level_subjects",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    levelId: uuid("level_id").notNull(),
+    subjectId: uuid("subject_id").notNull(),
+    sequence: integer("sequence").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.levelId, t.subjectId] }),
+    foreignKey({
+      name: "level_subjects_level_fk",
+      columns: [t.tenantId, t.levelId],
+      foreignColumns: [levels.tenantId, levels.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "level_subjects_subject_fk",
+      columns: [t.tenantId, t.subjectId],
+      foreignColumns: [subjects.tenantId, subjects.id],
+    }).onDelete("cascade"),
+    index("level_subjects_tenant_idx").on(t.tenantId, t.levelId),
+  ],
+);
+
+/**
+ * How a term's subjects are assessed: the parts (e.g. class score 50%, exam 50%) and whether report cards
+ * show class positions. One per term, created from the previous term's or the defaults when first used.
+ */
+export const assessmentSchemes = pgTable(
+  "assessment_schemes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    termId: uuid("term_id").notNull(),
+    components: jsonb("components").$type<AssessmentComponent[]>().notNull(),
+    showPositions: boolean("show_positions").notNull().default(false),
+    updatedByUserId: uuid("updated_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    ...timestamps,
+  },
+  (t) => [
+    foreignKey({
+      name: "assessment_schemes_term_fk",
+      columns: [t.tenantId, t.termId],
+      foreignColumns: [terms.tenantId, terms.id],
+    }).onDelete("cascade"),
+    unique("assessment_schemes_term_unique").on(t.tenantId, t.termId),
+    check("assessment_schemes_components", sql`jsonb_typeof(${t.components}) = 'array'`),
+  ],
+);
+
+/** A school's grade bands for one stage (KG, Primary, JHS…). Without a row, the stage's defaults apply. */
+export const gradingScales = pgTable(
+  "grading_scales",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    stage: text("stage", { enum: ["creche", "nursery", "kindergarten", "primary", "jhs"] }).notNull(),
+    bands: jsonb("bands").$type<GradeBand[]>().notNull(),
+    updatedByUserId: uuid("updated_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    ...timestamps,
+  },
+  (t) => [
+    unique("grading_scales_stage_unique").on(t.tenantId, t.stage),
+    check("grading_scales_bands", sql`jsonb_typeof(${t.bands}) = 'array'`),
+  ],
+);
+
+/**
+ * One mark: a student's score for one part of one subject in a term, in tenths (37.5 → 375). Cleared marks
+ * are deleted. A trigger refuses any change once the student's report card for the term is published.
+ */
+export const assessmentScores = pgTable(
+  "assessment_scores",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    termId: uuid("term_id").notNull(),
+    studentId: uuid("student_id").notNull(),
+    subjectId: uuid("subject_id").notNull(),
+    componentKey: text("component_key").notNull(),
+    scoreTenths: integer("score_tenths").notNull(),
+    enteredByUserId: uuid("entered_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    ...timestamps,
+  },
+  (t) => [
+    foreignKey({
+      name: "assessment_scores_term_fk",
+      columns: [t.tenantId, t.termId],
+      foreignColumns: [terms.tenantId, terms.id],
+    }),
+    foreignKey({
+      name: "assessment_scores_student_fk",
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "assessment_scores_subject_fk",
+      columns: [t.tenantId, t.subjectId],
+      foreignColumns: [subjects.tenantId, subjects.id],
+    }),
+    unique("assessment_scores_unique").on(t.tenantId, t.termId, t.studentId, t.subjectId, t.componentKey),
+    index("assessment_scores_subject_idx").on(t.tenantId, t.termId, t.subjectId),
+    check("assessment_scores_range", sql`${t.scoreTenths} between 0 and 10000`),
+    check("assessment_scores_key", sql`char_length(${t.componentKey}) between 1 and 20`),
+  ],
+);
+
+/**
+ * A student's report card for a term. Remarks are written while it is a draft; publishing (head teacher)
+ * freezes everything it shows into `snapshot` and locks the student's scores. A published card can only be
+ * withdrawn back to draft (audited), never edited (trigger).
+ */
+export const reportCards = pgTable(
+  "report_cards",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    termId: uuid("term_id").notNull(),
+    studentId: uuid("student_id").notNull(),
+    status: text("status", { enum: ["draft", "published"] })
+      .notNull()
+      .default("draft"),
+    attitude: text("attitude"),
+    conduct: text("conduct"),
+    interest: text("interest"),
+    classTeacherRemark: text("class_teacher_remark"),
+    headTeacherRemark: text("head_teacher_remark"),
+    /** Days present and days the school was open, entered by hand until attendance is recorded (phase H). */
+    daysPresent: integer("days_present"),
+    daysOpen: integer("days_open"),
+    snapshot: jsonb("snapshot").$type<ReportCardSnapshot>(),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    publishedByUserId: uuid("published_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    updatedByUserId: uuid("updated_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    ...timestamps,
+  },
+  (t) => [
+    foreignKey({
+      name: "report_cards_term_fk",
+      columns: [t.tenantId, t.termId],
+      foreignColumns: [terms.tenantId, terms.id],
+    }),
+    foreignKey({
+      name: "report_cards_student_fk",
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }).onDelete("cascade"),
+    unique("report_cards_term_student_unique").on(t.tenantId, t.termId, t.studentId),
+    unique("report_cards_tenant_id_unique").on(t.tenantId, t.id),
+    check(
+      "report_cards_published_complete",
+      sql`(${t.status} = 'published') = (${t.snapshot} is not null and ${t.publishedAt} is not null)`,
+    ),
+    check(
+      "report_cards_attendance",
+      sql`(${t.daysOpen} is null or ${t.daysOpen} between 0 and 366) and (${t.daysPresent} is null or (${t.daysPresent} >= 0 and (${t.daysOpen} is null or ${t.daysPresent} <= ${t.daysOpen})))`,
+    ),
+    check(
+      "report_cards_text_length",
+      sql`coalesce(char_length(${t.attitude}), 0) <= 60 and coalesce(char_length(${t.conduct}), 0) <= 60 and coalesce(char_length(${t.interest}), 0) <= 60 and coalesce(char_length(${t.classTeacherRemark}), 0) <= 500 and coalesce(char_length(${t.headTeacherRemark}), 0) <= 500`,
+    ),
+  ],
+);
+
+/**
+ * A request to print published report cards in bulk. The worker (or the web process after responding)
+ * renders one PDF per class, so progress shows class by class and a large school never needs one huge file.
+ * Removed with its files after 7 days.
+ */
+export const reportCardBatches = pgTable(
+  "report_card_batches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    termId: uuid("term_id").notNull(),
+    classIds: uuid("class_ids").array().notNull(),
+    status: text("status", { enum: ["queued", "running", "done", "failed"] })
+      .notNull()
+      .default("queued"),
+    attempts: integer("attempts").notNull().default(0),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+    error: text("error"),
+    requestedByUserId: uuid("requested_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [
+    foreignKey({
+      name: "report_card_batches_term_fk",
+      columns: [t.tenantId, t.termId],
+      foreignColumns: [terms.tenantId, terms.id],
+    }).onDelete("cascade"),
+    unique("report_card_batches_tenant_id_unique").on(t.tenantId, t.id),
+    index("report_card_batches_status_idx").on(t.tenantId, t.status),
+    check("report_card_batches_classes", sql`cardinality(${t.classIds}) between 1 and 200`),
+  ],
+);
+
+/** One class's printed report cards from a batch, with the SHA-256 of the file (`02` §11). */
+export const reportCardFiles = pgTable(
+  "report_card_files",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    batchId: uuid("batch_id").notNull(),
+    classId: uuid("class_id").notNull(),
+    className: text("class_name").notNull(),
+    reportCount: integer("report_count").notNull(),
+    pdf: bytea("pdf"),
+    sha256: text("sha256"),
+    byteSize: integer("byte_size").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "report_card_files_batch_fk",
+      columns: [t.tenantId, t.batchId],
+      foreignColumns: [reportCardBatches.tenantId, reportCardBatches.id],
+    }).onDelete("cascade"),
+    unique("report_card_files_batch_class_unique").on(t.batchId, t.classId),
+    check("report_card_files_pdf", sql`(${t.reportCount} = 0) = (${t.pdf} is null)`),
   ],
 );

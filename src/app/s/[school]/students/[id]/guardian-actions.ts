@@ -2,7 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/server/db/client";
-import { addGuardian, setPrimaryGuardian, unlinkGuardian, updateGuardian } from "@/server/students/guardians";
+import {
+  addGuardian,
+  setParentAccess,
+  setPrimaryGuardian,
+  unlinkGuardian,
+  updateGuardian,
+} from "@/server/students/guardians";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 import { toFormError, type FormState } from "@/web/forms";
@@ -77,5 +83,17 @@ export async function unlinkGuardianAction(
 ) {
   return run(slug, null, async (ctx) => {
     await unlinkGuardian(db(), ctx, studentId, guardianId);
+  });
+}
+
+export async function setParentAccessAction(
+  slug: string,
+  guardianId: string,
+  blocked: boolean,
+  _prev: FormState,
+) {
+  return run(slug, null, async (ctx) => {
+    await setParentAccess(db(), ctx, guardianId, { blocked });
+    return blocked ? "They can no longer use the parent view." : "They can use the parent view again.";
   });
 }

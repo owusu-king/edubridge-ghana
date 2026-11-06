@@ -94,3 +94,38 @@ export function RemoveGuardianButton({ action, name }: { action: Action; name: s
     />
   );
 }
+
+export function ParentAccessButton({
+  action,
+  name,
+  blocked,
+}: {
+  action: Action;
+  name: string;
+  blocked: boolean;
+}) {
+  return blocked ? (
+    <FormDialog
+      trigger="Allow parent view"
+      triggerVariant="ghost"
+      triggerSize="sm"
+      triggerLabel={`Allow ${name} to use the parent view`}
+      title={`Allow ${name} to use the parent view again?`}
+      description="They can sign in with a code sent to their phone and see the fees of every child they are linked to."
+      submitLabel="Allow"
+      action={action}
+    />
+  ) : (
+    <FormDialog
+      trigger="Block parent view"
+      triggerVariant="ghost"
+      triggerSize="sm"
+      triggerLabel={`Block ${name} from the parent view`}
+      title={`Block ${name} from the parent view?`}
+      description="From their next page they see nothing from this school, for every child they are linked to, and links in fee reminders sent to them stop working. Their details and messages from the school are not affected."
+      submitLabel="Block"
+      danger
+      action={action}
+    />
+  );
+}

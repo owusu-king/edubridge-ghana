@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Smartphone } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
@@ -33,7 +34,12 @@ export function MobileMoneyDialog({
 }) {
   return (
     <FormDialog
-      trigger="Request Mobile Money"
+      trigger={
+        <>
+          <Smartphone aria-hidden="true" />
+          Request Mobile Money
+        </>
+      }
       triggerSize="sm"
       title="Request Mobile Money"
       description={`The payer approves the payment for ${studentName} on their phone with their PIN. The receipt is issued once the network confirms it.`}

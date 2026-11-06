@@ -13,7 +13,7 @@ const nextConfig: NextConfig = {
   typedRoutes: true,
   // Student imports send a spreadsheet (up to 2 MB) and its parsed rows to server actions.
   experimental: { serverActions: { bodySizeLimit: "4mb" } },
-  serverExternalPackages: ["pg"],
+  serverExternalPackages: ["pg", "@react-pdf/renderer"],
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

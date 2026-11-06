@@ -31,6 +31,7 @@ describe("mock provider", () => {
       msisdn,
       network: "mtn",
       payerMessage: "School fees",
+      callbackUrl: null,
     });
 
   it("approves by default, with a stable transaction id", async () => {

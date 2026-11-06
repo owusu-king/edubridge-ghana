@@ -5,18 +5,28 @@ export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 export type ButtonSize = "sm" | "md";
 
 const base =
-  "inline-flex items-center justify-center gap-2 rounded-md font-medium whitespace-nowrap transition-colors " +
+  "inline-flex items-center justify-center gap-2 rounded-lg font-medium whitespace-nowrap select-none " +
+  "transition-[background-color,border-color,color,box-shadow,transform] duration-150 active:translate-y-px " +
   "disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0";
 
+/*
+ * Primary uses the brand navy; a soft inner highlight and shadow give it depth without a gradient.
+ * Secondary is a quiet outlined button. Ghost is a text action in the accent colour that gains a tint
+ * on hover, so it still reads as clickable.
+ */
 const variants: Record<ButtonVariant, string> = {
-  primary: "bg-ink text-white hover:bg-ink/88 shadow-raised",
-  secondary: "bg-surface text-ink border border-line-strong hover:bg-subtle shadow-raised",
-  ghost: "text-ink-2 hover:bg-subtle hover:text-ink",
-  danger: "bg-critical text-white hover:bg-critical/90 shadow-raised",
+  primary:
+    "bg-accent text-white hover:bg-accent-hover " +
+    "shadow-[inset_0_1px_0_rgb(255_255_255/0.14),0_1px_2px_rgb(27_26_23/0.18)]",
+  secondary: "bg-surface text-ink border border-line-strong hover:border-ink-3 hover:bg-subtle shadow-raised",
+  ghost: "text-accent hover:bg-accent-soft hover:text-accent-hover",
+  danger:
+    "bg-critical text-white hover:bg-critical/90 " +
+    "shadow-[inset_0_1px_0_rgb(255_255_255/0.14),0_1px_2px_rgb(27_26_23/0.18)]",
 };
 
 const sizes: Record<ButtonSize, string> = {
-  sm: "h-8 px-3 text-sm",
+  sm: "h-9 px-3.5 text-sm",
   md: "h-10 px-4 text-base",
 };
 

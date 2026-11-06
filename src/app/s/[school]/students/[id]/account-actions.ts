@@ -8,10 +8,13 @@ import { addConcession, endConcession } from "@/server/fees/concessions";
 import { recordAdjustment, setOpeningBalance } from "@/server/fees/opening-balances";
 import { cancelPaymentPlan, createPaymentPlan } from "@/server/fees/payment-plans";
 import { recordPayment } from "@/server/fees/payments";
+import { sendFeeReminders } from "@/server/fees/reminders";
 import { checkMobileMoneyRequest, requestMobileMoneyPayment } from "@/server/mobile-money/requests";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 import { toFormError, type FormState } from "@/web/forms";
+import { dispatchAfterResponse } from "@/web/notify";
+import { describeReminders } from "@/web/reminders";
 
 export async function reverseEntryAction(
   slug: string,
@@ -239,4 +242,25 @@ export async function checkMobileMoneyAction(
   if (result.status === "successful" && result.paymentId)
     redirect(schoolPath(slug, `fees/receipts/${result.paymentId}`));
   return { status: "success", message: CHECK_MESSAGES[result.status] };
+}
+
+/** Sends the family one SMS fee reminder (at most one a day). */
+export async function sendReminderAction(
+  slug: string,
+  studentId: string,
+  _prev: FormState,
+): Promise<FormState> {
+  const { ctx } = await requireTenant(slug);
+  let sent: number;
+  let message: string;
+  try {
+    const result = await sendFeeReminders(db(), ctx, { studentIds: [studentId] });
+    sent = result.sent;
+    message = sent ? "Reminder sent." : describeReminders(result);
+  } catch (error) {
+    return toFormError(error);
+  }
+  if (sent) dispatchAfterResponse();
+  revalidatePath(schoolPath(slug, `students/${studentId}`));
+  return { status: sent ? "success" : "error", message };
 }

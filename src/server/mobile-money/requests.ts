@@ -1,5 +1,6 @@
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { todayIn } from "@/lib/format";
 import { MOBILE_MONEY_NETWORKS, type MobileMoneyNetwork } from "@/lib/mobile-money";
@@ -9,12 +10,12 @@ import { recordAudit } from "../audit/record";
 import { assertCan } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
-import { mobileMoneyRequests, payments, users } from "../db/schema";
+import { mobileMoneyRequests, payments, students, users } from "../db/schema";
 import { DomainError, PG_UNIQUE_VIOLATION, pgErrorCode } from "../errors";
-import { loadFinanceStudent } from "../fees/access";
+import { campusScopeFilter, loadFinanceStudent } from "../fees/access";
 import { insertPayment } from "../fees/payments";
 import type { TenantContext } from "../tenancy/service";
-import { mobileMoneyProvider } from "./config";
+import { callbackUrlFor, mobileMoneyProvider } from "./config";
 import { ProviderError, type CollectionStatus, type MobileMoneyProvider } from "./provider";
 
 /**
@@ -31,17 +32,36 @@ export const PROMPT_EXPIRY_MS = 30 * 60_000;
 /** How long a provider may take before "no record of this request" means it was never received. */
 const NOT_FOUND_GRACE_MS = 5 * 60_000;
 
-const OPEN: readonly MobileMoneyRequestStatus[] = ["pending", "expired"];
+export const OPEN_STATUSES: readonly MobileMoneyRequestStatus[] = ["pending", "expired"];
+const OPEN = OPEN_STATUSES;
 
 export interface MobileMoneyDeps {
   /** Defaults to the provider configured for this deployment. */
   provider?: MobileMoneyProvider | null;
   now?: Date;
+  /** Base URL for provider callbacks; defaults to APP_URL. */
+  callbackBaseUrl?: string;
 }
 
 const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
 
-function providerFor(deps: MobileMoneyDeps): MobileMoneyProvider | null {
+/** Who records an outcome: a staff member, or the system (worker, callbacks) with no user. */
+export interface Actor {
+  tenantId: string;
+  timezone: string;
+  userId: string | null;
+}
+
+const actorOf = (ctx: TenantContext): Actor => ({
+  tenantId: ctx.tenant.id,
+  timezone: ctx.tenant.timezone,
+  userId: ctx.userId,
+});
+const actorScope = (actor: Actor) => ({ tenantId: actor.tenantId, userId: actor.userId ?? "" });
+
+export type MobileMoneyRequest = typeof mobileMoneyRequests.$inferSelect;
+
+export function providerFor(deps: MobileMoneyDeps): MobileMoneyProvider | null {
   return deps.provider === undefined ? mobileMoneyProvider() : deps.provider;
 }
 
@@ -180,6 +200,7 @@ export async function requestMobileMoneyPayment(
       msisdn: data.phone,
       network: data.network,
       payerMessage: `School fees for ${created.studentName}, ${ctx.tenant.name}`,
+      callbackUrl: callbackUrlFor(provider.name, ctx.tenant.id, deps.callbackBaseUrl),
     });
     if (started.providerReference) {
       await withTenant(database, scope(ctx), (tx) =>
@@ -199,7 +220,10 @@ export async function requestMobileMoneyPayment(
       return { requestId: created.id, status: "pending", replayed: false, unconfirmed: true };
     }
     await withTenant(database, scope(ctx), async (tx) => {
-      await finish(tx, ctx, created.id, { status: "failed", statusReason: reason(error.message) });
+      await finish(tx, actorOf(ctx), created.id, {
+        status: "failed",
+        statusReason: reason(error.message),
+      });
     });
     throw new DomainError("provider_rejected", error.message, "phone");
   }
@@ -233,18 +257,31 @@ export async function checkMobileMoneyRequest(
       "provider_unavailable",
       "This prompt was sent through a provider that is no longer set up. If the money arrived, record the payment by hand.",
     );
-  let status: CollectionStatus;
   try {
-    status = await provider.getStatus({
-      reference: request.id,
-      providerReference: request.providerReference,
-    });
+    return await settleRequest(database, actorOf(ctx), request, provider, deps.now ?? new Date());
   } catch (error) {
     if (error instanceof ProviderError)
       throw new DomainError("provider_unavailable", `${error.message} Try again in a minute.`);
     throw error;
   }
-  return applyStatus(database, ctx, request.id, status, deps.now ?? new Date());
+}
+
+/**
+ * Asks the request's provider for its outcome and records it. Shared by staff checks, callbacks and
+ * the worker. Throws ProviderError when the provider cannot be reached (nothing is recorded then).
+ */
+export async function settleRequest(
+  database: Database,
+  actor: Actor,
+  request: Pick<MobileMoneyRequest, "id" | "providerReference">,
+  provider: MobileMoneyProvider,
+  now: Date,
+): Promise<CheckOutcome> {
+  const status = await provider.getStatus({
+    reference: request.id,
+    providerReference: request.providerReference,
+  });
+  return applyStatus(database, actor, request.id, status, now);
 }
 
 async function loadRequest(database: Database, ctx: TenantContext, requestId: string) {
@@ -283,17 +320,17 @@ function mismatch(
 
 async function applyStatus(
   database: Database,
-  ctx: TenantContext,
+  actor: Actor,
   requestId: string,
   status: CollectionStatus,
   now: Date,
 ): Promise<CheckOutcome> {
-  return withTenant(database, scope(ctx), async (tx) => {
+  return withTenant(database, actorScope(actor), async (tx) => {
     // Lock the request: a concurrent check waits here, then sees the outcome this one recorded.
     const [row] = await tx
       .select()
       .from(mobileMoneyRequests)
-      .where(and(eq(mobileMoneyRequests.tenantId, ctx.tenant.id), eq(mobileMoneyRequests.id, requestId)))
+      .where(and(eq(mobileMoneyRequests.tenantId, actor.tenantId), eq(mobileMoneyRequests.id, requestId)))
       .for("update");
     if (!row) throw new DomainError("request_not_found", "Mobile Money request not found.");
     if (!OPEN.includes(row.status)) return outcome(row);
@@ -303,7 +340,7 @@ async function applyStatus(
       case "successful": {
         const problem = mismatch(row, status);
         if (problem) {
-          return finish(tx, ctx, row.id, {
+          return finish(tx, actor, row.id, {
             status: "needs_review",
             statusReason: reason(problem),
             transactionId:
@@ -312,31 +349,31 @@ async function applyStatus(
         }
         const completed = status.completedAt && status.completedAt < now ? status.completedAt : now;
         const { paymentId } = await insertPayment(tx, {
-          tenantId: ctx.tenant.id,
+          tenantId: actor.tenantId,
           studentId: row.studentId,
           amountPesewas: row.amountPesewas,
           method: "mobile_money",
           reference: status.transactionId,
           payerName: null,
-          paidOn: todayIn(ctx.tenant.timezone, completed),
+          paidOn: todayIn(actor.timezone, completed),
           idempotencyKey: `mobile_money:${row.id}`,
-          recordedByUserId: ctx.userId,
+          recordedByUserId: actor.userId,
         });
-        return finish(tx, ctx, row.id, {
+        return finish(tx, actor, row.id, {
           status: "successful",
           paymentId,
           transactionId: status.transactionId,
         });
       }
       case "failed":
-        return finish(tx, ctx, row.id, { status: "failed", statusReason: reason(status.reason) });
+        return finish(tx, actor, row.id, { status: "failed", statusReason: reason(status.reason) });
       case "not_found":
         if (age > NOT_FOUND_GRACE_MS)
-          return finish(tx, ctx, row.id, {
+          return finish(tx, actor, row.id, {
             status: "failed",
             statusReason: "The network has no record of this prompt, so it was not sent.",
           });
-        return touch(tx, ctx, row);
+        return touch(tx, actor, row);
       case "pending":
         if (row.status === "pending" && age > PROMPT_EXPIRY_MS) {
           const [updated] = await tx
@@ -345,29 +382,29 @@ async function applyStatus(
             .where(eq(mobileMoneyRequests.id, row.id))
             .returning();
           await recordAudit(tx, {
-            tenantId: ctx.tenant.id,
-            actorUserId: ctx.userId,
+            tenantId: actor.tenantId,
+            actorUserId: actor.userId,
             action: "mobile_money.expired",
             entityType: "mobile_money_request",
             entityId: row.id,
           });
           return outcome(updated!);
         }
-        return touch(tx, ctx, row);
+        return touch(tx, actor, row);
     }
   });
 }
 
 async function touch(
   tx: Transaction,
-  ctx: TenantContext,
+  actor: Actor,
   row: typeof mobileMoneyRequests.$inferSelect,
 ): Promise<CheckOutcome> {
   const now = new Date();
   await tx
     .update(mobileMoneyRequests)
     .set({ lastCheckedAt: now, updatedAt: now })
-    .where(and(eq(mobileMoneyRequests.tenantId, ctx.tenant.id), eq(mobileMoneyRequests.id, row.id)));
+    .where(and(eq(mobileMoneyRequests.tenantId, actor.tenantId), eq(mobileMoneyRequests.id, row.id)));
   return outcome(row);
 }
 
@@ -379,7 +416,7 @@ const FINISH_AUDIT = {
 
 async function finish(
   tx: Transaction,
-  ctx: TenantContext,
+  actor: Actor,
   requestId: string,
   result:
     | { status: "successful"; paymentId: string; transactionId: string }
@@ -398,11 +435,11 @@ async function finish(
       lastCheckedAt: now,
       updatedAt: now,
     })
-    .where(and(eq(mobileMoneyRequests.tenantId, ctx.tenant.id), eq(mobileMoneyRequests.id, requestId)))
+    .where(and(eq(mobileMoneyRequests.tenantId, actor.tenantId), eq(mobileMoneyRequests.id, requestId)))
     .returning();
   await recordAudit(tx, {
-    tenantId: ctx.tenant.id,
-    actorUserId: ctx.userId,
+    tenantId: actor.tenantId,
+    actorUserId: actor.userId,
     action: FINISH_AUDIT[result.status],
     entityType: "mobile_money_request",
     entityId: requestId,
@@ -416,6 +453,9 @@ async function finish(
 
 export interface MobileMoneyRequestRow {
   id: string;
+  studentId: string;
+  studentName: string;
+  admissionNumber: string;
   status: MobileMoneyRequestStatus;
   statusReason: string | null;
   network: MobileMoneyNetwork;
@@ -426,7 +466,58 @@ export interface MobileMoneyRequestRow {
   receiptNumber: string | null;
   requestedBy: string | null;
   createdAt: Date;
+  reviewedAt: Date | null;
+  reviewedBy: string | null;
+  reviewNote: string | null;
   testMode: boolean;
+}
+
+const requester = alias(users, "requester");
+const reviewer = alias(users, "reviewer");
+
+/** Requests with their student, receipt and the people involved, newest first. */
+async function selectRows(
+  tx: Transaction,
+  where: SQL | undefined,
+  limit: number,
+  offset = 0,
+): Promise<MobileMoneyRequestRow[]> {
+  const rows = await tx
+    .select({
+      id: mobileMoneyRequests.id,
+      studentId: mobileMoneyRequests.studentId,
+      firstName: students.firstName,
+      lastName: students.lastName,
+      admissionNumber: students.admissionNumber,
+      status: mobileMoneyRequests.status,
+      statusReason: mobileMoneyRequests.statusReason,
+      network: mobileMoneyRequests.network,
+      msisdn: mobileMoneyRequests.msisdn,
+      amountPesewas: mobileMoneyRequests.amountPesewas,
+      transactionId: mobileMoneyRequests.transactionId,
+      paymentId: mobileMoneyRequests.paymentId,
+      receiptNumber: payments.receiptNumber,
+      requestedBy: requester.name,
+      createdAt: mobileMoneyRequests.createdAt,
+      reviewedAt: mobileMoneyRequests.reviewedAt,
+      reviewedBy: reviewer.name,
+      reviewNote: mobileMoneyRequests.reviewNote,
+      provider: mobileMoneyRequests.provider,
+    })
+    .from(mobileMoneyRequests)
+    .innerJoin(students, eq(students.id, mobileMoneyRequests.studentId))
+    .leftJoin(payments, eq(payments.id, mobileMoneyRequests.paymentId))
+    .leftJoin(requester, eq(requester.id, mobileMoneyRequests.requestedByUserId))
+    .leftJoin(reviewer, eq(reviewer.id, mobileMoneyRequests.reviewedByUserId))
+    .where(where)
+    .orderBy(desc(mobileMoneyRequests.createdAt), desc(mobileMoneyRequests.id))
+    .limit(limit)
+    .offset(offset);
+  return rows.map(({ provider, firstName, lastName, ...row }) => ({
+    ...row,
+    studentName: `${firstName} ${lastName}`,
+    testMode: provider === "mock",
+  }));
 }
 
 /** A student's most recent Mobile Money requests, newest first. */
@@ -439,29 +530,108 @@ export async function listMobileMoneyRequests(
   assertCan(ctx.roles, "fees.view");
   return withTenant(database, scope(ctx), async (tx) => {
     if (!(await loadFinanceStudent(tx, ctx, studentId))) return [];
-    const rows = await tx
-      .select({
-        id: mobileMoneyRequests.id,
-        status: mobileMoneyRequests.status,
-        statusReason: mobileMoneyRequests.statusReason,
-        network: mobileMoneyRequests.network,
-        msisdn: mobileMoneyRequests.msisdn,
-        amountPesewas: mobileMoneyRequests.amountPesewas,
-        transactionId: mobileMoneyRequests.transactionId,
-        paymentId: mobileMoneyRequests.paymentId,
-        receiptNumber: payments.receiptNumber,
-        requestedBy: users.name,
-        createdAt: mobileMoneyRequests.createdAt,
-        provider: mobileMoneyRequests.provider,
-      })
+    return selectRows(
+      tx,
+      and(eq(mobileMoneyRequests.tenantId, ctx.tenant.id), eq(mobileMoneyRequests.studentId, studentId)),
+      limit,
+    );
+  });
+}
+
+export const MOBILE_MONEY_PAGE_SIZE = 50;
+
+/** "attention": held for review and not yet reviewed. "waiting": still waiting for the payer. */
+export const MOBILE_MONEY_FILTERS = ["all", "attention", "waiting"] as const;
+export type MobileMoneyFilter = (typeof MOBILE_MONEY_FILTERS)[number];
+
+const needsAttention = and(
+  eq(mobileMoneyRequests.status, "needs_review"),
+  isNull(mobileMoneyRequests.reviewedAt),
+);
+
+export interface SchoolMobileMoneyPage {
+  rows: MobileMoneyRequestRow[];
+  total: number;
+  page: number;
+  /** Held payments nobody has reviewed yet, whatever the filter. */
+  attentionCount: number;
+}
+
+/** Every Mobile Money request the member can see (campus scope applies), newest first. */
+export async function listSchoolMobileMoneyRequests(
+  database: Database,
+  ctx: TenantContext,
+  options: { filter: MobileMoneyFilter; page: number },
+): Promise<SchoolMobileMoneyPage> {
+  assertCan(ctx.roles, "fees.view");
+  const page = Math.max(1, Math.floor(options.page));
+  const visible = and(
+    eq(mobileMoneyRequests.tenantId, ctx.tenant.id),
+    campusScopeFilter(ctx, mobileMoneyRequests.studentId),
+  );
+  const filtered =
+    options.filter === "attention"
+      ? and(visible, needsAttention)
+      : options.filter === "waiting"
+        ? and(visible, inArray(mobileMoneyRequests.status, [...OPEN_STATUSES]))
+        : visible;
+  return withTenant(database, scope(ctx), async (tx) => {
+    // One transaction is one connection: queries run one after another.
+    const [totals] = await tx.select({ n: count() }).from(mobileMoneyRequests).where(filtered);
+    const [attention] = await tx
+      .select({ n: count() })
       .from(mobileMoneyRequests)
-      .leftJoin(payments, eq(payments.id, mobileMoneyRequests.paymentId))
-      .leftJoin(users, eq(users.id, mobileMoneyRequests.requestedByUserId))
-      .where(
-        and(eq(mobileMoneyRequests.tenantId, ctx.tenant.id), eq(mobileMoneyRequests.studentId, studentId)),
-      )
-      .orderBy(desc(mobileMoneyRequests.createdAt))
-      .limit(limit);
-    return rows.map(({ provider, ...row }) => ({ ...row, testMode: provider === "mock" }));
+      .where(and(visible, needsAttention));
+    const rows = await selectRows(tx, filtered, MOBILE_MONEY_PAGE_SIZE, (page - 1) * MOBILE_MONEY_PAGE_SIZE);
+    return { rows, total: totals!.n, page, attentionCount: attention!.n };
+  });
+}
+
+const reviewSchema = z.object({
+  note: z
+    .string()
+    .trim()
+    .min(3, "Say what you found, for example the receipt you recorded by hand.")
+    .max(200, "Use 200 characters or fewer."),
+});
+
+/**
+ * Closes a payment held for review once staff have checked the school's Mobile Money statement and
+ * dealt with it (usually by recording what actually arrived by hand). Recorded once, with a note.
+ */
+export async function markMobileMoneyReviewed(
+  database: Database,
+  ctx: TenantContext,
+  requestId: string,
+  input: unknown,
+): Promise<void> {
+  assertCan(ctx.roles, "payments.record");
+  const { note } = reviewSchema.parse(input);
+  if (!z.string().uuid().safeParse(requestId).success)
+    throw new DomainError("request_not_found", "Mobile Money request not found.");
+  await withTenant(database, scope(ctx), async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(mobileMoneyRequests)
+      .where(and(eq(mobileMoneyRequests.tenantId, ctx.tenant.id), eq(mobileMoneyRequests.id, requestId)))
+      .for("update");
+    if (!row || !(await loadFinanceStudent(tx, ctx, row.studentId)))
+      throw new DomainError("request_not_found", "Mobile Money request not found.");
+    if (row.status !== "needs_review")
+      throw new DomainError("not_held", "Only payments held for review can be marked as reviewed.");
+    if (row.reviewedAt) throw new DomainError("already_reviewed", "This payment has already been reviewed.");
+    const now = new Date();
+    await tx
+      .update(mobileMoneyRequests)
+      .set({ reviewedAt: now, reviewedByUserId: ctx.userId, reviewNote: note, updatedAt: now })
+      .where(eq(mobileMoneyRequests.id, row.id));
+    await recordAudit(tx, {
+      tenantId: ctx.tenant.id,
+      actorUserId: ctx.userId,
+      action: "mobile_money.reviewed",
+      entityType: "mobile_money_request",
+      entityId: row.id,
+      metadata: { note },
+    });
   });
 }
