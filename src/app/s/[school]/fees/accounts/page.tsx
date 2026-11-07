@@ -5,7 +5,7 @@ import { Button, buttonStyles } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/field";
 import { DescriptionList, EmptyState } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { can } from "@/server/authz/permissions";
+import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { ACCOUNTS_PAGE_SIZE, listAccounts } from "@/server/fees/payments";
 import { listClassOptions } from "@/server/students/service";
@@ -52,7 +52,7 @@ export default async function AccountsPage({
     return `${schoolPath(slug, "fees/accounts")}?${qs.toString()}` as Parameters<typeof Link>[0]["href"];
   };
 
-  const canImport = can(ctx.roles, "fees.manage") && ctx.campusIds === null;
+  const canImport = allowed(ctx, "fees.manage") && ctx.campusIds === null;
 
   return (
     <div className="space-y-6">

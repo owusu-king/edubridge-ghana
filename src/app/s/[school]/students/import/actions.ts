@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { can } from "@/server/authz/permissions";
+import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import {
   autoMapColumns,
@@ -28,7 +28,7 @@ export async function uploadAction(
   formData: FormData,
 ): Promise<FormState<Uploaded>> {
   const { ctx } = await requireTenant(slug);
-  if (!can(ctx.roles, "students.manage")) {
+  if (!allowed(ctx, "students.manage")) {
     return { status: "error", message: "You do not have permission to import students." };
   }
   const file = formData.get("file");

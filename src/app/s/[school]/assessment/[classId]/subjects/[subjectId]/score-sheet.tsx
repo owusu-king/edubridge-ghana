@@ -1,10 +1,12 @@
 "use client";
 
 import { Lock } from "lucide-react";
-import { useState, type KeyboardEvent } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useFormAction } from "@/components/ui/use-form-action";
+import { useSyncQueue, type SyncAction } from "@/components/sync/use-sync-queue";
 import {
   bandFor,
   parseScore,
@@ -30,22 +32,113 @@ interface SheetProps {
   subjectName: string;
 }
 
+interface Cell {
+  studentId: string;
+  key: string;
+  original: string;
+  value: string;
+}
+
+interface ConflictCell {
+  studentId: string;
+  key: string;
+  yours: string;
+  theirs: string;
+}
+
+/** Where offline marks go: the sheet's term, class and subject, and whose device it is. */
+export interface SheetSync {
+  school: string;
+  userId: string;
+  termId: string;
+  classId: string;
+  subjectId: string;
+  label: string;
+  action: SyncAction;
+}
+
+function changedCells(formData: FormData): Cell[] {
+  const cells: Cell[] = [];
+  for (const [name, value] of formData.entries()) {
+    if (!name.startsWith("s:") || typeof value !== "string") continue;
+    const [, studentId, key] = name.split(":");
+    if (!studentId || !key) continue;
+    const original = String(formData.get(`o:${studentId}:${key}`) ?? "");
+    if (value.trim() !== original.trim()) cells.push({ studentId, key, original, value });
+  }
+  return cells;
+}
+
 /**
  * The marks grid. The form state lives here, outside the keyed grid, so the save message survives the grid
- * being rebuilt from the saved marks.
+ * being rebuilt from the saved marks. Without a connection, marks are kept on the device and sent through
+ * the sync protocol when it returns; marks someone else changed meanwhile come back for the person to decide.
  */
 export function ScoreSheet({
   action,
   version,
+  sync,
   ...sheet
-}: SheetProps & { action: (prev: FormState, formData: FormData) => Promise<FormState>; version: string }) {
-  const { state, pending, onSubmit } = useFormAction(action);
+}: SheetProps & {
+  action: (prev: FormState, formData: FormData) => Promise<FormState>;
+  version: string;
+  sync: SheetSync;
+}) {
+  const router = useRouter();
+  const scope = `scores:${sync.termId}:${sync.classId}:${sync.subjectId}`;
+  const queue = useSyncQueue({ school: sync.school, userId: sync.userId, scope, action: sync.action });
+
+  useEffect(() => {
+    if (queue.lastApplied.length) router.refresh();
+  }, [queue.lastApplied, router]);
+
+  async function keepOnDevice(formData: FormData): Promise<FormState> {
+    const cells = changedCells(formData);
+    if (cells.length === 0) return { status: "success", message: "No changes to save." };
+    // One waiting change per sheet: later edits update it, keeping what the sheet first showed.
+    const waiting = queue.pending[0];
+    const merged = new Map<string, Cell>();
+    for (const c of (waiting?.payload as { cells?: Cell[] } | undefined)?.cells ?? [])
+      merged.set(`${c.studentId}:${c.key}`, c);
+    for (const c of cells) {
+      const earlier = merged.get(`${c.studentId}:${c.key}`);
+      merged.set(`${c.studentId}:${c.key}`, { ...c, original: earlier ? earlier.original : c.original });
+    }
+    if (waiting) await queue.remove(waiting.id);
+    await queue.add({
+      kind: "assessment.scores",
+      label: sync.label,
+      payload: {
+        termId: sync.termId,
+        classId: sync.classId,
+        subjectId: sync.subjectId,
+        cells: [...merged.values()],
+      },
+    });
+    return {
+      status: "success",
+      message: `You are offline. ${cells.length} ${cells.length === 1 ? "mark is" : "marks are"} kept on this device and will be sent when you are back online.`,
+    };
+  }
+
+  async function save(prev: FormState, formData: FormData): Promise<FormState> {
+    if (!navigator.onLine) return keepOnDevice(formData);
+    try {
+      return await action(prev, formData);
+    } catch (error) {
+      if (error instanceof TypeError || !navigator.onLine) return keepOnDevice(formData);
+      throw error;
+    }
+  }
+
+  const { state, pending, onSubmit } = useFormAction(save);
   const editable = sheet.students.some((s) => !s.locked);
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-4" aria-label={`${sheet.subjectName} scores`}>
       {state.status !== "idle" && state.message && (
         <Alert tone={state.status === "error" ? "critical" : "positive"}>{state.message}</Alert>
       )}
+      <WaitingMarks queue={queue} students={sheet.students} components={sheet.components} sync={sync} />
       <Grid key={version} {...sheet} />
       {editable && (
         <div className="flex flex-wrap items-center gap-3">
@@ -56,6 +149,111 @@ export function ScoreSheet({
         </div>
       )}
     </form>
+  );
+}
+
+/** Marks kept on this device, and marks that came back because someone else changed them meanwhile. */
+function WaitingMarks({
+  queue,
+  students,
+  components,
+  sync,
+}: {
+  queue: ReturnType<typeof useSyncQueue>;
+  students: SheetStudent[];
+  components: AssessmentComponent[];
+  sync: SheetSync;
+}) {
+  const nameOf = (id: string) => students.find((s) => s.id === id)?.name ?? "A student";
+  const partOf = (key: string) => components.find((c) => c.key === key)?.name ?? key;
+  const waiting = queue.pending.reduce(
+    (n, op) => n + ((op.payload as { cells?: unknown[] }).cells?.length ?? 0),
+    0,
+  );
+  if (!waiting && !queue.conflicts.length && !queue.rejected.length && !queue.error) return null;
+
+  /** The person keeps their own marks: sent again from what is saved now, so nothing else is overwritten. */
+  async function keepMine(opId: string, cells: ConflictCell[]) {
+    await queue.add({
+      kind: "assessment.scores",
+      label: sync.label,
+      payload: {
+        termId: sync.termId,
+        classId: sync.classId,
+        subjectId: sync.subjectId,
+        cells: cells.map((c) => ({ studentId: c.studentId, key: c.key, original: c.theirs, value: c.yours })),
+      },
+    });
+    await queue.remove(opId);
+  }
+
+  return (
+    <div className="space-y-3" aria-live="polite">
+      {waiting > 0 && (
+        <Alert tone="info">
+          {waiting} {waiting === 1 ? "mark is" : "marks are"} kept on this device, waiting for a connection.
+          {queue.sending ? " Sending…" : ""}
+        </Alert>
+      )}
+      {queue.error && <Alert tone="critical">{queue.error}</Alert>}
+      {queue.conflicts.map((op) => {
+        const result = op.outcome?.status === "conflict" ? op.outcome.result : {};
+        const cells = (result.conflictCells as ConflictCell[] | undefined) ?? [];
+        const locked = Number(result.locked ?? 0);
+        return (
+          <section
+            key={op.id}
+            aria-label="Marks to decide"
+            className="space-y-2 rounded-lg border border-line-strong bg-subtle px-4 py-3"
+          >
+            <p className="text-sm font-medium text-ink">
+              {cells.length
+                ? "Someone else changed these marks while yours were waiting on this device. Which should stay?"
+                : "Some marks from this device were not saved."}
+            </p>
+            {cells.length > 0 && (
+              <ul className="space-y-1 text-sm text-ink-2">
+                {cells.map((c) => (
+                  <li key={`${c.studentId}:${c.key}`}>
+                    {nameOf(c.studentId)}, {partOf(c.key)}: yours <strong>{c.yours || "empty"}</strong>, saved{" "}
+                    <strong>{c.theirs || "empty"}</strong>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {locked > 0 && (
+              <p className="text-sm text-ink-2">
+                {locked} {locked === 1 ? "mark was" : "marks were"} not saved because the report card was
+                published.
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="sm" variant="secondary" onClick={() => void queue.remove(op.id)}>
+                {cells.length ? "Keep saved marks" : "Dismiss"}
+              </Button>
+              {cells.length > 0 && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void keepMine(op.id, cells)}
+                >
+                  Use my marks
+                </Button>
+              )}
+            </div>
+          </section>
+        );
+      })}
+      {queue.rejected.map((op) => (
+        <Alert key={op.id} tone="critical">
+          {op.outcome?.status === "rejected" ? op.outcome.error.message : "These marks could not be saved."}{" "}
+          <button type="button" className="font-medium underline" onClick={() => void queue.remove(op.id)}>
+            Dismiss
+          </button>
+        </Alert>
+      ))}
+    </div>
   );
 }
 

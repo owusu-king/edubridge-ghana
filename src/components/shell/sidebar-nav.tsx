@@ -7,12 +7,20 @@ import { navLinks, type ShellArea } from "./navigation";
 
 export function SidebarNav({ area, onNavigate }: { area: ShellArea; onNavigate?: () => void }) {
   const pathname = usePathname();
+  const links = navLinks(area);
+  const matches = (link: (typeof links)[number]) => {
+    const base = link.activePrefix ?? link.href;
+    return link.exact ? pathname === link.href : pathname === base || pathname.startsWith(`${base}/`);
+  };
+  // When links nest (/admin and /admin/billing), only the most specific match is current.
+  const current = links
+    .filter(matches)
+    .sort((a, b) => (b.activePrefix ?? b.href).length - (a.activePrefix ?? a.href).length)[0];
   return (
     <nav aria-label={area.kind === "platform" ? "Platform" : "School"}>
       <ul className="space-y-0.5">
-        {navLinks(area).map(({ label, href, icon: Icon, exact, activePrefix }) => {
-          const base = activePrefix ?? href;
-          const active = exact ? pathname === href : pathname === base || pathname.startsWith(`${base}/`);
+        {links.map(({ label, href, icon: Icon }) => {
+          const active = current?.href === href;
           return (
             <li key={label}>
               <Link

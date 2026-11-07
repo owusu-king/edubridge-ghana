@@ -4,12 +4,17 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, ChevronRight, FileDown } from "lucide-react";
 import { Badge, StatusText } from "@/components/ui/badge";
 import { BalanceFigure, ChildFacts } from "@/components/parents/balance";
+import { SchoolContacts } from "@/components/parents/school-contacts";
+import { MoveSchoolForm } from "@/components/parents/transfer-forms";
+import { startTransferAction } from "../../transfer-actions";
 import { db } from "@/server/db/client";
 import { METHOD_LABELS } from "@/server/fees/payments";
 import type { InstalmentStatus } from "@/server/fees/plan-schedule";
 import { getParentChild } from "@/server/parents/portal";
+import { listTransferSchools } from "@/server/passport/transfers";
 import { formatCalendarDate, todayIn } from "@/lib/format";
 import { formatCedis } from "@/lib/money";
+import { attendanceRate, attended, STATUS_LABELS } from "@/lib/attendance";
 import { cn } from "@/lib/cn";
 import { requireParent } from "@/web/parent-auth";
 
@@ -107,6 +112,44 @@ export default async function ParentChildPage({
         </section>
       )}
 
+      {child.attendance && (
+        <section aria-labelledby="attendance" className="space-y-3">
+          <div>
+            <h2 id="attendance" className="text-md font-semibold text-ink">
+              Attendance
+            </h2>
+            <p className="mt-0.5 text-sm text-ink-3">{child.attendance.termName}, from the class register</p>
+          </div>
+          <div className="rounded-lg border border-line bg-surface px-4 py-4">
+            <p className="text-base text-ink">
+              <span className="font-medium tabular-nums">
+                {attended(child.attendance.totals)} of {child.attendance.totals.open}
+              </span>{" "}
+              days at school ({attendanceRate(child.attendance.totals)}%)
+            </p>
+            <p className="mt-1 text-sm text-ink-3">
+              {[
+                child.attendance.totals.late && `${child.attendance.totals.late} late`,
+                child.attendance.totals.absent && `${child.attendance.totals.absent} absent`,
+                child.attendance.totals.excused && `${child.attendance.totals.excused} excused`,
+              ]
+                .filter(Boolean)
+                .join(" · ") || "Not late or absent this term."}
+            </p>
+            {child.attendance.recent.length > 0 && (
+              <ul className="mt-3 divide-y divide-line border-t border-line">
+                {child.attendance.recent.map((day) => (
+                  <li key={day.date} className="flex justify-between gap-3 py-2 text-sm">
+                    <span className="text-ink">{formatCalendarDate(day.date)}</span>
+                    <span className="text-ink-2">{STATUS_LABELS[day.status]}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+      )}
+
       {child.reportCards.length > 0 && (
         <section aria-labelledby="report-cards" className="space-y-3">
           <h2 id="report-cards" className="text-md font-semibold text-ink">
@@ -200,6 +243,26 @@ export default async function ParentChildPage({
           </ul>
         )}
       </section>
+
+      {child.contacts && <SchoolContacts contacts={child.contacts} schoolName={child.school.name} />}
+
+      {summary.status === "active" && (
+        <section aria-labelledby="move" className="space-y-3">
+          <div>
+            <h2 id="move" className="text-md font-semibold text-ink">
+              Moving to another school
+            </h2>
+            <p className="text-sm text-ink-3">
+              If {summary.firstName} is joining another school on EduBridge, their records can go with them.
+            </p>
+          </div>
+          <MoveSchoolForm
+            action={startTransferAction.bind(null, slug, studentId)}
+            schools={await listTransferSchools(db(), child.school.id)}
+            child={summary.firstName}
+          />
+        </section>
+      )}
     </div>
   );
 }

@@ -179,6 +179,13 @@ export async function verifyChallenge(
   code: string,
   client: ClientInfo = {},
   now = new Date(),
+  /** What a successful second step issues: a web session, or a device token for the API. */
+  issue: (
+    database: Database,
+    userId: string,
+    client?: ClientInfo,
+    now?: Date,
+  ) => Promise<{ token: string; expiresAt: Date }> = createSession,
 ): Promise<ChallengeResult> {
   if (!token || token.length > 128) return { ok: false, reason: "expired" };
   const id = hashToken(token);
@@ -218,8 +225,12 @@ export async function verifyChallenge(
     .where(eq(users.id, challenge.userId));
   if (owner) await database.delete(loginAttempts).where(eq(loginAttempts.email, owner.email));
   await database.update(users).set({ lastLoginAt: now }).where(eq(users.id, challenge.userId));
-  const session = await createSession(database, challenge.userId, client, now);
-  return { ok: true, userId: challenge.userId, session };
+  const issued = await issue(database, challenge.userId, client, now);
+  return {
+    ok: true,
+    userId: challenge.userId,
+    session: { token: issued.token, expiresAt: issued.expiresAt },
+  };
 }
 
 export async function hasMfa(database: Queryable, userId: string): Promise<boolean> {

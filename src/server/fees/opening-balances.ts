@@ -4,7 +4,7 @@ import { z } from "zod";
 import { todayIn } from "@/lib/format";
 import { parseCedis, sumPesewas } from "@/lib/money";
 import { recordAudit } from "../audit/record";
-import { assertCan } from "../authz/permissions";
+import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import { ledgerEntries, students, terms } from "../db/schema";
@@ -46,7 +46,11 @@ async function openingState(tx: Transaction, ctx: TenantContext, studentId?: str
   }
   return state;
 }
-const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
+const scope = (ctx: TenantContext) => ({
+  tenantId: ctx.tenant.id,
+  userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
+});
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Enter a date.");
 
 /**
@@ -90,7 +94,7 @@ async function defaultAsOf(tx: Transaction, ctx: TenantContext): Promise<string>
 }
 
 export async function suggestedAsOf(database: Database, ctx: TenantContext): Promise<string> {
-  assertCan(ctx.roles, "fees.view");
+  assertAllowed(ctx, "fees.view");
   return withTenant(database, scope(ctx), (tx) => defaultAsOf(tx, ctx));
 }
 
@@ -311,7 +315,7 @@ export async function setOpeningBalance(
   studentId: string,
   input: unknown,
 ): Promise<void> {
-  assertCan(ctx.roles, "fees.manage");
+  assertAllowed(ctx, "fees.manage");
   const { amount, asOf } = openingSchema.parse(input);
   if (asOf > todayIn(ctx.tenant.timezone))
     throw new DomainError("future_date", "The date cannot be in the future.", "asOf");
@@ -350,7 +354,7 @@ export async function hasOpeningBalance(
   ctx: TenantContext,
   studentId: string,
 ): Promise<boolean> {
-  assertCan(ctx.roles, "fees.view");
+  assertAllowed(ctx, "fees.view");
   return withTenant(database, scope(ctx), async (tx) =>
     Boolean((await openingState(tx, ctx, studentId)).get(studentId)?.live),
   );
@@ -376,7 +380,7 @@ export async function recordAdjustment(
   studentId: string,
   input: unknown,
 ): Promise<void> {
-  assertCan(ctx.roles, "fees.manage");
+  assertAllowed(ctx, "fees.manage");
   const { direction, amount, description } = adjustmentSchema.parse(input);
   const signed = direction === "charge" ? amount : -amount;
   await withTenant(database, scope(ctx), async (tx) => {

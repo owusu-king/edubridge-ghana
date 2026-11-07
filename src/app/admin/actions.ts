@@ -1,6 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import {
+  invoiceLinesFrom,
+  issueSubscriptionInvoice,
+  markSubscriptionInvoicePaid,
+  updateSubscription,
+  voidSubscriptionInvoice,
+} from "@/server/billing/subscriptions";
+import { updatePlatformSettings } from "@/server/billing/settings";
 import { db } from "@/server/db/client";
 import {
   createSchool,
@@ -66,12 +74,10 @@ export async function updateEntitlementsAction(
 ): Promise<FormState> {
   const user = await requirePlatformAdmin();
   try {
-    await updateEntitlements(
-      db(),
-      user.id,
-      schoolId,
-      fields(formData, ["planName", "maxCampuses", "maxStudents"]),
-    );
+    await updateEntitlements(db(), user.id, schoolId, {
+      ...fields(formData, ["planName", "maxCampuses", "maxStudents", "maxSmsPerMonth"]),
+      features: formData.getAll("features").map(String),
+    });
   } catch (error) {
     return toFormError(error, formData);
   }
@@ -118,4 +124,104 @@ export async function reissueInvitationAction(
   } catch (error) {
     return toFormError(error, formData);
   }
+}
+
+export async function updateSubscriptionAction(
+  schoolId: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const user = await requirePlatformAdmin();
+  try {
+    await updateSubscription(
+      db(),
+      user.id,
+      schoolId,
+      fields(formData, [
+        "status",
+        "billingPeriod",
+        "trialEndsOn",
+        "paidUntil",
+        "price",
+        "smsPrice",
+        "settlementAccount",
+        "notes",
+      ]),
+    );
+  } catch (error) {
+    return toFormError(error, formData);
+  }
+  revalidatePath(`/admin/schools/${schoolId}`);
+  revalidatePath("/admin/billing");
+  return { status: "success", message: "Subscription saved." };
+}
+
+export async function issueInvoiceAction(
+  schoolId: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const user = await requirePlatformAdmin();
+  try {
+    const { invoiceNumber } = await issueSubscriptionInvoice(db(), user.id, schoolId, {
+      ...fields(formData, ["periodStartsOn", "periodEndsOn", "dueOn"]),
+      lines: invoiceLinesFrom(formData),
+    });
+    revalidatePath(`/admin/schools/${schoolId}`);
+    revalidatePath("/admin/billing");
+    return { status: "success", message: `Invoice ${invoiceNumber} issued.` };
+  } catch (error) {
+    return toFormError(error, formData);
+  }
+}
+
+export async function markInvoicePaidAction(
+  schoolId: string,
+  invoiceId: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const user = await requirePlatformAdmin();
+  try {
+    await markSubscriptionInvoicePaid(
+      db(),
+      user.id,
+      schoolId,
+      invoiceId,
+      fields(formData, ["paidOn", "reference"]),
+    );
+  } catch (error) {
+    return toFormError(error, formData);
+  }
+  revalidatePath(`/admin/schools/${schoolId}`);
+  revalidatePath("/admin/billing");
+  return { status: "success", message: "Payment recorded." };
+}
+
+export async function voidInvoiceAction(
+  schoolId: string,
+  invoiceId: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const user = await requirePlatformAdmin();
+  try {
+    await voidSubscriptionInvoice(db(), user.id, schoolId, invoiceId, fields(formData, ["reason"]));
+  } catch (error) {
+    return toFormError(error, formData);
+  }
+  revalidatePath(`/admin/schools/${schoolId}`);
+  revalidatePath("/admin/billing");
+  return { status: "success", message: "Invoice voided." };
+}
+
+export async function updatePlatformSettingsAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const user = await requirePlatformAdmin();
+  try {
+    await updatePlatformSettings(db(), user.id, fields(formData, ["smsPrice", "graceDays"]));
+  } catch (error) {
+    return toFormError(error, formData);
+  }
+  revalidatePath("/admin", "layout");
+  return { status: "success", message: "Billing settings saved." };
 }

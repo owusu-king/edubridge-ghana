@@ -17,6 +17,23 @@ export function normalizePhone(input: string, defaultCountry: "GH" = "GH"): stri
   return null;
 }
 
+/** Ghana landline area codes start with 3 (030 Accra, 032 Kumasi, ...). */
+const GH_LANDLINE = /^3\d{8}$/;
+
+/**
+ * A number families can call, such as the school office: a mobile number as above, or a Ghana landline
+ * (030 123 4567). Not for SMS, which need a mobile number.
+ */
+export function normalizeCallablePhone(input: string): string | null {
+  const mobile = normalizePhone(input);
+  if (mobile) return mobile;
+  const compact = input.replace(/[\s().-]/g, "");
+  const national = /^0\d{9}$/.test(compact) ? compact.slice(1) : compact.replace(/^\+?233/, "");
+  return (/^0/.test(compact) || /^\+?233/.test(compact)) && GH_LANDLINE.test(national)
+    ? `+233${national}`
+    : null;
+}
+
 /** "+233 24 123 4567" for Ghanaian numbers; other numbers are shown as stored. */
 export function formatPhone(e164: string): string {
   const m = e164.match(/^\+233(\d{2})(\d{3})(\d{4})$/);

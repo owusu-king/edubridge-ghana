@@ -7,10 +7,10 @@ import { MOBILE_MONEY_NETWORKS, type MobileMoneyNetwork } from "@/lib/mobile-mon
 import { formatCedis, parseCedis } from "@/lib/money";
 import { maskPhone, normalizePhone } from "@/lib/phone";
 import { recordAudit } from "../audit/record";
-import { assertCan } from "../authz/permissions";
+import { assertAllowed, assertFeature } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
-import { mobileMoneyRequests, payments, students, users } from "../db/schema";
+import { mobileMoneyRequests, payments, students, tenantEntitlements, users } from "../db/schema";
 import { DomainError, PG_UNIQUE_VIOLATION, pgErrorCode } from "../errors";
 import { campusScopeFilter, loadFinanceStudent } from "../fees/access";
 import { insertPayment } from "../fees/payments";
@@ -43,21 +43,31 @@ export interface MobileMoneyDeps {
   callbackBaseUrl?: string;
 }
 
-const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
+const scope = (ctx: TenantContext) => ({
+  tenantId: ctx.tenant.id,
+  userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
+});
 
 /** Who records an outcome: a staff member, or the system (worker, callbacks) with no user. */
 export interface Actor {
   tenantId: string;
   timezone: string;
   userId: string | null;
+  supportGrantId?: string | null;
 }
 
 const actorOf = (ctx: TenantContext): Actor => ({
   tenantId: ctx.tenant.id,
   timezone: ctx.tenant.timezone,
   userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
 });
-const actorScope = (actor: Actor) => ({ tenantId: actor.tenantId, userId: actor.userId ?? "" });
+const actorScope = (actor: Actor) => ({
+  tenantId: actor.tenantId,
+  userId: actor.userId ?? "",
+  supportGrantId: actor.supportGrantId,
+});
 
 export type MobileMoneyRequest = typeof mobileMoneyRequests.$inferSelect;
 
@@ -66,9 +76,17 @@ export function providerFor(deps: MobileMoneyDeps): MobileMoneyProvider | null {
 }
 
 /** Whether staff can send prompts, and whether they are only tests. */
-export function mobileMoneySetup(deps: MobileMoneyDeps = {}): { enabled: boolean; testMode: boolean } {
+/** Whether staff can send prompts: a provider is configured and the school's plan includes Mobile Money. */
+export function mobileMoneySetup(
+  ctx: Pick<TenantContext, "features">,
+  deps: MobileMoneyDeps = {},
+): { enabled: boolean; testMode: boolean; testHint: string | null } {
   const provider = providerFor(deps);
-  return { enabled: provider !== null, testMode: provider?.testMode ?? false };
+  return {
+    enabled: provider !== null && ctx.features.includes("mobile_money"),
+    testMode: provider?.testMode ?? false,
+    testHint: provider?.testMode ? (provider.testHint ?? null) : null,
+  };
 }
 
 const requestSchema = z.object({
@@ -137,7 +155,9 @@ export async function requestMobileMoneyPayment(
   input: unknown,
   deps: MobileMoneyDeps = {},
 ): Promise<RequestOutcome> {
-  assertCan(ctx.roles, "payments.record");
+  assertAllowed(ctx, "payments.record");
+  // Checking or settling a prompt already sent is never blocked, so money in flight is always recorded.
+  assertFeature(ctx, "mobile_money");
   const provider = providerFor(deps);
   if (!provider)
     throw new DomainError("mobile_money_off", "Mobile Money payments are not set up for this school yet.");
@@ -146,7 +166,7 @@ export async function requestMobileMoneyPayment(
   const existing = await findByKey(database, ctx, data.idempotencyKey);
   if (existing) return replay(existing, data);
 
-  let created: { id: string; studentName: string };
+  let created: { id: string; studentName: string; settlementAccount: string | null };
   try {
     created = await withTenant(database, scope(ctx), async (tx) => {
       const student = await loadFinanceStudent(tx, ctx, data.studentId);
@@ -177,7 +197,15 @@ export async function requestMobileMoneyPayment(
           provider: provider.name,
         },
       });
-      return { id: row!.id, studentName: `${student.firstName} ${student.lastName}` };
+      const [plan] = await tx
+        .select({ settlementAccount: tenantEntitlements.settlementAccount })
+        .from(tenantEntitlements)
+        .where(eq(tenantEntitlements.tenantId, ctx.tenant.id));
+      return {
+        id: row!.id,
+        studentName: `${student.firstName} ${student.lastName}`,
+        settlementAccount: plan?.settlementAccount ?? null,
+      };
     });
   } catch (error) {
     if (pgErrorCode(error) === PG_UNIQUE_VIOLATION) {
@@ -194,6 +222,7 @@ export async function requestMobileMoneyPayment(
 
   try {
     const started = await provider.requestPayment({
+      tenantId: ctx.tenant.id,
       reference: created.id,
       amountPesewas: data.amount,
       currency: "GHS",
@@ -201,6 +230,7 @@ export async function requestMobileMoneyPayment(
       network: data.network,
       payerMessage: `School fees for ${created.studentName}, ${ctx.tenant.name}`,
       callbackUrl: callbackUrlFor(provider.name, ctx.tenant.id, deps.callbackBaseUrl),
+      settlementAccount: created.settlementAccount,
     });
     if (started.providerReference) {
       await withTenant(database, scope(ctx), (tx) =>
@@ -246,7 +276,7 @@ export async function checkMobileMoneyRequest(
   requestId: string,
   deps: MobileMoneyDeps = {},
 ): Promise<CheckOutcome> {
-  assertCan(ctx.roles, "payments.record");
+  assertAllowed(ctx, "payments.record");
   const request = await loadRequest(database, ctx, requestId);
   if (!request) throw new DomainError("request_not_found", "Mobile Money request not found.");
   if (!OPEN.includes(request.status)) return outcome(request);
@@ -278,6 +308,7 @@ export async function settleRequest(
   now: Date,
 ): Promise<CheckOutcome> {
   const status = await provider.getStatus({
+    tenantId: actor.tenantId,
     reference: request.id,
     providerReference: request.providerReference,
   });
@@ -527,7 +558,7 @@ export async function listMobileMoneyRequests(
   studentId: string,
   limit = 5,
 ): Promise<MobileMoneyRequestRow[]> {
-  assertCan(ctx.roles, "fees.view");
+  assertAllowed(ctx, "fees.view");
   return withTenant(database, scope(ctx), async (tx) => {
     if (!(await loadFinanceStudent(tx, ctx, studentId))) return [];
     return selectRows(
@@ -563,7 +594,7 @@ export async function listSchoolMobileMoneyRequests(
   ctx: TenantContext,
   options: { filter: MobileMoneyFilter; page: number },
 ): Promise<SchoolMobileMoneyPage> {
-  assertCan(ctx.roles, "fees.view");
+  assertAllowed(ctx, "fees.view");
   const page = Math.max(1, Math.floor(options.page));
   const visible = and(
     eq(mobileMoneyRequests.tenantId, ctx.tenant.id),
@@ -605,7 +636,7 @@ export async function markMobileMoneyReviewed(
   requestId: string,
   input: unknown,
 ): Promise<void> {
-  assertCan(ctx.roles, "payments.record");
+  assertAllowed(ctx, "payments.record");
   const { note } = reviewSchema.parse(input);
   if (!z.string().uuid().safeParse(requestId).success)
     throw new DomainError("request_not_found", "Mobile Money request not found.");

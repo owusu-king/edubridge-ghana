@@ -41,6 +41,8 @@ export interface SchoolRef {
 
 export type CallbackReceipt =
   | { kind: "accepted" | "duplicate"; school: SchoolRef }
+  /** Genuine, but not about an EduBridge payment (another Paystack event): acknowledged, nothing stored. */
+  | { kind: "ignored" }
   | { kind: "unknown_provider" | "unknown_school" | "invalid_signature" };
 
 /**
@@ -49,18 +51,24 @@ export type CallbackReceipt =
  */
 export async function receiveMobileMoneyCallback(
   database: Database,
-  input: { providerName: string; tenantId: string; headers: Headers; rawBody: string },
+  /** The school from the callback URL, or null when the provider uses one address for all (Paystack). */
+  input: { providerName: string; tenantId: string | null; headers: Headers; rawBody: string },
   deps: MobileMoneyDeps = {},
 ): Promise<CallbackReceipt> {
   const provider = providerFor(deps);
   if (!provider || provider.name !== input.providerName) return { kind: "unknown_provider" };
-  if (!isUuid(input.tenantId)) return { kind: "unknown_school" };
+  if (input.tenantId !== null && !isUuid(input.tenantId)) return { kind: "unknown_school" };
   const ref = provider.verifyCallback({ headers: input.headers, rawBody: input.rawBody });
   if (!ref) return { kind: "invalid_signature" };
+  // One address for every school: the school comes from the (signed) reference.
+  const tenantId = input.tenantId ?? ref.tenantId ?? null;
+  if (tenantId === null) return { kind: "ignored" };
+  if (input.tenantId !== null && ref.tenantId && ref.tenantId !== input.tenantId)
+    return { kind: "unknown_school" };
   const [school] = await database
     .select({ id: tenants.id, timezone: tenants.timezone })
     .from(tenants)
-    .where(and(eq(tenants.id, input.tenantId), eq(tenants.status, "active")));
+    .where(and(eq(tenants.id, tenantId), eq(tenants.status, "active")));
   if (!school) return { kind: "unknown_school" };
 
   const requestId = ref.reference && isUuid(ref.reference) ? ref.reference : null;

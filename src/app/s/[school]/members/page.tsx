@@ -4,7 +4,7 @@ import { Users } from "lucide-react";
 import { Badge, StatusText } from "@/components/ui/badge";
 import { Avatar, EmptyState, PageHeader, Section } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { can, ROLE_LABELS, isRole } from "@/server/authz/permissions";
+import { allowed, isRole, ROLE_LABELS } from "@/server/authz/permissions";
 import { listCampuses } from "@/server/campuses/service";
 import { db } from "@/server/db/client";
 import { ASSIGNABLE_ROLES, listPendingInvitations } from "@/server/members/service";
@@ -25,7 +25,7 @@ export const metadata: Metadata = { title: "Members" };
 export default async function MembersPage({ params }: { params: Promise<{ school: string }> }) {
   const { school } = await params;
   const { ctx } = await requireTenant(school);
-  if (!can(ctx.roles, "members.view")) notFound();
+  if (!allowed(ctx, "members.view")) notFound();
   const [members, invitations, campuses] = await Promise.all([
     listMembers(db(), ctx),
     listPendingInvitations(db(), ctx),
@@ -36,7 +36,7 @@ export default async function MembersPage({ params }: { params: Promise<{ school
   const active = members.filter((m) => m.status === "active").length;
 
   const isOwner = ctx.roles.includes("owner");
-  const canManage = can(ctx.roles, "members.manage") && ctx.campusIds === null;
+  const canManage = allowed(ctx, "members.manage") && ctx.campusIds === null;
   const roleOptions = ASSIGNABLE_ROLES.filter((r) => r !== "owner" || isOwner).map((r) => ({
     value: r,
     label: ROLE_LABELS[r],

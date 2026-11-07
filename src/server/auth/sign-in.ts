@@ -42,6 +42,14 @@ export const THROTTLE_WINDOW_MS = 15 * 60 * 1000;
 export const MAX_FAILURES_PER_EMAIL = 5;
 export const MAX_FAILURES_PER_IP = 50;
 
+/** What a successful sign-in issues: a web session by default, or a device token for the API. */
+export type CredentialIssuer = (
+  database: Database,
+  userId: string,
+  client?: ClientInfo,
+  now?: Date,
+) => Promise<{ token: string; expiresAt: Date }>;
+
 export type SignInResult =
   | { ok: true; token: string; expiresAt: Date; userId: string }
   /** Password accepted; the second step must be completed with this challenge. */
@@ -77,6 +85,7 @@ export async function signIn(
   input: SignInInput,
   client: ClientInfo = {},
   now = new Date(),
+  issue: CredentialIssuer = createSession,
 ): Promise<SignInResult> {
   const ip = client.ipAddress ?? null;
   const { identifier, password } = signInSchema.parse(input);
@@ -107,6 +116,6 @@ export async function signIn(
   }
   await database.delete(loginAttempts).where(eq(loginAttempts.email, user.email));
   await database.update(users).set({ lastLoginAt: now }).where(eq(users.id, user.id));
-  const session = await createSession(database, user.id, client, now);
-  return { ok: true, userId: user.id, ...session };
+  const { token, expiresAt } = await issue(database, user.id, client, now);
+  return { ok: true, userId: user.id, token, expiresAt };
 }

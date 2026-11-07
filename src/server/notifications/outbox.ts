@@ -40,7 +40,13 @@ const backoffMs = (attempts: number) => 60_000 * 2 ** Math.max(0, attempts - 1);
  */
 export async function dispatchPending(
   database: Database,
-  opts: { limit?: number; providers?: Providers; now?: Date } = {},
+  opts: {
+    limit?: number;
+    providers?: Providers;
+    now?: Date;
+    /** Only these messages. For tests, which share one outbox and must not touch each other's messages. */
+    ids?: readonly string[];
+  } = {},
 ): Promise<{ sent: number; failed: number }> {
   const now = opts.now ?? new Date();
   const providers = opts.providers ?? providersFromEnv();
@@ -48,7 +54,13 @@ export async function dispatchPending(
     const due = await tx
       .select()
       .from(notificationOutbox)
-      .where(and(eq(notificationOutbox.status, "pending"), lte(notificationOutbox.nextAttemptAt, now)))
+      .where(
+        and(
+          eq(notificationOutbox.status, "pending"),
+          lte(notificationOutbox.nextAttemptAt, now),
+          opts.ids ? inArray(notificationOutbox.id, [...opts.ids]) : undefined,
+        ),
+      )
       .orderBy(notificationOutbox.createdAt)
       .limit(opts.limit ?? 20)
       .for("update", { skipLocked: true });

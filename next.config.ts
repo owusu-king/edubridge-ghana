@@ -15,7 +15,11 @@ const nextConfig: NextConfig = {
   experimental: { serverActions: { bodySizeLimit: "4mb" } },
   serverExternalPackages: ["pg", "@react-pdf/renderer"],
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      // The service worker must be re-checked on every visit so fixes reach devices at once.
+      { source: "/sw.js", headers: [{ key: "Cache-Control", value: "no-cache" }] },
+    ];
   },
 };
 

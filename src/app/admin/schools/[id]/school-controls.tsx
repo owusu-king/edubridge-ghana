@@ -16,67 +16,6 @@ function Message({ state }: { state: FormState<unknown> }) {
   return <Alert tone={state.status === "success" ? "positive" : "critical"}>{state.message}</Alert>;
 }
 
-export function EntitlementsForm({
-  action,
-  defaults,
-}: {
-  action: Action;
-  defaults: { planName: string; maxCampuses: number; maxStudents: number | null };
-}) {
-  const [state, formAction, pending] = useActionState(action, { status: "idle" });
-  const errors = state.fieldErrors ?? {};
-  const v = state.values;
-  return (
-    <form action={formAction} className="space-y-5" noValidate>
-      <Message state={state} />
-      <div className="grid gap-5 sm:grid-cols-3">
-        <Field label="Plan name" error={errors.planName}>
-          {(p) => (
-            <Input
-              {...p}
-              name="planName"
-              defaultValue={v?.planName ?? defaults.planName}
-              required
-              maxLength={60}
-            />
-          )}
-        </Field>
-        <Field label="Campus limit" error={errors.maxCampuses}>
-          {(p) => (
-            <Input
-              {...p}
-              name="maxCampuses"
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={1000}
-              defaultValue={v?.maxCampuses ?? defaults.maxCampuses}
-              required
-            />
-          )}
-        </Field>
-        <Field label="Student limit" description="Empty for no limit." error={errors.maxStudents}>
-          {(p) => (
-            <Input
-              {...p}
-              name="maxStudents"
-              type="number"
-              inputMode="numeric"
-              min={1}
-              defaultValue={v?.maxStudents ?? defaults.maxStudents ?? ""}
-            />
-          )}
-        </Field>
-      </div>
-      <div className="flex justify-end">
-        <Button type="submit" variant="secondary" pending={pending}>
-          Save plan
-        </Button>
-      </div>
-    </form>
-  );
-}
-
 export function StatusControl({
   action,
   status,

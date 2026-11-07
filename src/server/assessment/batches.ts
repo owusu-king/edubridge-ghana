@@ -4,7 +4,7 @@ import { and, asc, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { ReportCardSnapshot } from "../../lib/assessment";
 import { recordAudit } from "../audit/record";
-import { assertCan } from "../authz/permissions";
+import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import {
@@ -24,7 +24,11 @@ import { classStudents } from "./class-data";
 /** Renders report cards, in order, into one PDF (supplied by the web layer, which owns the PDF templates). */
 export type RenderReportCards = (snapshots: ReportCardSnapshot[]) => Promise<Buffer>;
 
-const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
+const scope = (ctx: TenantContext) => ({
+  tenantId: ctx.tenant.id,
+  userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
+});
 /** How long a worker holds a batch before another may take it over (renewed after every class). */
 const LEASE_MS = 5 * 60_000;
 const MAX_ATTEMPTS = 3;
@@ -40,7 +44,7 @@ export async function requestReportCardPrint(
   termId: string,
   input: unknown,
 ): Promise<string> {
-  assertCan(ctx.roles, "assessment.enter");
+  assertAllowed(ctx, "assessment.enter");
   const { classIds } = z
     .object({ classIds: z.array(z.string().uuid()).min(1, "Choose at least one class.").max(200) })
     .parse(input);
@@ -91,7 +95,7 @@ export interface BatchView {
 
 /** Recent print runs: everyone's for academic leads, a teacher's own otherwise. */
 export async function listReportCardBatches(database: Database, ctx: TenantContext): Promise<BatchView[]> {
-  assertCan(ctx.roles, "assessment.enter");
+  assertAllowed(ctx, "assessment.enter");
   return withTenant(database, scope(ctx), async (tx) => {
     const rows = await tx
       .select({
@@ -156,7 +160,7 @@ export async function getReportCardFile(
   ctx: TenantContext,
   fileId: string,
 ): Promise<{ pdf: Buffer; filename: string } | null> {
-  assertCan(ctx.roles, "assessment.enter");
+  assertAllowed(ctx, "assessment.enter");
   if (!z.string().uuid().safeParse(fileId).success) return null;
   return withTenant(database, scope(ctx), async (tx) => {
     const [row] = await tx

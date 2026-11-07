@@ -6,7 +6,7 @@ import { Button, buttonStyles } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/field";
 import { EmptyState, PageHeader } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { can } from "@/server/authz/permissions";
+import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { listClassOptions, listStudents, PAGE_SIZE } from "@/server/students/service";
 import { formatPhone } from "@/lib/phone";
@@ -28,15 +28,15 @@ export default async function StudentsPage({
 }) {
   const [{ school }, search] = await Promise.all([params, searchParams]);
   const { ctx } = await requireTenant(school);
-  if (!can(ctx.roles, "students.view")) notFound();
+  if (!allowed(ctx, "students.view")) notFound();
   const status = search.status === "withdrawn" || search.status === "graduated" ? search.status : "active";
   const [result, classOptions] = await Promise.all([
     listStudents(db(), ctx, { q: search.q, classId: search.class, status, page: Number(search.page) || 1 }),
     listClassOptions(db(), ctx),
   ]);
   const slug = ctx.tenant.slug;
-  const canManage = can(ctx.roles, "students.manage");
-  const viewAll = can(ctx.roles, "students.view_all");
+  const canManage = allowed(ctx, "students.manage");
+  const viewAll = allowed(ctx, "students.view_all");
   const pages = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
   const filtered = Boolean(search.q || search.class || status !== "active");
   const pageHref = (page: number) => {
@@ -65,6 +65,14 @@ export default async function StudentsPage({
               <Link href={schoolPath(slug, "students/import")} className={buttonStyles("secondary")}>
                 Import
               </Link>
+              <Link href={schoolPath(slug, "students/register")} className={buttonStyles("secondary")}>
+                Register (works offline)
+              </Link>
+              {allowed(ctx, "transfers.manage") && (
+                <Link href={schoolPath(slug, "students/transfers")} className={buttonStyles("secondary")}>
+                  Transfers
+                </Link>
+              )}
               <AddStudentDialog
                 action={addStudentAction.bind(null, slug)}
                 classes={classes}

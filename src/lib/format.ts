@@ -22,7 +22,11 @@ export function formatDateTime(value: Date, timeZone: string): string {
 }
 
 export function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
+  // Words that start with a letter, so "(Demo)" or "&" never become an initial.
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter((w) => /^\p{L}/u.test(w));
   const first = parts[0]?.[0] ?? "";
   const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? "") : "";
   return (first + last).toUpperCase() || "?";

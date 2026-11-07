@@ -7,6 +7,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { hashPassword } from "../src/server/auth/password";
 import { DEFAULT_COMPONENTS, DEFAULT_SUBJECTS } from "../src/server/assessment/defaults";
+import { addDays, isWeekend, type AttendanceStatus } from "../src/lib/attendance";
 import { planBilling } from "../src/server/fees/billing-plan";
 import { seal } from "../src/server/auth/secret-box";
 import type { Role } from "../src/server/authz/permissions";
@@ -14,6 +15,9 @@ import {
   academicYears,
   assessmentSchemes,
   assessmentScores,
+  attendanceChanges,
+  attendanceMarks,
+  attendanceRegisters,
   campuses,
   classes,
   enrolments,
@@ -30,6 +34,7 @@ import {
   loginAttempts,
   memberships,
   platformAdmins,
+  schoolPreferences,
   studentGuardians,
   students,
   tenantEntitlements,
@@ -38,7 +43,8 @@ import {
   userMfa,
   users,
 } from "../src/server/db/schema";
-import { loadLocalEnv } from "./load-env";
+import { FEATURES } from "../src/lib/plan";
+import { isEntrypoint, loadLocalEnv } from "./load-env";
 
 export const DEV_PASSWORD = "edubridge-dev-only";
 /** Authenticator secret for platform@example.test in development only. */
@@ -128,10 +134,11 @@ async function main() {
         );
         await tx
           .insert(tenantEntitlements)
-          .values({ tenantId, planName: "Pilot", maxCampuses: school.maxCampuses })
+          // Seeded schools have every module, including the assistant (still off unless ASSISTANT_ENABLED).
+          .values({ tenantId, planName: "Pilot", maxCampuses: school.maxCampuses, features: [...FEATURES] })
           .onConflictDoUpdate({
             target: tenantEntitlements.tenantId,
-            set: { maxCampuses: school.maxCampuses },
+            set: { maxCampuses: school.maxCampuses, features: [...FEATURES] },
           });
         for (const name of school.campuses) {
           await tx.insert(campuses).values({ tenantId, name }).onConflictDoNothing();
@@ -171,6 +178,20 @@ async function main() {
     }
     // Kpone Ridge has a calendar with a current term; Adenta Hall starts empty (shows the setup state).
     const kpone = tenantIds.get("kpone-ridge")!;
+    // How families reach the office (synthetic numbers), shown in the parent view.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
+      const contacts = {
+        contactPhone: "+233302000100",
+        contactWhatsapp: "+233245550100",
+        contactEmail: "office@kpone-ridge.example.test",
+        officeHours: "Weekdays 7:30 to 16:00",
+      };
+      await tx
+        .insert(schoolPreferences)
+        .values({ tenantId: kpone, ...contacts })
+        .onConflictDoUpdate({ target: schoolPreferences.tenantId, set: contacts });
+    });
     await db.transaction(async (tx) => {
       await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
       const [year] = await tx
@@ -596,6 +617,86 @@ async function main() {
       if (rows.length) await tx.insert(assessmentScores).values(rows);
     });
 
+    // Basic 4A's registers for the last two weeks of school days before today (relative to when the seed
+    // runs), taken by its class teacher, with a few absences and late arrivals. Today is left for testing.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
+      const [existing] = await tx
+        .select({ id: attendanceRegisters.id })
+        .from(attendanceRegisters)
+        .where(eq(attendanceRegisters.tenantId, kpone))
+        .limit(1);
+      if (existing) return;
+      const [term] = await tx
+        .select({ id: terms.id, startsOn: terms.startsOn, endsOn: terms.endsOn })
+        .from(terms)
+        .where(and(eq(terms.tenantId, kpone), eq(terms.isCurrent, true)));
+      const [basic4a] = await tx
+        .select({ id: classes.id })
+        .from(classes)
+        .where(and(eq(classes.tenantId, kpone), eq(classes.name, "Basic 4A")));
+      const [teacher] = await tx
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.email, "teacher@example.test"));
+      if (!term || !basic4a) return;
+      const roster = await tx
+        .select({ id: students.id, admissionNumber: students.admissionNumber })
+        .from(enrolments)
+        .innerJoin(students, eq(students.id, enrolments.studentId))
+        .where(and(eq(enrolments.termId, term.id), eq(enrolments.classId, basic4a.id)));
+      const today = new Date().toISOString().slice(0, 10);
+      const days: string[] = [];
+      for (let d = addDays(today, -1); days.length < 10 && d >= term.startsOn; d = addDays(d, -1))
+        if (!isWeekend(d) && d <= term.endsOn) days.push(d);
+      // Fixed pattern: S0004 (Yaw Darko) is often late, S0003 (Esi Quaye) missed two days with permission.
+      const statusFor = (admission: string, i: number): AttendanceStatus =>
+        admission === "S0004" && i % 3 === 0
+          ? "late"
+          : admission === "S0003" && (i === 2 || i === 3)
+            ? "excused"
+            : admission === "S0001" && i === 5
+              ? "absent"
+              : "present";
+      for (const [i, date] of days.entries()) {
+        const [register] = await tx
+          .insert(attendanceRegisters)
+          .values({
+            tenantId: kpone,
+            classId: basic4a.id,
+            termId: term.id,
+            date,
+            takenByUserId: teacher?.id ?? null,
+          })
+          .returning({ id: attendanceRegisters.id });
+        for (const student of roster) {
+          const status = statusFor(student.admissionNumber, i);
+          const reason = status === "excused" ? "Family event" : null;
+          const [mark] = await tx
+            .insert(attendanceMarks)
+            .values({
+              tenantId: kpone,
+              registerId: register!.id,
+              studentId: student.id,
+              status,
+              reason,
+              recordedByUserId: teacher?.id ?? null,
+            })
+            .returning({ id: attendanceMarks.id });
+          await tx.insert(attendanceChanges).values({
+            tenantId: kpone,
+            markId: mark!.id,
+            studentId: student.id,
+            toStatus: status,
+            toReason: reason,
+            version: 1,
+            source: "online",
+            changedByUserId: teacher?.id ?? null,
+          });
+        }
+      }
+    });
+
     // A sibling discount for Efua (Grace Mensah's second child), left for the accountant to bill.
     await db.transaction(async (tx) => {
       await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
@@ -634,7 +735,10 @@ async function main() {
   }
 }
 
-main().catch((error: unknown) => {
-  console.error(error);
-  process.exit(1);
-});
+// Only when run as a script: other scripts import the development constants above.
+if (isEntrypoint(import.meta.url)) {
+  main().catch((error: unknown) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

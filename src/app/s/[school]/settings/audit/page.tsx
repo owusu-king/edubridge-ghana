@@ -5,7 +5,7 @@ import { ScrollText } from "lucide-react";
 import { buttonStyles } from "@/components/ui/button";
 import { EmptyState, Section } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { can } from "@/server/authz/permissions";
+import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { listAuditEvents } from "@/server/members/service";
 import { auditLabel, auditSummary } from "@/lib/audit-labels";
@@ -24,7 +24,7 @@ export default async function AuditPage({
 }) {
   const [{ school }, { before }] = await Promise.all([params, searchParams]);
   const { ctx } = await requireTenant(school);
-  if (!can(ctx.roles, "audit.view")) notFound();
+  if (!allowed(ctx, "audit.view")) notFound();
   const { entries, nextCursor } = await listAuditEvents(db(), ctx, before);
   const base = schoolPath(ctx.tenant.slug, "settings/audit");
 
@@ -59,6 +59,7 @@ export default async function AuditPage({
                     </TD>
                     <TD className="text-ink">
                       {entry.actorName ?? <span className="text-ink-3">System</span>}
+                      {entry.bySupport && <span className="block text-sm text-ink-3">EduBridge support</span>}
                     </TD>
                     <TD className="text-ink">{auditLabel(entry.action)}</TD>
                     <TD

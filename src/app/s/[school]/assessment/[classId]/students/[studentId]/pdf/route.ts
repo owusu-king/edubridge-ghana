@@ -1,11 +1,11 @@
 import type { NextRequest } from "next/server";
 import { getReportCard } from "@/server/assessment/report-cards";
-import { can } from "@/server/authz/permissions";
+import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { requireTenant } from "@/web/auth";
 import { renderReportCardsPdf } from "@/web/pdf/report-card";
 import { pdfResponse } from "@/web/pdf/response";
-import { chooseTerm } from "../../../../terms";
+import { chooseTerm } from "@/web/terms";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,7 @@ export async function GET(
 ) {
   const { school, classId, studentId } = await params;
   const { ctx } = await requireTenant(school);
-  if (!can(ctx.roles, "assessment.enter")) return new Response("Not found", { status: 404 });
+  if (!allowed(ctx, "assessment.enter")) return new Response("Not found", { status: 404 });
   const { term } = await chooseTerm(ctx, request.nextUrl.searchParams.get("term") ?? undefined);
   if (!term) return new Response("Not found", { status: 404 });
   const report = await getReportCard(db(), ctx, term.id, classId, studentId);

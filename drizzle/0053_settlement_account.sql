@@ -1,0 +1,2 @@
+ALTER TABLE "tenant_entitlements" ADD COLUMN "settlement_account" text;--> statement-breakpoint
+ALTER TABLE "tenant_entitlements" ADD CONSTRAINT "tenant_entitlements_settlement_account_format" CHECK ("tenant_entitlements"."settlement_account" is null or "tenant_entitlements"."settlement_account" ~ '^[A-Za-z0-9_]{4,40}$');

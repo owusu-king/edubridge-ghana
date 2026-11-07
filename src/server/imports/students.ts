@@ -2,11 +2,11 @@ import "server-only";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { readSheet } from "read-excel-file/node";
 import { recordAudit } from "../audit/record";
-import { assertCan } from "../authz/permissions";
+import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import { classes, enrolments, students, terms } from "../db/schema";
-import { nextAdmissionNumber } from "../students/service";
+import { assertStudentCapacity, nextAdmissionNumber } from "../students/service";
 import { DomainError } from "../errors";
 import { linkGuardianInTx, type AddGuardianInput } from "../students/guardian-links";
 import type { TenantContext } from "../tenancy/service";
@@ -431,13 +431,17 @@ export async function checkStudentImport(
   parsed: ParsedFile,
   mapping: ColumnMapping,
 ): Promise<ImportCheck> {
-  assertCan(ctx.roles, "students.manage");
+  assertAllowed(ctx, "students.manage");
   if (parsed.rows.length > MAX_ROWS)
     throw new DomainError("file_too_many_rows", `Import up to ${MAX_ROWS} rows at a time.`);
-  return withTenant(database, { tenantId: ctx.tenant.id, userId: ctx.userId }, async (tx) => {
-    const { valid, problems } = await checkRows(tx, ctx, parsed, mapping);
-    return { total: parsed.rows.length, valid: valid.length, problems };
-  });
+  return withTenant(
+    database,
+    { tenantId: ctx.tenant.id, userId: ctx.userId, supportGrantId: ctx.support?.grantId },
+    async (tx) => {
+      const { valid, problems } = await checkRows(tx, ctx, parsed, mapping);
+      return { total: parsed.rows.length, valid: valid.length, problems };
+    },
+  );
 }
 
 /**
@@ -450,51 +454,59 @@ export async function importStudents(
   parsed: ParsedFile,
   mapping: ColumnMapping,
 ): Promise<{ imported: number; skipped: number; problems: RowProblem[] }> {
-  assertCan(ctx.roles, "students.manage");
+  assertAllowed(ctx, "students.manage");
   if (parsed.rows.length > MAX_ROWS)
     throw new DomainError("file_too_many_rows", `Import up to ${MAX_ROWS} rows at a time.`);
-  return withTenant(database, { tenantId: ctx.tenant.id, userId: ctx.userId }, async (tx) => {
-    // Serialise imports per school so admission numbers and guardian links cannot race.
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${"student-import:" + ctx.tenant.id}, 0))`,
-    );
-    const { valid, problems } = await checkRows(tx, ctx, parsed, mapping);
-    const [term] = await tx
-      .select({ id: terms.id })
-      .from(terms)
-      .where(and(eq(terms.tenantId, ctx.tenant.id), eq(terms.isCurrent, true)));
-    const admittedOn = new Date().toISOString().slice(0, 10);
-    for (const row of valid) {
-      const admissionNumber = row.admissionNumber ?? (await nextAdmissionNumber(tx, ctx.tenant.id));
-      const [student] = await tx
-        .insert(students)
-        .values({
-          tenantId: ctx.tenant.id,
-          admissionNumber,
-          firstName: row.firstName,
-          otherNames: row.otherNames,
-          lastName: row.lastName,
-          sex: row.sex,
-          dateOfBirth: row.dateOfBirth,
-          admittedOn,
-        })
-        .returning({ id: students.id });
-      if (row.classId && term) {
-        await tx
-          .insert(enrolments)
-          .values({ tenantId: ctx.tenant.id, studentId: student!.id, termId: term.id, classId: row.classId });
+  return withTenant(
+    database,
+    { tenantId: ctx.tenant.id, userId: ctx.userId, supportGrantId: ctx.support?.grantId },
+    async (tx) => {
+      // Serialise imports per school so admission numbers and guardian links cannot race.
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${"student-import:" + ctx.tenant.id}, 0))`,
+      );
+      const { valid, problems } = await checkRows(tx, ctx, parsed, mapping);
+      await assertStudentCapacity(tx, ctx.tenant.id, valid.length);
+      const [term] = await tx
+        .select({ id: terms.id })
+        .from(terms)
+        .where(and(eq(terms.tenantId, ctx.tenant.id), eq(terms.isCurrent, true)));
+      const admittedOn = new Date().toISOString().slice(0, 10);
+      for (const row of valid) {
+        const admissionNumber = row.admissionNumber ?? (await nextAdmissionNumber(tx, ctx.tenant.id));
+        const [student] = await tx
+          .insert(students)
+          .values({
+            tenantId: ctx.tenant.id,
+            admissionNumber,
+            firstName: row.firstName,
+            otherNames: row.otherNames,
+            lastName: row.lastName,
+            sex: row.sex,
+            dateOfBirth: row.dateOfBirth,
+            admittedOn,
+          })
+          .returning({ id: students.id });
+        if (row.classId && term) {
+          await tx.insert(enrolments).values({
+            tenantId: ctx.tenant.id,
+            studentId: student!.id,
+            termId: term.id,
+            classId: row.classId,
+          });
+        }
+        if (row.guardian) await linkGuardianInTx(tx, ctx, student!.id, row.guardian);
       }
-      if (row.guardian) await linkGuardianInTx(tx, ctx, student!.id, row.guardian);
-    }
-    await recordAudit(tx, {
-      tenantId: ctx.tenant.id,
-      actorUserId: ctx.userId,
-      action: "students.imported",
-      entityType: "student",
-      metadata: { imported: valid.length, skipped: parsed.rows.length - valid.length },
-    });
-    return { imported: valid.length, skipped: parsed.rows.length - valid.length, problems };
-  });
+      await recordAudit(tx, {
+        tenantId: ctx.tenant.id,
+        actorUserId: ctx.userId,
+        action: "students.imported",
+        entityType: "student",
+        metadata: { imported: valid.length, skipped: parsed.rows.length - valid.length },
+      });
+      return { imported: valid.length, skipped: parsed.rows.length - valid.length, problems };
+    },
+  );
 }
 
 /** The template's header row, in the order schools usually keep their registers. */

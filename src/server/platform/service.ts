@@ -9,6 +9,7 @@ import { DomainError, PG_UNIQUE_VIOLATION, pgErrorCode } from "../errors";
 import { issueInvitation, type IssuedInvitation } from "../invitations/service";
 import { isValidSlug } from "../tenancy/slug";
 import { SUPPORTED_TIMEZONES } from "../tenancy/service";
+import { DEFAULT_PLAN_FEATURES, FEATURES } from "../../lib/plan";
 
 /**
  * Platform administration: EduBridge staff operating schools. Every function re-checks the platform
@@ -35,7 +36,7 @@ export async function isPlatformAdmin(database: Database, userId: string): Promi
   return Boolean(row);
 }
 
-async function assertPlatformAdmin(database: Database, userId: string): Promise<void> {
+export async function assertPlatformAdmin(database: Database, userId: string): Promise<void> {
   if (!(await isPlatformAdmin(database, userId))) throw new NotPlatformAdminError();
 }
 
@@ -52,6 +53,14 @@ export const entitlementsSchema = z.object({
     .min(1, "Use 1 or more.")
     .max(1000, "Use 1000 or fewer."),
   maxStudents: optionalLimit,
+  /** Optional so school creation can leave them at their defaults (every feature, no SMS limit). */
+  maxSmsPerMonth: z
+    .preprocess(
+      (v) => (v === "" || v === null || v === undefined ? null : Number(v)),
+      z.number().int("Use a whole number.").min(0, "Use 0 or more.").max(1_000_000, "Too large.").nullable(),
+    )
+    .optional(),
+  features: z.array(z.enum(FEATURES)).optional(),
 });
 
 export const createSchoolSchema = z
@@ -96,6 +105,8 @@ export async function createSchool(
         planName: data.planName,
         maxCampuses: data.maxCampuses,
         maxStudents: data.maxStudents,
+        maxSmsPerMonth: data.maxSmsPerMonth ?? null,
+        features: data.features ?? [...DEFAULT_PLAN_FEATURES],
       });
       await tx.insert(campuses).values({ tenantId, name: "Main campus" });
       await recordAudit(tx, {
@@ -134,6 +145,8 @@ export interface SchoolSummary {
   countryCode: string;
   currencyCode: string;
   status: "active" | "suspended";
+  /** Made-up data from `npm run demo:school`. */
+  isDemo: boolean;
   planName: string | null;
   createdAt: Date;
 }
@@ -149,6 +162,7 @@ export async function listSchools(database: Database, actorUserId: string): Prom
         countryCode: tenants.countryCode,
         currencyCode: tenants.currencyCode,
         status: tenants.status,
+        isDemo: tenants.isDemo,
         planName: tenantEntitlements.planName,
         createdAt: tenants.createdAt,
       })
@@ -160,7 +174,13 @@ export async function listSchools(database: Database, actorUserId: string): Prom
 
 export interface SchoolDetail extends SchoolSummary {
   timezone: string;
-  entitlements: { planName: string; maxCampuses: number; maxStudents: number | null } | null;
+  entitlements: {
+    planName: string;
+    maxCampuses: number;
+    maxStudents: number | null;
+    maxSmsPerMonth: number | null;
+    features: string[];
+  } | null;
   activeCampuses: number;
   invitations: {
     id: string;
@@ -187,6 +207,8 @@ export async function getSchool(
         planName: tenantEntitlements.planName,
         maxCampuses: tenantEntitlements.maxCampuses,
         maxStudents: tenantEntitlements.maxStudents,
+        maxSmsPerMonth: tenantEntitlements.maxSmsPerMonth,
+        features: tenantEntitlements.features,
       })
       .from(tenantEntitlements)
       .where(eq(tenantEntitlements.tenantId, tenantId));
@@ -209,6 +231,7 @@ export async function getSchool(
       currencyCode: tenant.currencyCode,
       timezone: tenant.timezone,
       status: tenant.status,
+      isDemo: tenant.isDemo,
       planName: entitlements?.planName ?? null,
       createdAt: tenant.createdAt,
       entitlements: entitlements ?? null,
@@ -263,22 +286,32 @@ export async function updateEntitlements(
       .select()
       .from(tenantEntitlements)
       .where(eq(tenantEntitlements.tenantId, tenantId));
+    const values = {
+      planName: data.planName,
+      maxCampuses: data.maxCampuses,
+      maxStudents: data.maxStudents,
+      maxSmsPerMonth:
+        data.maxSmsPerMonth === undefined ? (before?.maxSmsPerMonth ?? null) : data.maxSmsPerMonth,
+      features: data.features ?? before?.features ?? [...DEFAULT_PLAN_FEATURES],
+    };
     await tx
       .insert(tenantEntitlements)
-      .values({ tenantId, ...data })
-      .onConflictDoUpdate({ target: tenantEntitlements.tenantId, set: { ...data, updatedAt: new Date() } });
+      .values({ tenantId, ...values })
+      .onConflictDoUpdate({ target: tenantEntitlements.tenantId, set: { ...values, updatedAt: new Date() } });
+    const plan = (row: typeof values) => ({
+      planName: row.planName,
+      maxCampuses: row.maxCampuses,
+      maxStudents: row.maxStudents,
+      maxSmsPerMonth: row.maxSmsPerMonth,
+      features: row.features,
+    });
     await recordAudit(tx, {
       tenantId,
       actorUserId,
       action: "entitlements.updated",
       entityType: "tenant",
       entityId: tenantId,
-      metadata: {
-        from: before
-          ? { planName: before.planName, maxCampuses: before.maxCampuses, maxStudents: before.maxStudents }
-          : null,
-        to: data,
-      },
+      metadata: { from: before ? plan(before) : null, to: plan(values) },
     });
   });
 }

@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, FileDown, MessageCircle } from "lucide-react";
 import { buttonStyles } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
-import { can } from "@/server/authz/permissions";
+import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { getReceipt, METHOD_LABELS } from "@/server/fees/payments";
 import { getReminderState } from "@/server/fees/reminders";
@@ -81,7 +81,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ school
             <FileDown aria-hidden="true" />
             Download PDF
           </a>
-          {!receipt.voided && can(ctx.roles, "payments.void") && (
+          {!receipt.voided && allowed(ctx, "payments.void") && (
             <VoidReceiptDialog
               action={voidPaymentAction.bind(null, slug, receipt.id)}
               receiptNumber={receipt.receiptNumber}

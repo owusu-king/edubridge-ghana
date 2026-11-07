@@ -1,4 +1,5 @@
 import "server-only";
+import { revokeAllDeviceTokens } from "./device-tokens";
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Database } from "../db/client";
@@ -146,6 +147,7 @@ export async function resetPassword(
       .set({ usedAt: now })
       .where(and(eq(passwordResets.userId, claimed.userId), isNull(passwordResets.usedAt)));
     await tx.delete(sessions).where(eq(sessions.userId, claimed.userId));
+    await revokeAllDeviceTokens(tx, claimed.userId);
     if (user) await tx.delete(loginAttempts).where(eq(loginAttempts.email, user.email));
   });
 }

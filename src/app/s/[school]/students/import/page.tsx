@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { PageHeader } from "@/components/ui/layout";
-import { can } from "@/server/authz/permissions";
+import { allowed } from "@/server/authz/permissions";
 import { IMPORT_FIELDS } from "@/server/imports/students";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
@@ -15,7 +15,7 @@ export const metadata: Metadata = { title: "Import students" };
 export default async function ImportPage({ params }: { params: Promise<{ school: string }> }) {
   const { school } = await params;
   const { ctx } = await requireTenant(school);
-  if (!can(ctx.roles, "students.manage")) notFound();
+  if (!allowed(ctx, "students.manage")) notFound();
   const slug = ctx.tenant.slug;
   return (
     <div className="space-y-8">

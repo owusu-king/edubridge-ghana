@@ -21,3 +21,10 @@ export function pgErrorCode(error: unknown): string | undefined {
 }
 
 export const PG_UNIQUE_VIOLATION = "23505";
+
+/** The constraint a PostgreSQL error names (e.g. which unique index was violated). */
+export function pgConstraint(error: unknown): string | undefined {
+  const candidate = error as { constraint?: unknown; cause?: { constraint?: unknown } };
+  const name = candidate.cause?.constraint ?? candidate.constraint;
+  return typeof name === "string" ? name : undefined;
+}

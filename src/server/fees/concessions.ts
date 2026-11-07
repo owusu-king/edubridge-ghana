@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { parseCedis } from "@/lib/money";
 import { recordAudit } from "../audit/record";
-import { assertCan } from "../authz/permissions";
+import { assertAllowed } from "../authz/permissions";
 import type { Database } from "../db/client";
 import { withTenant } from "../db/context";
 import {
@@ -22,9 +22,8 @@ import type { TenantContext } from "../tenancy/service";
 import { loadFinanceStudent } from "./access";
 
 /**
- * Scholarships and discounts per student. Sibling discounts are added the same way: schools differ on
- * which child and which items qualify (assumption to confirm with pilot schools), so the school decides
- * per child, helped by the list of families with more than one child enrolled.
+ * Scholarships and discounts per student. Sibling discounts can be added by hand the same way, or by the
+ * school's sibling discount rule (fees/siblings.ts), which manages only the discounts it created.
  */
 
 export interface Concession {
@@ -38,7 +37,11 @@ export interface Concession {
   createdAt: Date;
 }
 
-const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
+const scope = (ctx: TenantContext) => ({
+  tenantId: ctx.tenant.id,
+  userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
+});
 
 /** "10%", "12.5%". */
 export function formatPercent(basisPoints: number): string {
@@ -60,7 +63,7 @@ export async function listConcessions(
   ctx: TenantContext,
   studentId: string,
 ): Promise<Concession[]> {
-  assertCan(ctx.roles, "fees.view");
+  assertAllowed(ctx, "fees.view");
   if (!z.string().uuid().safeParse(studentId).success) return [];
   return withTenant(database, scope(ctx), async (tx) => {
     if (!(await loadFinanceStudent(tx, ctx, studentId))) return [];
@@ -130,7 +133,7 @@ export async function addConcession(
   studentId: string,
   input: unknown,
 ): Promise<string> {
-  assertCan(ctx.roles, "fees.manage");
+  assertAllowed(ctx, "fees.manage");
   const data = addSchema.parse(input);
   return withTenant(database, scope(ctx), async (tx) => {
     const student = await loadFinanceStudent(tx, ctx, studentId);
@@ -174,7 +177,7 @@ export async function endConcession(
   ctx: TenantContext,
   concessionId: string,
 ): Promise<void> {
-  assertCan(ctx.roles, "fees.manage");
+  assertAllowed(ctx, "fees.manage");
   if (!z.string().uuid().safeParse(concessionId).success) throw new DomainError("not_found", "Not found.");
   await withTenant(database, scope(ctx), async (tx) => {
     const [concession] = await tx
@@ -214,7 +217,7 @@ export interface Family {
 
 /** Guardians with two or more active children, for deciding sibling discounts. */
 export async function listFamilies(database: Database, ctx: TenantContext): Promise<Family[]> {
-  assertCan(ctx.roles, "fees.view");
+  assertAllowed(ctx, "fees.view");
   return withTenant(database, scope(ctx), async (tx) => {
     const rows = await tx
       .select({

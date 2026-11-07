@@ -3,7 +3,7 @@ import { ReceiptText } from "lucide-react";
 import { StatusText } from "@/components/ui/badge";
 import { EmptyState, Section } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { can } from "@/server/authz/permissions";
+import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { listFeeItems, SUGGESTED_FEE_ITEMS } from "@/server/fees/structure";
 import { requireTenant } from "@/web/auth";
@@ -26,7 +26,7 @@ export default async function FeeItemsPage({ params }: { params: Promise<{ schoo
   const { school } = await params;
   const { ctx } = await requireTenant(school);
   const slug = ctx.tenant.slug;
-  const canManage = can(ctx.roles, "fees.manage") && ctx.campusIds === null;
+  const canManage = allowed(ctx, "fees.manage") && ctx.campusIds === null;
   const items = await listFeeItems(db(), ctx);
 
   return (

@@ -12,7 +12,7 @@ import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 import { publishAction, saveRemarksAction, withdrawAction } from "../../../actions";
 import { PublishDialog, RemarksForm, WithdrawDialog } from "../../../assessment-controls";
-import { chooseTerm, termQuery } from "../../../terms";
+import { chooseTerm, termQuery } from "@/web/terms";
 
 export const metadata: Metadata = { title: "Report card" };
 
@@ -104,6 +104,7 @@ export default async function ReportCardPage({
               action={saveRemarksAction.bind(null, slug, term.id, cls.id, report.studentId)}
               values={report.remarks}
               canWriteHeadRemark={report.canPublish}
+              registers={report.registers}
             />
           )}
         </section>

@@ -7,7 +7,7 @@ import { AutoRefresh } from "@/components/ui/auto-refresh";
 import { buttonStyles } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { can } from "@/server/authz/permissions";
+import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import {
   listSchoolMobileMoneyRequests,
@@ -57,8 +57,8 @@ export default async function MobileMoneyPage({
     : "all";
   const page = Math.max(1, Math.min(10_000, Number.parseInt(search.page ?? "1", 10) || 1));
   const result = await listSchoolMobileMoneyRequests(db(), ctx, { filter, page });
-  const setup = mobileMoneySetup();
-  const canReview = can(ctx.roles, "payments.record");
+  const setup = mobileMoneySetup(ctx);
+  const canReview = allowed(ctx, "payments.record");
   const pages = Math.max(1, Math.ceil(result.total / MOBILE_MONEY_PAGE_SIZE));
   const href = (show: MobileMoneyFilter, p = 1) => {
     const qs = new URLSearchParams({
@@ -88,11 +88,7 @@ export default async function MobileMoneyPage({
           listed here.
         </Alert>
       ) : (
-        setup.testMode && (
-          <Alert>
-            Test mode: prompts are simulated and no money moves. Receipts are marked with MOCK references.
-          </Alert>
-        )
+        setup.testMode && <Alert>{setup.testHint ?? "Test mode: no money moves."}</Alert>
       )}
       {result.attentionCount > 0 && filter !== "attention" && (
         <Alert tone="critical">

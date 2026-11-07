@@ -1,7 +1,7 @@
 import "server-only";
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { assertCan } from "../authz/permissions";
+import { assertAllowed } from "../authz/permissions";
 import type { Transaction } from "../db/client";
 import { classes, enrolments, students, terms } from "../db/schema";
 import { DomainError } from "../errors";
@@ -9,7 +9,7 @@ import type { TenantContext } from "../tenancy/service";
 
 /** School-wide finance changes (structures, billing) need fees.manage and access to every campus. */
 export function assertCanManageSchoolFees(ctx: TenantContext): void {
-  assertCan(ctx.roles, "fees.manage");
+  assertAllowed(ctx, "fees.manage");
   if (ctx.campusIds !== null) {
     throw new DomainError(
       "campus_restricted",

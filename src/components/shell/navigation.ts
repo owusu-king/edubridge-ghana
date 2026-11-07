@@ -1,16 +1,22 @@
 import type { Route } from "next";
 import {
   Building2,
+  CalendarCheck,
+  ChartLine,
   ClipboardList,
   GraduationCap,
   LayoutGrid,
+  Megaphone,
+  MessageSquareText,
+  Receipt,
   School,
   Settings,
   Users,
   Wallet,
   type LucideIcon,
 } from "lucide-react";
-import { can, type Permission, type Role } from "@/server/authz/permissions";
+import { allowed, type Access, type Permission, type Role } from "@/server/authz/permissions";
+import type { Feature } from "@/lib/plan";
 import { schoolPath } from "@/lib/routes";
 
 export interface SchoolOption {
@@ -20,7 +26,8 @@ export interface SchoolOption {
 
 /** Which part of the product the shell is framing. Serializable, so it can cross to client components. */
 export type ShellArea =
-  { kind: "school"; school: SchoolOption; schools: SchoolOption[]; roles: Role[] } | { kind: "platform" };
+  | { kind: "school"; school: SchoolOption; schools: SchoolOption[]; roles: Role[]; features: Feature[] }
+  | { kind: "platform" };
 
 export interface NavLink {
   label: string;
@@ -33,17 +40,21 @@ export interface NavLink {
 }
 
 /** Settings tabs, each shown only to roles that may use it. The first visible tab is the Settings landing page. */
-const SETTINGS_TABS: readonly { label: string; segment: string; permission: Permission }[] = [
-  { label: "Profile", segment: "settings", permission: "school.settings.manage" },
-  { label: "Calendar", segment: "settings/calendar", permission: "academics.manage" },
-  { label: "Campuses", segment: "settings/campuses", permission: "campuses.manage" },
-  { label: "Plan", segment: "settings/plan", permission: "plan.view" },
-  { label: "Security", segment: "settings/security", permission: "security.manage" },
-  { label: "Audit log", segment: "settings/audit", permission: "audit.view" },
+const SETTINGS_TABS: readonly { label: string; segment: string; permissions: Permission[] }[] = [
+  { label: "Profile", segment: "settings", permissions: ["school.settings.manage"] },
+  { label: "Calendar", segment: "settings/calendar", permissions: ["academics.manage"] },
+  { label: "Attendance", segment: "settings/attendance", permissions: ["attendance.manage"] },
+  { label: "Messages", segment: "settings/messages", permissions: ["fees.manage"] },
+  { label: "Campuses", segment: "settings/campuses", permissions: ["campuses.manage"] },
+  { label: "Plan", segment: "settings/plan", permissions: ["plan.view"] },
+  { label: "Security", segment: "settings/security", permissions: ["security.manage"] },
+  { label: "Support access", segment: "settings/support", permissions: ["support.manage"] },
+  { label: "Data export", segment: "settings/export", permissions: ["data.export", "fees.export"] },
+  { label: "Audit log", segment: "settings/audit", permissions: ["audit.view"] },
 ];
 
-export function settingsTabs(slug: string, roles: readonly Role[]): { label: string; href: Route }[] {
-  return SETTINGS_TABS.filter((t) => can(roles, t.permission)).map((t) => ({
+export function settingsTabs(slug: string, access: Access): { label: string; href: Route }[] {
+  return SETTINGS_TABS.filter((t) => t.permissions.some((p) => allowed(access, p))).map((t) => ({
     label: t.label,
     href: schoolPath(slug, t.segment),
   }));
@@ -54,22 +65,29 @@ const SCHOOL_NAV: readonly { label: string; segment: string; icon: LucideIcon; p
   { label: "Overview", segment: "", icon: LayoutGrid, permission: "school.view" },
   { label: "Students", segment: "students", icon: GraduationCap, permission: "students.view" },
   { label: "Classes", segment: "classes", icon: School, permission: "classes.view" },
+  { label: "Attendance", segment: "attendance", icon: CalendarCheck, permission: "attendance.take" },
   { label: "Assessment", segment: "assessment", icon: ClipboardList, permission: "assessment.enter" },
   { label: "Fees", segment: "fees", icon: Wallet, permission: "fees.view" },
+  { label: "Insights", segment: "insights", icon: ChartLine, permission: "insights.view" },
+  { label: "Assistant", segment: "assistant", icon: MessageSquareText, permission: "assistant.use" },
+  { label: "Announcements", segment: "announcements", icon: Megaphone, permission: "communication.send" },
   { label: "Members", segment: "members", icon: Users, permission: "members.view" },
 ];
 
 export function navLinks(area: ShellArea): NavLink[] {
   if (area.kind === "platform") {
-    return [{ label: "Schools", href: "/admin" as Route, icon: Building2 }];
+    return [
+      { label: "Schools", href: "/admin" as Route, icon: Building2 },
+      { label: "Billing", href: "/admin/billing" as Route, icon: Receipt },
+    ];
   }
-  const links: NavLink[] = SCHOOL_NAV.filter((item) => can(area.roles, item.permission)).map((item) => ({
+  const links: NavLink[] = SCHOOL_NAV.filter((item) => allowed(area, item.permission)).map((item) => ({
     label: item.label,
     href: schoolPath(area.school.slug, item.segment),
     icon: item.icon,
     exact: item.segment === "",
   }));
-  const [firstTab] = settingsTabs(area.school.slug, area.roles);
+  const [firstTab] = settingsTabs(area.school.slug, area);
   // Highlight Settings for every settings tab, whichever one it opens on.
   if (firstTab)
     links.push({

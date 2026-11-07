@@ -2,9 +2,9 @@ import "server-only";
 import { randomBytes } from "node:crypto";
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { todayIn } from "@/lib/format";
+import { planIncludesParentView } from "./schools";
 import { hashToken } from "../auth/tokens";
 import type { Database, Transaction } from "../db/client";
-import { setTenantContext } from "../db/context";
 import { balanceLinks, guardians, studentGuardians, students, tenants } from "../db/schema";
 import { readChildSummary, type ChildSummary } from "./portal";
 
@@ -60,10 +60,10 @@ export async function readBalanceLink(
     const [school] = await tx
       .select({ name: tenants.name, timezone: tenants.timezone })
       .from(tenants)
-      .where(and(eq(tenants.id, link.tenantId), eq(tenants.status, "active")));
+      .where(and(eq(tenants.id, link.tenantId), eq(tenants.status, "active"), eq(tenants.isDemo, false)));
     if (!school) return null;
-
-    await setTenantContext(tx, { tenantId: link.tenantId, userId: "" });
+    // Sets the school's tenant context as well; a plan without the parent view shows nothing.
+    if (!(await planIncludesParentView(tx, link.tenantId))) return null;
     const [student] = await tx
       .select({
         id: students.id,

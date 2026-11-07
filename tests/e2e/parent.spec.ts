@@ -44,7 +44,27 @@ test.describe("on a phone", () => {
     const other = await page.goto(`/p/kpone-ridge/00000000-0000-4000-8000-000000000000`);
     expect(other!.status()).toBe(404);
 
+    // School news and how to reach the office, from the family home.
     await page.goto("/p");
+    await page
+      .getByRole("region", { name: SCHOOL.name })
+      .getByRole("link", { name: /School news/ })
+      .click();
+    await expect(page.getByRole("heading", { name: `News from ${SCHOOL.name}` })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Call +233 30 200 0100" })).toHaveAttribute(
+      "href",
+      "tel:+233302000100",
+    );
+    await expect(page.getByRole("link", { name: /WhatsApp/ })).toHaveAttribute(
+      "href",
+      "https://wa.me/233245550100",
+    );
+    await expect(page.getByText("Office hours: Weekdays 7:30 to 16:00")).toBeVisible();
+
+    await page.goto("/p");
+    await expect(
+      page.getByRole("region", { name: SCHOOL.name }).getByRole("link", { name: /School news/ }),
+    ).not.toContainText(/\d+ new/);
     await page.getByRole("button", { name: "Sign out" }).click();
     await expect(page).toHaveURL(/\/p\/login$/);
     await page.goto("/p");

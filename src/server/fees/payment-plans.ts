@@ -4,7 +4,7 @@ import { z } from "zod";
 import { todayIn } from "@/lib/format";
 import { parseCedis } from "@/lib/money";
 import { recordAudit } from "../audit/record";
-import { assertCan } from "../authz/permissions";
+import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import { paymentPlanInstalments, paymentPlans, payments, paymentVoids, users } from "../db/schema";
@@ -13,7 +13,11 @@ import type { TenantContext } from "../tenancy/service";
 import { loadFinanceStudent } from "./access";
 import { FREQUENCIES, planProgress, splitInstalments, type PlanProgress } from "./plan-schedule";
 
-const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
+const scope = (ctx: TenantContext) => ({
+  tenantId: ctx.tenant.id,
+  userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
+});
 
 export interface PaymentPlan {
   id: string;
@@ -29,7 +33,7 @@ export async function getPaymentPlan(
   ctx: TenantContext,
   studentId: string,
 ): Promise<PaymentPlan | null> {
-  assertCan(ctx.roles, "fees.view");
+  assertAllowed(ctx, "fees.view");
   if (!z.string().uuid().safeParse(studentId).success) return null;
   return withTenant(database, scope(ctx), async (tx) => {
     if (!(await loadFinanceStudent(tx, ctx, studentId))) return null;
@@ -108,7 +112,7 @@ export async function createPaymentPlan(
   studentId: string,
   input: unknown,
 ): Promise<string> {
-  assertCan(ctx.roles, "fees.manage");
+  assertAllowed(ctx, "fees.manage");
   const data = createSchema.parse(input);
   const today = todayIn(ctx.tenant.timezone);
   if (data.firstDueOn < today)
@@ -154,7 +158,7 @@ export async function cancelPaymentPlan(
   ctx: TenantContext,
   planId: string,
 ): Promise<void> {
-  assertCan(ctx.roles, "fees.manage");
+  assertAllowed(ctx, "fees.manage");
   if (!z.string().uuid().safeParse(planId).success) throw new DomainError("not_found", "Not found.");
   await withTenant(database, scope(ctx), async (tx) => {
     const [plan] = await tx

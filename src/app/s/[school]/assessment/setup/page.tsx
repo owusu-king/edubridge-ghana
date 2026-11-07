@@ -9,7 +9,7 @@ import { EmptyState, Section } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { STAGE_LABELS } from "@/server/academics/classes";
 import { getAssessmentSetup } from "@/server/assessment/setup";
-import { can } from "@/server/authz/permissions";
+import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
@@ -22,8 +22,8 @@ import {
   updateSubjectAction,
 } from "../actions";
 import { ScaleForm, SchemeForm, SubjectDialog } from "../assessment-controls";
-import { TermPicker } from "../term-picker";
-import { chooseTerm } from "../terms";
+import { TermPicker } from "@/components/term-picker";
+import { chooseTerm } from "@/web/terms";
 
 export const metadata: Metadata = { title: "Assessment setup" };
 
@@ -36,7 +36,7 @@ export default async function AssessmentSetupPage({
 }) {
   const [{ school }, search] = await Promise.all([params, searchParams]);
   const { ctx } = await requireTenant(school);
-  if (!can(ctx.roles, "academics.manage")) notFound();
+  if (!allowed(ctx, "academics.manage")) notFound();
   const slug = ctx.tenant.slug;
   const { terms, term } = await chooseTerm(ctx, search.term);
   if (!term) {

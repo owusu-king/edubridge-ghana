@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "../audit/record";
-import { assertCan } from "../authz/permissions";
+import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import { campuses, tenantEntitlements } from "../db/schema";
@@ -20,7 +20,11 @@ export const campusNameSchema = z.object({
   name: z.string().trim().min(2, "Use at least 2 characters.").max(80, "Use 80 characters or fewer."),
 });
 
-const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
+const scope = (ctx: TenantContext) => ({
+  tenantId: ctx.tenant.id,
+  userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
+});
 
 export async function listCampuses(database: Database, ctx: TenantContext): Promise<Campus[]> {
   const rows = await withTenant(database, scope(ctx), (tx) =>
@@ -69,7 +73,7 @@ async function readUsage(tx: Transaction, tenantId: string): Promise<PlanUsage> 
 }
 
 export async function getPlanUsage(database: Database, ctx: TenantContext): Promise<PlanUsage> {
-  assertCan(ctx.roles, "plan.view");
+  assertAllowed(ctx, "plan.view");
   return withTenant(database, scope(ctx), (tx) => readUsage(tx, ctx.tenant.id));
 }
 
@@ -100,7 +104,7 @@ function mapUnique(error: unknown): never {
 }
 
 function assertManage(ctx: TenantContext): void {
-  assertCan(ctx.roles, "campuses.manage");
+  assertAllowed(ctx, "campuses.manage");
   // Creating, renaming and archiving campuses affects the whole school.
   if (ctx.campusIds !== null) {
     throw new DomainError("campus_scope", "Only members with access to every campus can manage campuses.");

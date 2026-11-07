@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Section } from "@/components/ui/layout";
-import { can } from "@/server/authz/permissions";
+import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { suggestedAsOf } from "@/server/fees/opening-balances";
 import { schoolPath } from "@/lib/routes";
@@ -14,7 +14,7 @@ export const metadata: Metadata = { title: "Fees · Opening balances" };
 export default async function OpeningBalancesPage({ params }: { params: Promise<{ school: string }> }) {
   const { school } = await params;
   const { ctx } = await requireTenant(school);
-  if (!can(ctx.roles, "fees.manage") || ctx.campusIds !== null) notFound();
+  if (!allowed(ctx, "fees.manage") || ctx.campusIds !== null) notFound();
   const slug = ctx.tenant.slug;
   return (
     <Section

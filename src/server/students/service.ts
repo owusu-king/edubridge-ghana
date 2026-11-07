@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "../audit/record";
-import { assertCan, can } from "../authz/permissions";
+import { allowed, assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import {
@@ -15,14 +15,19 @@ import {
   studentGuardians,
   students,
   tenantCounters,
+  tenantEntitlements,
   terms,
 } from "../db/schema";
 import { addGuardianSchema, linkGuardianInTx } from "./guardian-links";
-import { DomainError, PG_UNIQUE_VIOLATION, pgErrorCode } from "../errors";
+import { DomainError, PG_UNIQUE_VIOLATION, pgConstraint, pgErrorCode } from "../errors";
 import type { TenantContext } from "../tenancy/service";
 
 export const PAGE_SIZE = 50;
-const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
+const scope = (ctx: TenantContext) => ({
+  tenantId: ctx.tenant.id,
+  userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
+});
 
 /** Treats blank form values as missing. Optional at the key level, so the field may be omitted. */
 const blank = (v: unknown) => (v === "" || v === null ? undefined : v);
@@ -75,8 +80,9 @@ async function currentTermId(tx: Transaction, tenantId: string): Promise<string 
  * Class ids the context may see students of, or null for "all". Teachers: classes where they are class
  * teacher. Campus-scoped staff: classes at their campuses.
  */
-async function visibleClassIds(tx: Transaction, ctx: TenantContext): Promise<string[] | null> {
-  const viewAll = can(ctx.roles, "students.view_all");
+/** Classes whose students this member may see (null: every class). */
+export async function visibleClassIds(tx: Transaction, ctx: TenantContext): Promise<string[] | null> {
+  const viewAll = allowed(ctx, "students.view_all");
   if (viewAll && ctx.campusIds === null) return null;
   const conditions: SQL[] = [eq(classes.tenantId, ctx.tenant.id)];
   if (ctx.campusIds !== null)
@@ -152,6 +158,11 @@ function mapRaceSafe(error: unknown): unknown {
 
 function mapUnique(error: unknown): never {
   if (error instanceof DomainError) throw error;
+  if (pgErrorCode(error) === PG_UNIQUE_VIOLATION && pgConstraint(error) === "students_tenant_learner_unique")
+    throw new DomainError(
+      "learner_already_here",
+      "This child already has a record at your school. Find them under Students and make them active again.",
+    );
   if (pgErrorCode(error) === PG_UNIQUE_VIOLATION) {
     throw new DomainError(
       "admission_taken",
@@ -162,14 +173,49 @@ function mapUnique(error: unknown): never {
   throw error;
 }
 
+/**
+ * The plan's student limit (active students). Taken under a per-school lock, so two people adding students
+ * at once cannot pass it together. No plan row, or no limit set, means no limit.
+ */
+export async function assertStudentCapacity(
+  tx: Transaction,
+  tenantId: string,
+  adding: number,
+): Promise<void> {
+  if (adding <= 0) return;
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${"student-capacity:" + tenantId}, 0))`);
+  const [plan] = await tx
+    .select({ max: tenantEntitlements.maxStudents })
+    .from(tenantEntitlements)
+    .where(eq(tenantEntitlements.tenantId, tenantId));
+  if (plan?.max === null || plan?.max === undefined) return;
+  const [count] = await tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(students)
+    .where(and(eq(students.tenantId, tenantId), eq(students.status, "active")));
+  const active = count?.n ?? 0;
+  if (active + adding > plan.max) {
+    const room = Math.max(0, plan.max - active);
+    throw new DomainError(
+      "student_limit",
+      `Your plan allows ${plan.max.toLocaleString("en-GH")} active students and you have ${active.toLocaleString("en-GH")}` +
+        (room > 0 ? `, so ${room} more can be added.` : ".") +
+        " Ask EduBridge to raise the limit, or withdraw students who have left.",
+    );
+  }
+}
+
 export async function createStudent(
   database: Database,
   ctx: TenantContext,
   input: unknown,
+  /** A transferred child keeps their learner identity (Transfer Passport). */
+  options: { learnerId?: string } = {},
 ): Promise<{ id: string; admissionNumber: string }> {
-  assertCan(ctx.roles, "students.manage");
+  assertAllowed(ctx, "students.manage");
   const data = createStudentSchema.parse(input);
   return withTenant(database, scope(ctx), async (tx) => {
+    await assertStudentCapacity(tx, ctx.tenant.id, 1);
     let termId: string | null = null;
     if (data.classId) {
       await assertClass(tx, ctx, data.classId);
@@ -193,6 +239,7 @@ export async function createStudent(
         sex: data.sex,
         dateOfBirth: data.dateOfBirth ?? null,
         admittedOn: new Date().toISOString().slice(0, 10),
+        ...(options.learnerId ? { learnerId: options.learnerId } : {}),
       })
       .returning({ id: students.id });
     if (data.classId && termId) {
@@ -225,7 +272,7 @@ export async function listStudents(
   ctx: TenantContext,
   input: ListStudentsInput = {},
 ): Promise<{ rows: StudentRow[]; total: number; page: number; termName: string | null }> {
-  assertCan(ctx.roles, "students.view");
+  assertAllowed(ctx, "students.view");
   const page = Math.max(1, Math.floor(input.page ?? 1));
   return withTenant(database, scope(ctx), async (tx) => {
     const [term] = await tx
@@ -331,7 +378,7 @@ export async function getStudent(
   ctx: TenantContext,
   studentId: string,
 ): Promise<StudentDetail | null> {
-  assertCan(ctx.roles, "students.view");
+  assertAllowed(ctx, "students.view");
   if (!z.string().uuid().safeParse(studentId).success) return null;
   return withTenant(database, scope(ctx), async (tx) => {
     const [student] = await tx
@@ -400,7 +447,7 @@ export async function updateStudent(
   studentId: string,
   input: unknown,
 ): Promise<void> {
-  assertCan(ctx.roles, "students.manage");
+  assertAllowed(ctx, "students.manage");
   const data = studentSchema.parse(input);
   await withTenant(database, scope(ctx), async (tx) => {
     const before = await loadStudent(tx, ctx, studentId);
@@ -447,7 +494,7 @@ export async function assignClass(
   studentId: string,
   classId: string,
 ): Promise<void> {
-  assertCan(ctx.roles, "students.manage");
+  assertAllowed(ctx, "students.manage");
   await withTenant(database, scope(ctx), async (tx) => {
     const student = await loadStudent(tx, ctx, studentId);
     if (student.status !== "active")
@@ -492,11 +539,12 @@ export async function setStudentStatus(
   studentId: string,
   status: "active" | "withdrawn" | "graduated",
 ): Promise<void> {
-  assertCan(ctx.roles, "students.manage");
+  assertAllowed(ctx, "students.manage");
   const parsed = z.enum(["active", "withdrawn", "graduated"]).parse(status);
   await withTenant(database, scope(ctx), async (tx) => {
     const student = await loadStudent(tx, ctx, studentId);
     if (student.status === parsed) return;
+    if (parsed === "active") await assertStudentCapacity(tx, ctx.tenant.id, 1);
     await tx
       .update(students)
       .set({ status: parsed, updatedAt: new Date() })
@@ -525,7 +573,7 @@ export async function listClassOptions(
   database: Database,
   ctx: TenantContext,
 ): Promise<{ id: string; name: string; levelName: string }[]> {
-  assertCan(ctx.roles, "students.view");
+  assertAllowed(ctx, "students.view");
   return withTenant(database, scope(ctx), async (tx) => {
     const rows = await tx
       .select({ id: classes.id, name: classes.name, levelName: levels.name, campusId: classes.campusId })
@@ -536,5 +584,59 @@ export async function listClassOptions(
     return rows
       .filter((r) => ctx.campusIds === null || ctx.campusIds.includes(r.campusId))
       .map(({ id, name, levelName }) => ({ id, name, levelName }));
+  });
+}
+
+export interface PossibleDuplicate {
+  id: string;
+  name: string;
+  admissionNumber: string;
+  status: "active" | "withdrawn" | "graduated";
+  dateOfBirth: string | null;
+}
+
+/**
+ * Students already on record with the same first name and surname (case and spacing ignored) and, when
+ * both are known, the same date of birth. Used before registering a student entered offline, where the
+ * person could not see whether someone else had already added the child.
+ */
+export async function findPossibleDuplicates(
+  database: Database,
+  ctx: TenantContext,
+  input: { firstName: string; lastName: string; dateOfBirth?: string | null },
+): Promise<PossibleDuplicate[]> {
+  assertAllowed(ctx, "students.manage");
+  const norm = (v: string) => v.trim().replace(/\s+/g, " ").toLowerCase();
+  return withTenant(database, scope(ctx), async (tx) => {
+    const rows = await tx
+      .select({
+        id: students.id,
+        firstName: students.firstName,
+        otherNames: students.otherNames,
+        lastName: students.lastName,
+        admissionNumber: students.admissionNumber,
+        status: students.status,
+        dateOfBirth: students.dateOfBirth,
+      })
+      .from(students)
+      .where(
+        and(
+          eq(students.tenantId, ctx.tenant.id),
+          // "\\s" in a template literal reaches PostgreSQL as the regex \s (whitespace).
+          sql`lower(regexp_replace(trim(${students.firstName}), '\\s+', ' ', 'g')) = ${norm(input.firstName)}`,
+          sql`lower(regexp_replace(trim(${students.lastName}), '\\s+', ' ', 'g')) = ${norm(input.lastName)}`,
+          input.dateOfBirth
+            ? or(isNull(students.dateOfBirth), eq(students.dateOfBirth, input.dateOfBirth))
+            : undefined,
+        ),
+      )
+      .limit(5);
+    return rows.map((r) => ({
+      id: r.id,
+      name: fullName(r),
+      admissionNumber: r.admissionNumber,
+      status: r.status,
+      dateOfBirth: r.dateOfBirth,
+    }));
   });
 }

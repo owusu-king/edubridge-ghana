@@ -8,7 +8,8 @@ import { db } from "@/server/db/client";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 import { saveScoresAction } from "../../../actions";
-import { chooseTerm, termQuery } from "../../../terms";
+import { chooseTerm, termQuery } from "@/web/terms";
+import { syncOperationsAction } from "../../../../sync-actions";
 import { ScoreSheet } from "./score-sheet";
 
 export const metadata: Metadata = { title: "Score sheet" };
@@ -62,6 +63,15 @@ export default async function ScoreSheetPage({
           bands={sheet.bands}
           students={sheet.students}
           subjectName={sheet.subject.name}
+          sync={{
+            school: slug,
+            userId: ctx.userId,
+            termId: term.id,
+            classId: sheet.cls.id,
+            subjectId: sheet.subject.id,
+            label: `${sheet.subject.name}, ${sheet.cls.name}`,
+            action: syncOperationsAction,
+          }}
         />
       )}
     </div>

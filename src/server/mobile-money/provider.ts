@@ -2,8 +2,7 @@ import type { MobileMoneyNetwork } from "@/lib/mobile-money";
 
 /**
  * A Mobile Money collection provider: asks a payer to approve a payment on their phone, and reports
- * the result. Real adapters (MTN MoMo, Telecel Cash, AT Money, or an aggregator) implement this once
- * their documentation and sandbox access are available; until then only the mock exists.
+ * the result. Implemented by Paystack (paystack.ts, chosen 2026-11-06) and by the mock used in tests.
  *
  * The provider's word is never taken from a callback alone: the service always asks `getStatus` and
  * checks the amount and currency before recording a payment.
@@ -13,6 +12,8 @@ export interface MobileMoneyProvider {
   name: string;
   /** True when no real money moves (shown to staff as test mode). */
   testMode: boolean;
+  /** In test mode: how to try it (which numbers approve, decline...), shown to staff. */
+  testHint?: string;
   requestPayment(request: CollectionRequest): Promise<CollectionStarted>;
   getStatus(ref: CollectionRef): Promise<CollectionStatus>;
   /**
@@ -31,9 +32,16 @@ export interface IncomingCallback {
 export interface CallbackRef {
   reference: string | null;
   providerReference: string | null;
+  /**
+   * The school, for providers that send every callback to one address (Paystack): read from the
+   * reference EduBridge gave the payment. Null when the callback URL names the school instead.
+   */
+  tenantId?: string | null;
 }
 
 export interface CollectionRequest {
+  /** The school the payment is for. */
+  tenantId: string;
   /** Our request id; providers that accept a client reference receive this. */
   reference: string;
   amountPesewas: number;
@@ -45,6 +53,11 @@ export interface CollectionRequest {
   payerMessage: string;
   /** Where the provider should send its callback, when it supports per-request callback URLs. */
   callbackUrl: string | null;
+  /**
+   * The school's own account with the provider (a Paystack subaccount code), so the money settles to the
+   * school directly and EduBridge never holds it (D-07). Null when not set up.
+   */
+  settlementAccount: string | null;
 }
 
 export interface CollectionStarted {
@@ -53,6 +66,7 @@ export interface CollectionStarted {
 }
 
 export interface CollectionRef {
+  tenantId: string;
   reference: string;
   providerReference: string | null;
 }

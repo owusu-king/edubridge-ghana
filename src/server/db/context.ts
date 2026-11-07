@@ -5,6 +5,11 @@ import type { Database, Transaction } from "./client";
 export interface TenantScope {
   tenantId: string;
   userId: string;
+  /**
+   * Set when EduBridge support is acting under a support grant (PLT-02): every audit event recorded in the
+   * transaction carries it (the column's default reads it).
+   */
+  supportGrantId?: string | null;
 }
 
 /**
@@ -15,7 +20,7 @@ export interface TenantScope {
 /** Sets the tenant context on an open transaction, e.g. after creating the tenant in that transaction. */
 export async function setTenantContext(tx: Transaction, scope: TenantScope): Promise<void> {
   await tx.execute(
-    sql`select set_config('app.tenant_id', ${scope.tenantId}, true), set_config('app.user_id', ${scope.userId}, true)`,
+    sql`select set_config('app.tenant_id', ${scope.tenantId}, true), set_config('app.user_id', ${scope.userId}, true), set_config('app.support_grant_id', ${scope.supportGrantId ?? ""}, true)`,
   );
 }
 

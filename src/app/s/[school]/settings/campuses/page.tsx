@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Section } from "@/components/ui/layout";
-import { can } from "@/server/authz/permissions";
+import { allowed } from "@/server/authz/permissions";
 import { getPlanUsage, listCampuses } from "@/server/campuses/service";
 import { db } from "@/server/db/client";
 import { formatDate } from "@/lib/format";
@@ -14,7 +14,7 @@ export const metadata: Metadata = { title: "Settings · Campuses" };
 export default async function CampusesPage({ params }: { params: Promise<{ school: string }> }) {
   const { school } = await params;
   const { ctx } = await requireTenant(school);
-  if (!can(ctx.roles, "campuses.manage")) notFound();
+  if (!allowed(ctx, "campuses.manage")) notFound();
   const [campuses, usage] = await Promise.all([listCampuses(db(), ctx), getPlanUsage(db(), ctx)]);
   const slug = ctx.tenant.slug;
   const canManage = ctx.campusIds === null;

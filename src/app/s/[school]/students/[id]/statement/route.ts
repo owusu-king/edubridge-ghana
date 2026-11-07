@@ -1,4 +1,4 @@
-import { can } from "@/server/authz/permissions";
+import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { getStudentAccount } from "@/server/fees/ledger";
 import { getStudent } from "@/server/students/service";
@@ -16,7 +16,7 @@ export async function GET(
 ) {
   const { school, id } = await params;
   const { ctx } = await requireTenant(school);
-  if (!can(ctx.roles, "fees.view")) return new Response("Not found", { status: 404 });
+  if (!allowed(ctx, "fees.view")) return new Response("Not found", { status: 404 });
   const account = await getStudentAccount(db(), ctx, id);
   if (!account) return new Response("Not found", { status: 404 });
   const student = await getStudent(db(), ctx, id);

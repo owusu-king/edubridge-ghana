@@ -6,13 +6,14 @@ export function describeReminders(result: ReminderResult): string {
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const sent = result.sent ? `Sent ${plural(result.sent, "reminder", "reminders")}.` : "No reminders sent.";
   if (result.skipped.length === 0) return sent;
-  const counts = { no_phone: 0, already_today: 0, not_owing: 0, not_found: 0 };
+  const counts = { no_phone: 0, already_today: 0, not_owing: 0, not_found: 0, sms_limit: 0 };
   for (const s of result.skipped) counts[s.reason]++;
   const reasons = [
     counts.no_phone && `${plural(counts.no_phone, "has", "have")} no guardian phone number`,
     counts.already_today && `${plural(counts.already_today, "was", "were")} already reminded today`,
     counts.not_owing && `${plural(counts.not_owing, "owes", "owe")} nothing`,
     counts.not_found && `${plural(counts.not_found, "is", "are")} not available to you`,
+    counts.sms_limit && `${plural(counts.sms_limit, "was", "were")} over this month's SMS limit in your plan`,
   ].filter(Boolean);
   return `${sent} ${result.skipped.length} skipped: ${reasons.join(", ")}.`;
 }

@@ -1,7 +1,7 @@
 import type { Metadata, Route } from "next";
 import Link from "next/link";
 import { Building2, Plus } from "lucide-react";
-import { StatusText } from "@/components/ui/badge";
+import { Badge, StatusText } from "@/components/ui/badge";
 import { buttonStyles } from "@/components/ui/button";
 import { EmptyState, PageHeader } from "@/components/ui/layout";
 import { SchoolMonogram } from "@/components/ui/monogram";
@@ -66,6 +66,11 @@ export default async function SchoolsAdminPage() {
                           {school.name}
                         </Link>
                         <p className="truncate font-mono text-xs text-ink-3">/s/{school.slug}</p>
+                        {school.isDemo && (
+                          <Badge tone="caution" className="mt-1">
+                            Demo, made-up data
+                          </Badge>
+                        )}
                       </div>
                     </div>
                   </TD>

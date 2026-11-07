@@ -35,6 +35,7 @@ export default async function AccountLayout({ children }: { children: ReactNode 
             items={[
               { label: "Profile", href: "/account" },
               { label: "Security", href: "/account/security" },
+              { label: "Devices", href: "/account/devices" },
             ]}
           />
         </div>

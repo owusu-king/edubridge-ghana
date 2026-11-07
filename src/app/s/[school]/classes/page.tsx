@@ -1,13 +1,16 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { School } from "lucide-react";
 import { StatusText } from "@/components/ui/badge";
+import { buttonStyles } from "@/components/ui/button";
 import { EmptyState, PageHeader } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { listLevelsWithClasses, listTeacherOptions, STAGE_LABELS, STAGES } from "@/server/academics/classes";
-import { can } from "@/server/authz/permissions";
+import { allowed } from "@/server/authz/permissions";
 import { listCampuses } from "@/server/campuses/service";
 import { db } from "@/server/db/client";
+import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 import {
   addClassAction,
@@ -31,8 +34,8 @@ export const metadata: Metadata = { title: "Classes" };
 export default async function ClassesPage({ params }: { params: Promise<{ school: string }> }) {
   const { school } = await params;
   const { ctx } = await requireTenant(school);
-  if (!can(ctx.roles, "classes.view")) notFound();
-  const canManage = can(ctx.roles, "academics.manage");
+  if (!allowed(ctx, "classes.view")) notFound();
+  const canManage = allowed(ctx, "academics.manage");
   const [levels, campuses, teachers] = await Promise.all([
     listLevelsWithClasses(db(), ctx),
     listCampuses(db(), ctx),
@@ -65,6 +68,11 @@ export default async function ClassesPage({ params }: { params: Promise<{ school
           canManage &&
           levels.length > 0 && (
             <>
+              {ctx.campusIds === null && (
+                <Link href={schoolPath(slug, "classes/move")} className={buttonStyles("secondary")}>
+                  Move to another term
+                </Link>
+              )}
               <AddLevelDialog action={addLevelAction.bind(null, slug)} stages={stageOptions} />
               {addClass()}
             </>

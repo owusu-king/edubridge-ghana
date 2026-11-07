@@ -10,6 +10,7 @@ import { initials } from "@/lib/format";
 import { Wordmark } from "@/components/ui/wordmark";
 import type { SchoolOption, ShellArea } from "./navigation";
 import { schoolPath } from "@/lib/routes";
+import { clearOfflineData } from "@/components/attendance/offline";
 
 const menuContent =
   "z-50 min-w-60 overflow-hidden rounded-lg border border-line bg-surface p-1 text-base shadow-overlay";
@@ -113,7 +114,10 @@ export function UserMenu({
               <Link href="/admin">Platform administration</Link>
             </DropdownMenu.Item>
           )}
-          <DropdownMenu.Item className={menuItem} onSelect={() => signOutForm.current?.requestSubmit()}>
+          <DropdownMenu.Item
+            className={menuItem}
+            onSelect={() => void clearOfflineData().finally(() => signOutForm.current?.requestSubmit())}
+          >
             <LogOut aria-hidden="true" className="size-4" />
             Sign out
           </DropdownMenu.Item>

@@ -9,6 +9,7 @@ import { parentSignInCodes } from "../db/schema";
 import { DomainError } from "../errors";
 import { enqueue } from "../notifications/outbox";
 import { createParentSession } from "./sessions";
+import { recordParentCodeUsage } from "../billing/usage";
 import { schoolsForPhone } from "./schools";
 
 /**
@@ -107,8 +108,16 @@ export async function requestParentCode(
       createdAt: now,
     });
     // Unknown numbers get no SMS (and so cost nothing), but the same response.
-    if (tenantIds.length > 0)
-      await enqueue(tx, { channel: "sms", recipient: phone, template: "phone_code", payload: { code } });
+    if (tenantIds.length > 0) {
+      const outboxId = await enqueue(tx, {
+        channel: "sms",
+        recipient: phone,
+        template: "phone_code",
+        payload: { code },
+      });
+      // Each school with the number pays for the code (billing records; shared codes are marked as such).
+      await recordParentCodeUsage(tx, outboxId, tenantIds);
+    }
     return { requestId, phone };
   });
 }

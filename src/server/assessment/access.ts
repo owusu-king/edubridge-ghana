@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, eq, inArray, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { can } from "../authz/permissions";
+import { allowed, type Permission } from "../authz/permissions";
 import type { Transaction } from "../db/client";
 import { campuses, classes, levels, memberships, terms, users } from "../db/schema";
 import type { TenantContext } from "../tenancy/service";
@@ -20,17 +20,21 @@ export interface AssessableClass {
 
 /** Staff who oversee academics reach every class (at their campuses); others only enter for their own. */
 export function seesAllClasses(ctx: TenantContext): boolean {
-  return can(ctx.roles, "academics.manage") || can(ctx.roles, "reports.publish");
+  return allowed(ctx, "academics.manage") || allowed(ctx, "reports.publish");
 }
 
 const NONE = "00000000-0000-0000-0000-000000000000";
 
+/** Class work that follows the class-teacher rule: entering marks and remarks, and taking the register. */
+export type ClassWork = Extract<Permission, "assessment.enter" | "attendance.take">;
+
 /**
- * Conditions for the classes this member may enter scores and remarks for: all classes (within campus scope)
- * for academic leads; for teachers, the classes they are class teacher of. Null when they may see none.
+ * Conditions for the classes this member may do class work for (marks, remarks, registers): all classes
+ * (within campus scope) for academic leads; for teachers, the classes they are class teacher of. Null when
+ * they may see none.
  */
-async function classConditions(tx: Transaction, ctx: TenantContext): Promise<SQL[] | null> {
-  if (!can(ctx.roles, "assessment.enter")) return null;
+async function classConditions(tx: Transaction, ctx: TenantContext, work: ClassWork): Promise<SQL[] | null> {
+  if (!allowed(ctx, work)) return null;
   const conditions: SQL[] = [eq(classes.tenantId, ctx.tenant.id)];
   if (ctx.campusIds !== null)
     conditions.push(inArray(classes.campusId, ctx.campusIds.length ? ctx.campusIds : [NONE]));
@@ -66,8 +70,12 @@ function classQuery(tx: Transaction) {
 }
 
 /** Classes this member may assess, in level then name order. */
-export async function listAssessableClasses(tx: Transaction, ctx: TenantContext): Promise<AssessableClass[]> {
-  const conditions = await classConditions(tx, ctx);
+export async function listAssessableClasses(
+  tx: Transaction,
+  ctx: TenantContext,
+  work: ClassWork = "assessment.enter",
+): Promise<AssessableClass[]> {
+  const conditions = await classConditions(tx, ctx, work);
   if (!conditions) return [];
   return classQuery(tx)
     .where(and(...conditions))
@@ -79,9 +87,10 @@ export async function loadAssessableClass(
   tx: Transaction,
   ctx: TenantContext,
   classId: string,
+  work: ClassWork = "assessment.enter",
 ): Promise<AssessableClass | null> {
   if (!z.string().uuid().safeParse(classId).success) return null;
-  const conditions = await classConditions(tx, ctx);
+  const conditions = await classConditions(tx, ctx, work);
   if (!conditions) return null;
   const [row] = await classQuery(tx).where(and(...conditions, eq(classes.id, classId)));
   return row ?? null;

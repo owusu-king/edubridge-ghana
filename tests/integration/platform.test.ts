@@ -132,7 +132,14 @@ describe("operating schools", () => {
       maxStudents: 800,
     });
     const detail = await getSchool(conn.app, admin.id, school.id);
-    expect(detail?.entitlements).toEqual({ planName: "Standard", maxCampuses: 3, maxStudents: 800 });
+    // Features and the SMS limit keep their defaults when not given.
+    expect(detail?.entitlements).toEqual({
+      planName: "Standard",
+      maxCampuses: 3,
+      maxStudents: 800,
+      maxSmsPerMonth: null,
+      features: ["attendance", "assessment", "parent_view", "fee_reminders", "mobile_money"],
+    });
 
     await expect(
       withTenant(conn.app, { tenantId: school.id, userId: schoolOwner.id }, (tx) =>

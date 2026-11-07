@@ -5,8 +5,9 @@ import { buttonStyles } from "@/components/ui/button";
 import { Select } from "@/components/ui/field";
 import { EmptyState } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { can } from "@/server/authz/permissions";
+import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
+import { billedForTerm } from "@/server/dashboard/finance";
 import { getBillingStatus } from "@/server/fees/ledger";
 import { getFeeStructure, listFeeTerms, type FeeTerm } from "@/server/fees/structure";
 import { formatCedis, pesewasToInput } from "@/lib/money";
@@ -29,7 +30,7 @@ export default async function FeeStructurePage({
   const [{ school }, search] = await Promise.all([params, searchParams]);
   const { ctx } = await requireTenant(school);
   const slug = ctx.tenant.slug;
-  const canManage = can(ctx.roles, "fees.manage") && ctx.campusIds === null;
+  const canManage = allowed(ctx, "fees.manage") && ctx.campusIds === null;
   const terms = await listFeeTerms(db(), ctx);
 
   if (terms.length === 0) {
@@ -39,7 +40,7 @@ export default async function FeeStructurePage({
         title="No terms yet"
         description="Fees are set per term. Add your academic year and its terms first."
         action={
-          can(ctx.roles, "academics.manage") && (
+          allowed(ctx, "academics.manage") && (
             <Link href={schoolPath(slug, "settings/calendar")} className={buttonStyles("primary")}>
               Set up the calendar
             </Link>
@@ -50,9 +51,10 @@ export default async function FeeStructurePage({
   }
 
   const term = terms.find((t) => t.id === search.term) ?? terms.find((t) => t.isCurrent) ?? terms[0]!;
-  const [structure, billing] = await Promise.all([
+  const [structure, billing, billed] = await Promise.all([
     getFeeStructure(db(), ctx, term.id),
     getBillingStatus(db(), ctx, term.id),
+    billedForTerm(db(), ctx, term.id),
   ]);
   const activeItems = structure.items.filter((i) => i.status === "active");
   const copySources = terms.filter((t) => t.id !== term.id && t.lineCount > 0);
@@ -119,6 +121,13 @@ export default async function FeeStructurePage({
           />
         )}
       </div>
+      {billed !== 0 && (
+        <p className="text-base text-ink-2">
+          Billed for {termLabel(term)}:{" "}
+          <span className="font-semibold text-ink tabular-nums">{formatCedis(billed)}</span>{" "}
+          <span className="text-ink-3">(charges less discounts, leaving out any reversed)</span>
+        </p>
+      )}
       {empty && (
         <p className="text-base text-ink-2">
           No fees set for {termLabel(term)} yet.
@@ -291,7 +300,7 @@ export default async function FeeStructurePage({
           )}
         </section>
       )}
-      {!canManage && can(ctx.roles, "fees.manage") && (
+      {!canManage && allowed(ctx, "fees.manage") && (
         <p className="text-sm text-ink-3">
           Fees apply to the whole school, so they can only be changed by staff with access to every campus.
         </p>

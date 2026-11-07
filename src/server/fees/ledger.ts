@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { sumPesewas } from "@/lib/money";
 import { recordAudit } from "../audit/record";
-import { assertCan } from "../authz/permissions";
+import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import {
@@ -24,7 +24,11 @@ import { assertCanManageSchoolFees, loadFinanceStudent } from "./access";
 import { planBilling, type BillingPlan } from "./billing-plan";
 import { planDiscounts, type ChargeBase, type PlannedDiscount } from "./discount-plan";
 
-const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
+const scope = (ctx: TenantContext) => ({
+  tenantId: ctx.tenant.id,
+  userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
+});
 
 /**
  * Whether an entry has been reversed (a reversal row points at it). The outer column is written out in
@@ -227,7 +231,7 @@ export async function getBillingStatus(
   ctx: TenantContext,
   termId: string,
 ): Promise<BillingStatus | null> {
-  assertCan(ctx.roles, "fees.view");
+  assertAllowed(ctx, "fees.view");
   return withTenant(database, scope(ctx), async (tx) => {
     if (!(await loadTerm(tx, ctx, termId))) return null;
     return summarise(tx, ctx, await planTerm(tx, ctx, termId));
@@ -362,7 +366,7 @@ export async function getStudentAccount(
   ctx: TenantContext,
   studentId: string,
 ): Promise<StudentAccount | null> {
-  assertCan(ctx.roles, "fees.view");
+  assertAllowed(ctx, "fees.view");
   if (!z.string().uuid().safeParse(studentId).success) return null;
   return withTenant(database, scope(ctx), async (tx) => {
     const student = await loadFinanceStudent(tx, ctx, studentId);
@@ -430,7 +434,7 @@ export async function reverseEntry(
   entryId: string,
   input: unknown,
 ): Promise<string> {
-  assertCan(ctx.roles, "fees.manage");
+  assertAllowed(ctx, "fees.manage");
   const { reason } = reverseSchema.parse(input);
   if (!z.string().uuid().safeParse(entryId).success)
     throw new DomainError("not_found", "This entry no longer exists.");

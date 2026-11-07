@@ -6,12 +6,12 @@ import { buttonStyles } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { listAssessmentClasses } from "@/server/assessment/scores";
-import { can } from "@/server/authz/permissions";
+import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
-import { TermPicker } from "./term-picker";
-import { chooseTerm, termQuery } from "./terms";
+import { TermPicker } from "@/components/term-picker";
+import { chooseTerm, termQuery } from "@/web/terms";
 
 export const metadata: Metadata = { title: "Assessment" };
 
@@ -33,7 +33,7 @@ export default async function AssessmentPage({
         title="No terms yet"
         description="Scores and report cards are kept per term. Add your academic year and its terms first."
         action={
-          can(ctx.roles, "academics.manage") && (
+          allowed(ctx, "academics.manage") && (
             <Link href={schoolPath(slug, "settings/calendar")} className={buttonStyles("primary")}>
               Set up the calendar
             </Link>
@@ -53,7 +53,7 @@ export default async function AssessmentPage({
           icon={<ClipboardList />}
           title="No classes to assess"
           description={
-            can(ctx.roles, "academics.manage")
+            allowed(ctx, "academics.manage")
               ? "Add classes under Classes, then come back to enter scores."
               : "You enter scores for the classes you are class teacher of. Ask the head teacher to assign you a class."
           }

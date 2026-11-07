@@ -9,11 +9,13 @@ export interface AppShellProps {
   user: { name: string; email: string };
   isPlatformAdmin: boolean;
   signOut: () => Promise<void>;
+  /** A line shown above every page, e.g. that this is a demonstration school. */
+  notice?: ReactNode;
   children: ReactNode;
 }
 
 /** Desktop: fixed sidebar. Mobile: top bar with a navigation drawer. */
-export function AppShell({ area, user, isPlatformAdmin, signOut, children }: AppShellProps) {
+export function AppShell({ area, user, isPlatformAdmin, signOut, notice, children }: AppShellProps) {
   const menu = { name: user.name, email: user.email, signOut, isPlatformAdmin };
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[15.5rem_1fr] print:block">
@@ -40,6 +42,14 @@ export function AppShell({ area, user, isPlatformAdmin, signOut, children }: App
           <span className="min-w-0 flex-1 truncate text-base font-semibold">{areaTitle(area)}</span>
           <UserMenu {...menu} compact />
         </header>
+        {notice && (
+          <div
+            role="note"
+            className="border-b border-caution/20 bg-caution-soft px-4 py-2 text-sm text-caution sm:px-6 lg:px-10 print:hidden"
+          >
+            {notice}
+          </div>
+        )}
         <main id="main" className="flex-1 bg-surface lg:min-h-dvh">
           <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-10">
             {children}

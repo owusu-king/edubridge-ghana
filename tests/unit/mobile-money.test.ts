@@ -32,11 +32,17 @@ describe("mock provider", () => {
       network: "mtn",
       payerMessage: "School fees",
       callbackUrl: null,
+      tenantId: "00000000-0000-0000-0000-000000000001",
+      settlementAccount: null,
     });
 
   it("approves by default, with a stable transaction id", async () => {
     const started = await request("+233241234567");
-    const first = await provider.getStatus({ reference: "x", providerReference: started.providerReference });
+    const first = await provider.getStatus({
+      tenantId: "00000000-0000-0000-0000-000000000001",
+      reference: "x",
+      providerReference: started.providerReference,
+    });
     expect(first).toEqual({
       state: "successful",
       amountPesewas: 5000,
@@ -45,13 +51,21 @@ describe("mock provider", () => {
       completedAt: null,
     });
     expect(
-      await provider.getStatus({ reference: "x", providerReference: started.providerReference }),
+      await provider.getStatus({
+        tenantId: "00000000-0000-0000-0000-000000000001",
+        reference: "x",
+        providerReference: started.providerReference,
+      }),
     ).toEqual(first);
   });
 
   it("simulates declines, unanswered prompts and amount mismatches by number", async () => {
     const status = async (msisdn: string) =>
-      provider.getStatus({ reference: "x", providerReference: (await request(msisdn)).providerReference });
+      provider.getStatus({
+        tenantId: "00000000-0000-0000-0000-000000000001",
+        reference: "x",
+        providerReference: (await request(msisdn)).providerReference,
+      });
     expect(await status("+233245551111")).toEqual({
       state: "failed",
       reason: "The payer declined the prompt.",
@@ -64,10 +78,22 @@ describe("mock provider", () => {
     await expect(request("+233245554444")).rejects.toEqual(
       new ProviderError("This number is not registered for Mobile Money.", true),
     );
-    expect(await provider.getStatus({ reference: "x", providerReference: null })).toEqual({
+    expect(
+      await provider.getStatus({
+        tenantId: "00000000-0000-0000-0000-000000000001",
+        reference: "x",
+        providerReference: null,
+      }),
+    ).toEqual({
       state: "not_found",
     });
-    expect(await provider.getStatus({ reference: "x", providerReference: "OTHER-1" })).toEqual({
+    expect(
+      await provider.getStatus({
+        tenantId: "00000000-0000-0000-0000-000000000001",
+        reference: "x",
+        providerReference: "OTHER-1",
+      }),
+    ).toEqual({
       state: "not_found",
     });
   });

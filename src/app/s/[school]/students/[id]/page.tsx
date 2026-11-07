@@ -5,9 +5,11 @@ import { ArrowLeft } from "lucide-react";
 import { Badge, StatusText } from "@/components/ui/badge";
 import { DescriptionList, PageHeader, Section } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { can } from "@/server/authz/permissions";
+import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { listGuardians, RELATIONSHIP_LABELS } from "@/server/students/guardians";
+import { listStudentMessages } from "@/server/messages/history";
+import { listPriorRecords } from "@/server/passport/records";
 import { getStudentAccount } from "@/server/fees/ledger";
 import { listConcessions } from "@/server/fees/concessions";
 import { getPaymentPlan } from "@/server/fees/payment-plans";
@@ -18,7 +20,7 @@ import { getReminderState } from "@/server/fees/reminders";
 import { feeReminderMessage, feeReminderSms, whatsappLink } from "@/lib/fee-messages";
 import { balanceLinkUrl } from "@/server/notifications/templates";
 import { getStudent, listClassOptions } from "@/server/students/service";
-import { formatCalendarDate, todayIn } from "@/lib/format";
+import { formatCalendarDate, formatDateTime, todayIn } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
@@ -40,6 +42,8 @@ import {
 } from "./guardian-controls";
 import { FeeAccount } from "./fee-account";
 
+import { LearnerRecords } from "./learner-records";
+
 export const metadata: Metadata = { title: "Student" };
 
 const STATUS = {
@@ -48,11 +52,17 @@ const STATUS = {
   graduated: <StatusText tone="neutral">Graduated</StatusText>,
 };
 
+const MESSAGE_KINDS = {
+  fee_reminder: "Fee reminder",
+  payment_receipt: "Payment receipt",
+  absence_alert: "Absence alert",
+} as const;
+
 export default async function StudentPage({ params }: { params: Promise<{ school: string; id: string }> }) {
   const { school, id } = await params;
   const { ctx } = await requireTenant(school);
-  if (!can(ctx.roles, "students.view")) notFound();
-  const canSeeFees = can(ctx.roles, "fees.view");
+  if (!allowed(ctx, "students.view")) notFound();
+  const canSeeFees = allowed(ctx, "fees.view");
   const [student, guardianLinks, account] = await Promise.all([
     getStudent(db(), ctx, id),
     listGuardians(db(), ctx, id),
@@ -62,7 +72,7 @@ export default async function StudentPage({ params }: { params: Promise<{ school
   const [concessions, feeItemOptions, plan, mobileMoneyRequests, reminderState] = account
     ? await Promise.all([
         listConcessions(db(), ctx, id),
-        can(ctx.roles, "fees.manage")
+        allowed(ctx, "fees.manage")
           ? listFeeItems(db(), ctx).then((items) =>
               items.filter((i) => i.status === "active").map((i) => ({ value: i.id, label: i.name })),
             )
@@ -74,13 +84,15 @@ export default async function StudentPage({ params }: { params: Promise<{ school
     : [[], [], null, [], null];
   // Offer an opening balance only to finance staff, and only while the student has none.
   const openingAsOf =
-    account && can(ctx.roles, "fees.manage") && !(await hasOpeningBalance(db(), ctx, id))
+    account && allowed(ctx, "fees.manage") && !(await hasOpeningBalance(db(), ctx, id))
       ? await suggestedAsOf(db(), ctx)
       : undefined;
+  const messages = allowed(ctx, "students.view_all") ? await listStudentMessages(db(), ctx, id) : null;
+  const prior = allowed(ctx, "students.view_all") ? await listPriorRecords(db(), ctx, id) : [];
   const links = guardianLinks ?? [];
   const slug = ctx.tenant.slug;
-  const canManage = can(ctx.roles, "students.manage");
-  const canManageParentAccess = can(ctx.roles, "parents.access.manage");
+  const canManage = allowed(ctx, "students.manage");
+  const canManageParentAccess = allowed(ctx, "parents.access.manage");
   const classes = canManage
     ? (await listClassOptions(db(), ctx)).map((c) => ({ id: c.id, name: c.name }))
     : [];
@@ -173,8 +185,8 @@ export default async function StudentPage({ params }: { params: Promise<{ school
             <FeeAccount
               slug={slug}
               account={account}
-              canManage={can(ctx.roles, "fees.manage")}
-              canRecordPayment={can(ctx.roles, "payments.record")}
+              canManage={allowed(ctx, "fees.manage")}
+              canRecordPayment={allowed(ctx, "payments.record")}
               payerName={links.find((g) => g.isPrimary)?.fullName}
               today={todayIn(ctx.tenant.timezone)}
               openingAsOf={openingAsOf}
@@ -183,7 +195,7 @@ export default async function StudentPage({ params }: { params: Promise<{ school
               plan={plan}
               outreach={{
                 statementHref: schoolPath(slug, `students/${student.id}/statement`),
-                canRemind: can(ctx.roles, "fees.remind"),
+                canRemind: allowed(ctx, "fees.remind"),
                 reminder:
                   account.balancePesewas > 0 && reminderState?.contact?.phone
                     ? {
@@ -209,7 +221,7 @@ export default async function StudentPage({ params }: { params: Promise<{ school
                     : null,
               }}
               mobileMoney={{
-                ...mobileMoneySetup(),
+                ...mobileMoneySetup(ctx),
                 requests: mobileMoneyRequests,
                 // Primary contact first; the dialog suggests the first number.
                 phones: [...links]
@@ -325,6 +337,40 @@ export default async function StudentPage({ params }: { params: Promise<{ school
               </ul>
             )}
           </Section>
+          {messages && (
+            <Section title="Messages to the family" description="SMS sent about this student, newest first.">
+              {messages.length === 0 ? (
+                <p className="text-sm text-ink-3">None yet.</p>
+              ) : (
+                <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
+                  {messages.map((m, i) => (
+                    <li key={i} className="flex items-start justify-between gap-3 px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="text-base text-ink">{MESSAGE_KINDS[m.kind]}</p>
+                        <p className="text-sm text-ink-3">
+                          {formatPhone(m.recipient)} · {formatDateTime(m.queuedAt, ctx.tenant.timezone)}
+                        </p>
+                      </div>
+                      <StatusText
+                        tone={m.state === "sent" ? "positive" : m.state === "failed" ? "critical" : "neutral"}
+                      >
+                        {m.state === "sent"
+                          ? "Delivered"
+                          : m.state === "failed"
+                            ? "Not delivered"
+                            : "Sending"}
+                      </StatusText>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Section>
+          )}
+          <LearnerRecords
+            prior={prior}
+            downloadUrl={allowed(ctx, "transfers.manage") ? `/s/${slug}/students/${id}/record` : null}
+            timezone={ctx.tenant.timezone}
+          />
         </div>
       </div>
     </div>

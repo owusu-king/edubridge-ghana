@@ -55,6 +55,8 @@ export async function recordPaymentAction(
   } catch (error) {
     return toFormError(error, formData);
   }
+  // Sends the family's SMS receipt straight away, when the school sends them.
+  dispatchAfterResponse();
   revalidatePath(schoolPath(slug, `students/${studentId}`));
   redirect(schoolPath(slug, `fees/receipts/${paymentId}`));
 }

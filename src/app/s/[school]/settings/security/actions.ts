@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/server/db/client";
+import { saveVoidPolicy } from "@/server/tenancy/preferences";
 import { updateMfaPolicy } from "@/server/tenancy/service";
 import { schoolPath } from "@/lib/routes";
 import { getClientInfo, requireTenant } from "@/web/auth";
@@ -21,4 +22,19 @@ export async function saveMfaPolicyAction(
   }
   revalidatePath(schoolPath(slug), "layout");
   return { status: "success", message: "Security policy saved." };
+}
+
+export async function saveVoidPolicyAction(
+  slug: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const { ctx } = await requireTenant(slug);
+  try {
+    await saveVoidPolicy(db(), ctx, { accountantsCanVoid: formData.get("accountantsCanVoid") === "yes" });
+  } catch (error) {
+    return toFormError(error, formData);
+  }
+  revalidatePath(schoolPath(slug), "layout");
+  return { status: "success", message: "Saved. It applies from each person's next page." };
 }

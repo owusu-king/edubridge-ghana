@@ -13,6 +13,7 @@ import {
 import { hasMfa } from "@/server/auth/mfa";
 import { db } from "@/server/db/client";
 import { isPlatformAdmin } from "@/server/platform/service";
+import { recordSupportView } from "@/server/support/access";
 import { resolveTenantContext, type TenantContext } from "@/server/tenancy/service";
 import { SESSION_COOKIE, sessionCookieOptions } from "./session-cookie";
 
@@ -64,6 +65,16 @@ export const requireTenant = cache(
     if (!ctx) notFound();
     // The school's policy may require two-step verification for this member's roles.
     if (ctx.mfaRequired && !(await hasMfa(db(), user.id))) redirect("/account/security?required=school");
+    // EduBridge support: every page opened and every form sent is recorded for the Proprietor (PLT-02).
+    if (ctx.support) {
+      const h = await headers();
+      await recordSupportView(
+        db(),
+        ctx,
+        h.get("x-edubridge-path") ?? `/s/${slug}`,
+        h.has("next-action") ? "action" : "view",
+      );
+    }
     return { user, ctx };
   },
 );

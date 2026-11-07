@@ -39,6 +39,7 @@ export interface OwingTableRow {
 export function OwingTable({
   rows,
   canRemind,
+  canShare,
   today,
   schoolName,
   linkPreview,
@@ -46,10 +47,12 @@ export function OwingTable({
 }: {
   rows: OwingTableRow[];
   canRemind: boolean;
+  /** WhatsApp links are free (sent from the member's own phone), so the plan does not limit them. */
+  canShare: boolean;
   today: string;
   schoolName: string;
-  /** How the private balance link looks in the message (each family gets its own). */
-  linkPreview: string;
+  /** How the private balance link looks in the message (each family gets its own); null when not sent. */
+  linkPreview: string | null;
   send: (studentIds: string[]) => Promise<FormState>;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -200,7 +203,7 @@ export function OwingTable({
                 </TD>
                 <TD className="text-right whitespace-nowrap">
                   <span className="inline-flex gap-1">
-                    {canRemind && r.whatsappHref && (
+                    {canShare && r.whatsappHref && (
                       <a
                         href={r.whatsappHref}
                         target="_blank"
@@ -233,7 +236,7 @@ export function OwingTable({
           open
           onOpenChange={setConfirming}
           title={`Send ${willSend === 1 ? "1 SMS reminder" : `${willSend} SMS reminders`}?`}
-          description="Each guardian gets one text with a private link that shows the balance for 7 days. Families without a phone number, or already reminded today, are skipped."
+          description={`Each guardian gets one text${linkPreview ? " with a private link that shows the balance for 7 days" : " with the balance"}. Families without a phone number, or already reminded today, are skipped.`}
         >
           <div className="space-y-5">
             <figure className="rounded-lg border border-line bg-subtle px-4 py-3">
@@ -246,7 +249,7 @@ export function OwingTable({
                     schoolName,
                     studentFirstName: example.firstName,
                     balancePesewas: example.balancePesewas,
-                    link: linkPreview,
+                    link: linkPreview ?? undefined,
                   })}
                 </p>
               )}

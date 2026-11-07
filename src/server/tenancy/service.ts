@@ -2,10 +2,21 @@ import "server-only";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "../audit/record";
-import { assertCan, isRole, type Role } from "../authz/permissions";
+import { assertAllowed, isRole, type Permission, type Role } from "../authz/permissions";
 import type { Database } from "../db/client";
 import { withTenant, withUser } from "../db/context";
-import { membershipCampuses, memberships, tenants, users } from "../db/schema";
+import {
+  membershipCampuses,
+  memberships,
+  platformAdmins,
+  tenantEntitlements,
+  tenants,
+  users,
+} from "../db/schema";
+import { readLiveGrant } from "../support/grants";
+import { FEATURES, isFeature, type BillingState, type Feature } from "../../lib/plan";
+import { readBillingState } from "../billing/state";
+import { readPreferences } from "./preferences";
 
 export interface Tenant {
   id: string;
@@ -16,6 +27,8 @@ export interface Tenant {
   currencyCode: string;
   /** Roles that must use two-step verification at this school. */
   mfaRequiredRoles: Role[];
+  /** A demonstration school with made-up data (sends no messages, not in the parent view). */
+  isDemo: boolean;
 }
 
 /** The authenticated user acting inside one school. Every tenant-scoped service call takes this. */
@@ -27,6 +40,17 @@ export interface TenantContext {
   campusIds: string[] | null;
   /** True when one of the member's roles must use two-step verification here. */
   mfaRequired: boolean;
+  /** Modules the school's plan includes (checked with `allowed` / `assertAllowed`). */
+  features: Feature[];
+  /** Whether an overdue EduBridge invoice has paused school-initiated SMS (or soon will). */
+  billing: BillingState;
+  /** Permissions the school's own settings give this member beyond their roles. */
+  schoolGrants: Permission[];
+  /**
+   * Set when this is EduBridge support inside the school under the Proprietor's support grant (PLT-02):
+   * the Proprietor's permissions except support access and exports, until the grant ends.
+   */
+  support?: { grantId: string; expiresAt: Date } | null;
 }
 
 const tenantColumns = {
@@ -37,6 +61,7 @@ const tenantColumns = {
   timezone: tenants.timezone,
   currencyCode: tenants.currencyCode,
   mfaRequiredRoles: tenants.mfaRequiredRoles,
+  isDemo: tenants.isDemo,
 };
 
 function toRoles(values: string[]): Role[] {
@@ -77,13 +102,77 @@ export async function resolveTenantContext(
       .select({ campusId: membershipCampuses.campusId })
       .from(membershipCampuses)
       .where(and(eq(membershipCampuses.tenantId, tenant.id), eq(membershipCampuses.membershipId, row.id)));
-    return { roles: row.roles, campusIds: scope.length > 0 ? scope.map((r) => r.campusId) : null };
+    const [plan] = await tx
+      .select({ features: tenantEntitlements.features })
+      .from(tenantEntitlements)
+      .where(eq(tenantEntitlements.tenantId, tenant.id));
+    return {
+      roles: row.roles,
+      campusIds: scope.length > 0 ? scope.map((r) => r.campusId) : null,
+      // A school without a plan row (made outside platform onboarding) gets the column's default: everything.
+      features: plan ? plan.features.filter(isFeature) : [...FEATURES],
+      billing: await readBillingState(tx, tenant),
+      preferences: await readPreferences(tx, tenant.id),
+    };
   });
-  if (!membership) return null;
+  if (!membership) return resolveSupportContext(database, tenant, userId);
   const roles = toRoles(membership.roles);
   if (roles.length === 0) return null;
   const mfaRequired = roles.some((r) => tenant.mfaRequiredRoles.includes(r));
-  return { tenant, userId, roles, campusIds: membership.campusIds, mfaRequired };
+  return {
+    tenant,
+    userId,
+    roles,
+    campusIds: membership.campusIds,
+    mfaRequired,
+    features: membership.features,
+    billing: membership.billing,
+    schoolGrants:
+      membership.preferences.accountantsCanVoid && roles.includes("bursar") ? ["payments.void"] : [],
+  };
+}
+
+/**
+ * EduBridge platform staff who are not members reach a school only while its Proprietor allows support
+ * access (PLT-02). Checked on every request, so ending the grant or its expiry applies on the next page.
+ */
+async function resolveSupportContext(
+  database: Database,
+  tenant: Tenant,
+  userId: string,
+): Promise<TenantContext | null> {
+  const [admin] = await database
+    .select({ userId: platformAdmins.userId })
+    .from(platformAdmins)
+    .where(eq(platformAdmins.userId, userId))
+    .limit(1);
+  if (!admin) return null;
+  const found = await withTenant(database, { tenantId: tenant.id, userId }, async (tx) => {
+    const grant = await readLiveGrant(tx, tenant.id);
+    if (!grant) return null;
+    const [plan] = await tx
+      .select({ features: tenantEntitlements.features })
+      .from(tenantEntitlements)
+      .where(eq(tenantEntitlements.tenantId, tenant.id));
+    return {
+      grant,
+      features: plan ? plan.features.filter(isFeature) : [...FEATURES],
+      billing: await readBillingState(tx, tenant),
+    };
+  });
+  if (!found) return null;
+  return {
+    tenant,
+    userId,
+    roles: ["owner"],
+    campusIds: null,
+    // Platform staff can reach many schools, so two-step verification applies as on the admin pages.
+    mfaRequired: process.env.PLATFORM_MFA_REQUIRED !== "false",
+    features: found.features,
+    billing: found.billing,
+    schoolGrants: [],
+    support: { grantId: found.grant.id, expiresAt: found.grant.expiresAt },
+  };
 }
 
 export interface UserSchool {
@@ -121,10 +210,10 @@ export interface Member {
 }
 
 export async function listMembers(database: Database, ctx: TenantContext): Promise<Member[]> {
-  assertCan(ctx.roles, "members.view");
+  assertAllowed(ctx, "members.view");
   const { rows, scopes } = await withTenant(
     database,
-    { tenantId: ctx.tenant.id, userId: ctx.userId },
+    { tenantId: ctx.tenant.id, userId: ctx.userId, supportGrantId: ctx.support?.grantId },
     async (tx) => {
       const rows = await tx
         .select({
@@ -162,13 +251,16 @@ export async function listMembers(database: Database, ctx: TenantContext): Promi
 export type RoleCounts = Record<Role, number>;
 
 export async function countMembersByRole(database: Database, ctx: TenantContext): Promise<RoleCounts> {
-  assertCan(ctx.roles, "members.view");
-  const rows = await withTenant(database, { tenantId: ctx.tenant.id, userId: ctx.userId }, (tx) =>
-    tx
-      .select({ role: sql<string>`r.role`, n: sql<number>`count(*)::int` })
-      .from(sql`${memberships}, unnest(${memberships.roles}) as r(role)`)
-      .where(and(eq(memberships.tenantId, ctx.tenant.id), eq(memberships.status, "active")))
-      .groupBy(sql`r.role`),
+  assertAllowed(ctx, "members.view");
+  const rows = await withTenant(
+    database,
+    { tenantId: ctx.tenant.id, userId: ctx.userId, supportGrantId: ctx.support?.grantId },
+    (tx) =>
+      tx
+        .select({ role: sql<string>`r.role`, n: sql<number>`count(*)::int` })
+        .from(sql`${memberships}, unnest(${memberships.roles}) as r(role)`)
+        .where(and(eq(memberships.tenantId, ctx.tenant.id), eq(memberships.status, "active")))
+        .groupBy(sql`r.role`),
   );
   const counts: RoleCounts = {
     owner: 0,
@@ -210,33 +302,37 @@ export async function updateSchoolProfile(
   input: unknown,
   meta: { ipAddress?: string | null } = {},
 ): Promise<Omit<Tenant, "mfaRequiredRoles">> {
-  assertCan(ctx.roles, "school.settings.manage");
+  assertAllowed(ctx, "school.settings.manage");
   const data = schoolProfileSchema.parse(input);
-  return withTenant(database, { tenantId: ctx.tenant.id, userId: ctx.userId }, async (tx) => {
-    const [updated] = await tx
-      .update(tenants)
-      .set({ name: data.name, timezone: data.timezone, updatedAt: new Date() })
-      .where(eq(tenants.id, ctx.tenant.id))
-      .returning(tenantColumns);
-    if (!updated) throw new Error("School not found.");
+  return withTenant(
+    database,
+    { tenantId: ctx.tenant.id, userId: ctx.userId, supportGrantId: ctx.support?.grantId },
+    async (tx) => {
+      const [updated] = await tx
+        .update(tenants)
+        .set({ name: data.name, timezone: data.timezone, updatedAt: new Date() })
+        .where(eq(tenants.id, ctx.tenant.id))
+        .returning(tenantColumns);
+      if (!updated) throw new Error("School not found.");
 
-    const changes: Record<string, { from: string; to: string }> = {};
-    if (ctx.tenant.name !== data.name) changes.name = { from: ctx.tenant.name, to: data.name };
-    if (ctx.tenant.timezone !== data.timezone)
-      changes.timezone = { from: ctx.tenant.timezone, to: data.timezone };
-    if (Object.keys(changes).length > 0) {
-      await recordAudit(tx, {
-        tenantId: ctx.tenant.id,
-        actorUserId: ctx.userId,
-        action: "school.profile.updated",
-        entityType: "tenant",
-        entityId: ctx.tenant.id,
-        metadata: { changes },
-        ipAddress: meta.ipAddress ?? null,
-      });
-    }
-    return updated;
-  });
+      const changes: Record<string, { from: string; to: string }> = {};
+      if (ctx.tenant.name !== data.name) changes.name = { from: ctx.tenant.name, to: data.name };
+      if (ctx.tenant.timezone !== data.timezone)
+        changes.timezone = { from: ctx.tenant.timezone, to: data.timezone };
+      if (Object.keys(changes).length > 0) {
+        await recordAudit(tx, {
+          tenantId: ctx.tenant.id,
+          actorUserId: ctx.userId,
+          action: "school.profile.updated",
+          entityType: "tenant",
+          entityId: ctx.tenant.id,
+          metadata: { changes },
+          ipAddress: meta.ipAddress ?? null,
+        });
+      }
+      return updated;
+    },
+  );
 }
 
 export const mfaPolicySchema = z.object({
@@ -252,21 +348,25 @@ export async function updateMfaPolicy(
   input: unknown,
   meta: { ipAddress?: string | null } = {},
 ): Promise<void> {
-  assertCan(ctx.roles, "security.manage");
+  assertAllowed(ctx, "security.manage");
   const { roles } = mfaPolicySchema.parse(input);
-  await withTenant(database, { tenantId: ctx.tenant.id, userId: ctx.userId }, async (tx) => {
-    await tx
-      .update(tenants)
-      .set({ mfaRequiredRoles: roles, updatedAt: new Date() })
-      .where(eq(tenants.id, ctx.tenant.id));
-    await recordAudit(tx, {
-      tenantId: ctx.tenant.id,
-      actorUserId: ctx.userId,
-      action: "school.mfa_policy.updated",
-      entityType: "tenant",
-      entityId: ctx.tenant.id,
-      metadata: { changes: { roles: { from: ctx.tenant.mfaRequiredRoles, to: roles } } },
-      ipAddress: meta.ipAddress ?? null,
-    });
-  });
+  await withTenant(
+    database,
+    { tenantId: ctx.tenant.id, userId: ctx.userId, supportGrantId: ctx.support?.grantId },
+    async (tx) => {
+      await tx
+        .update(tenants)
+        .set({ mfaRequiredRoles: roles, updatedAt: new Date() })
+        .where(eq(tenants.id, ctx.tenant.id));
+      await recordAudit(tx, {
+        tenantId: ctx.tenant.id,
+        actorUserId: ctx.userId,
+        action: "school.mfa_policy.updated",
+        entityType: "tenant",
+        entityId: ctx.tenant.id,
+        metadata: { changes: { roles: { from: ctx.tenant.mfaRequiredRoles, to: roles } } },
+        ipAddress: meta.ipAddress ?? null,
+      });
+    },
+  );
 }

@@ -7,6 +7,8 @@ import {
   type ReportCardSnapshot,
   type StudentResult,
 } from "../../lib/assessment";
+import type { AttendanceTotals } from "../../lib/attendance";
+import { readAttendanceTotals } from "../attendance/totals";
 import type { Transaction } from "../db/client";
 import { academicYears, assessmentScores, enrolments, reportCards, students, terms } from "../db/schema";
 import { fullName } from "../students/service";
@@ -35,6 +37,8 @@ export interface ClassTermData {
   scores: Map<string, Map<string, Record<string, number>>>;
   cards: Map<string, ReportCardRow>;
   results: Map<string, StudentResult>;
+  /** Attendance from the term's registers. */
+  attendance: Map<string, AttendanceTotals>;
 }
 
 /** Students in the class for the term, by surname then first name. */
@@ -124,6 +128,7 @@ export async function loadClassTermData(
     bands,
     scores,
     cards: new Map(cardRows.map((c) => [c.studentId, c])),
+    attendance: await readAttendanceTotals(tx, tenantId, term.id, ids),
     results: classResults({
       components: scheme.components,
       bands,
@@ -189,7 +194,7 @@ export function buildSnapshot(
       position: result.position,
       graded: result.graded,
     },
-    attendance: { present: card?.daysPresent ?? null, open: card?.daysOpen ?? null },
+    attendance: reportAttendance(card, data.attendance.get(student.id)),
     remarks: {
       attitude: card?.attitude ?? null,
       conduct: card?.conduct ?? null,
@@ -200,5 +205,20 @@ export function buildSnapshot(
     classTeacherName: data.cls.classTeacherName,
     approvedBy: extra.approvedBy,
     approvedOn: extra.approvedOn,
+  };
+}
+
+/**
+ * Days present and days open for a report card: from the registers, unless the school typed figures in (for
+ * terms before registers were kept, or to correct them). Null when neither exists.
+ */
+export function reportAttendance(
+  card: Pick<ReportCardRow, "daysPresent" | "daysOpen"> | undefined,
+  registers: AttendanceTotals | undefined,
+): { present: number | null; open: number | null } {
+  const fromRegisters = registers && registers.open > 0;
+  return {
+    present: card?.daysPresent ?? (fromRegisters ? registers.present + registers.late : null),
+    open: card?.daysOpen ?? (fromRegisters ? registers.open : null),
   };
 }

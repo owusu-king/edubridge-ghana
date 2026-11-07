@@ -11,7 +11,7 @@ import {
 } from "../../lib/assessment";
 import { STAGES, type Stage } from "../academics/classes";
 import { recordAudit } from "../audit/record";
-import { assertCan } from "../authz/permissions";
+import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import {
@@ -29,7 +29,11 @@ import type { TenantContext } from "../tenancy/service";
 import { loadTerm } from "./access";
 import { DEFAULT_BANDS, DEFAULT_COMPONENTS, DEFAULT_SUBJECTS } from "./defaults";
 
-const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
+const scope = (ctx: TenantContext) => ({
+  tenantId: ctx.tenant.id,
+  userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
+});
 
 export interface Scheme {
   components: AssessmentComponent[];
@@ -138,7 +142,7 @@ export async function getAssessmentSetup(
   ctx: TenantContext,
   termId: string,
 ): Promise<AssessmentSetup | null> {
-  assertCan(ctx.roles, "academics.manage");
+  assertAllowed(ctx, "academics.manage");
   return withTenant(database, scope(ctx), async (tx) => {
     const term = await loadTerm(tx, ctx.tenant.id, termId);
     if (!term) return null;
@@ -196,7 +200,7 @@ export async function getAssessmentSetup(
 
 /** Adds the default subjects of each level's stage. Only while the school has no subjects. */
 export async function setupDefaultSubjects(database: Database, ctx: TenantContext): Promise<number> {
-  assertCan(ctx.roles, "academics.manage");
+  assertAllowed(ctx, "academics.manage");
   return withTenant(database, scope(ctx), async (tx) => {
     const [existing] = await tx
       .select({ n: sql<number>`count(*)::int` })
@@ -291,7 +295,7 @@ function duplicateName(error: unknown): never {
 }
 
 export async function createSubject(database: Database, ctx: TenantContext, input: unknown): Promise<string> {
-  assertCan(ctx.roles, "academics.manage");
+  assertAllowed(ctx, "academics.manage");
   const data = subjectSchema.parse(input);
   return withTenant(database, scope(ctx), async (tx) => {
     const [subject] = await tx
@@ -321,7 +325,7 @@ export async function updateSubject(
   subjectId: string,
   input: unknown,
 ): Promise<void> {
-  assertCan(ctx.roles, "academics.manage");
+  assertAllowed(ctx, "academics.manage");
   const data = subjectSchema.parse(input);
   await withTenant(database, scope(ctx), async (tx) => {
     if (!z.string().uuid().safeParse(subjectId).success)
@@ -369,7 +373,7 @@ export async function saveAssessmentScheme(
   termId: string,
   input: unknown,
 ): Promise<void> {
-  assertCan(ctx.roles, "academics.manage");
+  assertAllowed(ctx, "academics.manage");
   const data = z
     .object({ components: z.array(componentInput).max(10), showPositions: z.boolean() })
     .parse(input);
@@ -487,7 +491,7 @@ export async function saveGradingScale(
   stage: Stage,
   input: unknown,
 ): Promise<void> {
-  assertCan(ctx.roles, "academics.manage");
+  assertAllowed(ctx, "academics.manage");
   const parsedStage = z.enum(STAGES).parse(stage);
   const { bands } = z.object({ bands: z.array(bandInput).max(20) }).parse(input);
   const problems = bandProblems(bands);
@@ -518,7 +522,7 @@ export async function saveGradingScale(
 
 /** Goes back to the stage's default bands. */
 export async function resetGradingScale(database: Database, ctx: TenantContext, stage: Stage): Promise<void> {
-  assertCan(ctx.roles, "academics.manage");
+  assertAllowed(ctx, "academics.manage");
   const parsedStage = z.enum(STAGES).parse(stage);
   await withTenant(database, scope(ctx), async (tx) => {
     const removed = await tx

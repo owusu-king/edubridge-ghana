@@ -14,7 +14,7 @@ export default async function SettingsLayout({
 }) {
   const { school } = await params;
   const { ctx } = await requireTenant(school);
-  const items = settingsTabs(ctx.tenant.slug, ctx.roles);
+  const items = settingsTabs(ctx.tenant.slug, ctx);
   if (items.length === 0) notFound();
   return (
     <div className="space-y-8">

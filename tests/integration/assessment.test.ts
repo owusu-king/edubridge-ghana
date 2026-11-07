@@ -188,7 +188,12 @@ describe("score entry", () => {
         { studentId: kofi.id, key: "class", original: "", value: "40" },
       ],
     });
-    expect(result).toEqual({ saved: 1, conflicts: 1, locked: 0 });
+    expect(result).toEqual({
+      saved: 1,
+      conflicts: 1,
+      locked: 0,
+      conflictCells: [{ studentId: ama.id, key: "class", yours: "45", theirs: "30" }],
+    });
     const after = (await getScoreSheet(conn.app, s.teacher, s.termId, s.classA, english))!;
     expect(after.students.find((x) => x.id === ama.id)!.scores.class).toBe("30");
     expect(after.students.find((x) => x.id === kofi.id)!.scores.class).toBe("40");

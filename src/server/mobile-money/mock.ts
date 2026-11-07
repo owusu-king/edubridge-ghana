@@ -67,6 +67,8 @@ export function mockProvider(
   return {
     name: "mock",
     testMode: true,
+    testHint:
+      "Test mode: no prompt is sent and no money moves. Numbers ending 1111 decline, 2222 never answer, 3333 report a different amount and 4444 are not registered. Any other number approves.",
     async requestPayment(request) {
       const scenario: Scenario = SCENARIOS[request.msisdn.slice(-4) as keyof typeof SCENARIOS] ?? "approve";
       if (scenario === "not_registered")

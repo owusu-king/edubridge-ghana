@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { ReportCardSnapshot, StudentResult } from "../../lib/assessment";
 import { todayIn } from "../../lib/format";
 import { recordAudit } from "../audit/record";
-import { assertCan, can } from "../authz/permissions";
+import { allowed, assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import { academicYears, enrolments, reportCards, terms, users } from "../db/schema";
@@ -13,7 +13,11 @@ import type { TenantContext } from "../tenancy/service";
 import { loadAssessableClass, loadTerm, type AssessableClass, type TermRef } from "./access";
 import { buildSnapshot, loadClassTermData, termContext, type ClassTermData } from "./class-data";
 
-const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
+const scope = (ctx: TenantContext) => ({
+  tenantId: ctx.tenant.id,
+  userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
+});
 
 export interface ClassOverview {
   term: TermRef;
@@ -46,7 +50,7 @@ export async function getClassOverview(
   termId: string,
   classId: string,
 ): Promise<ClassOverview | null> {
-  assertCan(ctx.roles, "assessment.enter");
+  assertAllowed(ctx, "assessment.enter");
   return withTenant(database, scope(ctx), async (tx) => {
     const data = await loadClass(tx, ctx, termId, classId);
     if (!data) return null;
@@ -102,6 +106,8 @@ export interface ReportCardView {
   };
   publishedAt: Date | null;
   canPublish: boolean;
+  /** Attendance from this term's registers (null before any register). */
+  registers: { present: number; open: number } | null;
 }
 
 async function snapshotExtras(tx: Transaction, ctx: TenantContext, data: ClassTermData) {
@@ -117,7 +123,7 @@ export async function getReportCard(
   classId: string,
   studentId: string,
 ): Promise<ReportCardView | null> {
-  assertCan(ctx.roles, "assessment.enter");
+  assertAllowed(ctx, "assessment.enter");
   return withTenant(database, scope(ctx), async (tx) => {
     const data = await loadClass(tx, ctx, termId, classId);
     const student = data?.students.find((s) => s.id === studentId);
@@ -147,7 +153,11 @@ export async function getReportCard(
         daysOpen: card?.daysOpen?.toString() ?? "",
       },
       publishedAt: card?.publishedAt ?? null,
-      canPublish: can(ctx.roles, "reports.publish"),
+      registers: (() => {
+        const t = data.attendance.get(student.id);
+        return t && t.open > 0 ? { present: t.present + t.late, open: t.open } : null;
+      })(),
+      canPublish: allowed(ctx, "reports.publish"),
     };
   });
 }
@@ -197,9 +207,9 @@ export async function saveReportRemarks(
   studentId: string,
   input: unknown,
 ): Promise<void> {
-  assertCan(ctx.roles, "assessment.enter");
+  assertAllowed(ctx, "assessment.enter");
   const data = remarksSchema.parse(input);
-  const head = can(ctx.roles, "reports.publish");
+  const head = allowed(ctx, "reports.publish");
   await withTenant(database, scope(ctx), async (tx) => {
     const term = await loadTerm(tx, ctx.tenant.id, termId);
     const cls = await loadAssessableClass(tx, ctx, classId);
@@ -269,7 +279,7 @@ export async function publishReportCards(
   classId: string,
   input: unknown = {},
 ): Promise<number> {
-  assertCan(ctx.roles, "reports.publish");
+  assertAllowed(ctx, "reports.publish");
   const { studentIds } = z
     .object({ studentIds: z.array(z.string().uuid()).max(500).optional() })
     .parse(input);
@@ -321,7 +331,7 @@ export async function withdrawReportCard(
   studentId: string,
   input: unknown,
 ): Promise<void> {
-  assertCan(ctx.roles, "reports.publish");
+  assertAllowed(ctx, "reports.publish");
   const { reason } = z
     .object({
       reason: z

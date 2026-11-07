@@ -4,6 +4,7 @@ import { z } from "zod";
 import { todayIn } from "@/lib/format";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
+import { readSchoolContacts, type SchoolContacts } from "../messages/announcements";
 import {
   classes,
   enrolments,
@@ -17,6 +18,7 @@ import {
 } from "../db/schema";
 import type { ReportCardSnapshot } from "@/lib/assessment";
 import { readPublishedReportCards, readPublishedSnapshot } from "../assessment/report-cards";
+import { readStudentAttendance } from "../attendance/registers";
 import { readStudentAccount, type StudentAccount } from "../fees/ledger";
 import { readPaymentPlan, type PaymentPlan } from "../fees/payment-plans";
 import { readReceipt, type PaymentMethod, type Receipt } from "../fees/payments";
@@ -53,7 +55,8 @@ export interface ParentSchool {
 }
 
 /** Students linked to a guardian with this number at the current school who is not blocked. */
-async function linkedStudents(tx: Transaction, tenantId: string, phone: string, studentId?: string) {
+/** Students a parent number reaches at one school (guardian on file, not blocked). */
+export async function linkedStudents(tx: Transaction, tenantId: string, phone: string, studentId?: string) {
   return tx
     .selectDistinct({
       id: students.id,
@@ -170,6 +173,9 @@ export interface ParentChildDetail {
   payments: ChildPayment[];
   /** Published report cards, newest term first. */
   reportCards: { id: string; termName: string; yearName: string; publishedAt: Date }[];
+  /** This term's attendance from the registers, or null before any register (or out of term). */
+  attendance: Awaited<ReturnType<typeof readStudentAttendance>>;
+  contacts: SchoolContacts | null;
 }
 
 /** One child's account, plan and receipts, or null when the number does not reach the child. */
@@ -207,6 +213,8 @@ export async function getParentChild(
       plan: await readPaymentPlan(tx, school.id, student.id, today),
       payments: childPayments,
       reportCards: await readPublishedReportCards(tx, school.id, student.id),
+      attendance: await readStudentAttendance(tx, school.id, student.id, today),
+      contacts: await readSchoolContacts(tx, school.id),
     };
   });
 }

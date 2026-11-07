@@ -6,14 +6,14 @@ import { Badge, StatusText } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { getClassOverview } from "@/server/assessment/report-cards";
-import { can } from "@/server/authz/permissions";
+import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { ordinal } from "@/lib/assessment";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 import { printAction, publishAction } from "../actions";
 import { PrintDialog, PublishDialog } from "../assessment-controls";
-import { chooseTerm, termQuery } from "../terms";
+import { chooseTerm, termQuery } from "@/web/terms";
 
 export const metadata: Metadata = { title: "Class assessment" };
 
@@ -43,7 +43,7 @@ export default async function ClassAssessmentPage({
   const drafts = students.filter((s) => s.status !== "published");
   const incomplete = drafts.filter((s) => s.result.graded < subjects.length).length;
   const published = students.length - drafts.length;
-  const canPublish = can(ctx.roles, "reports.publish");
+  const canPublish = allowed(ctx, "reports.publish");
 
   return (
     <div className="space-y-8">
@@ -89,7 +89,7 @@ export default async function ClassAssessmentPage({
           <EmptyState
             title="No subjects for this level"
             description={
-              can(ctx.roles, "academics.manage")
+              allowed(ctx, "academics.manage")
                 ? `Choose the subjects ${cls.levelName} takes under Assessment, Setup.`
                 : `The head teacher has not chosen the subjects ${cls.levelName} takes yet.`
             }

@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "../audit/record";
-import { assertCan } from "../authz/permissions";
+import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import { campuses, classes, levels, memberships, users } from "../db/schema";
@@ -50,7 +50,11 @@ export interface LevelWithClasses {
   classes: ClassSummary[];
 }
 
-const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
+const scope = (ctx: TenantContext) => ({
+  tenantId: ctx.tenant.id,
+  userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
+});
 const nameSchema = z.string().trim().min(1, "Enter a name.").max(40, "Use 40 characters or fewer.");
 const uuidOrEmpty = z.union([z.string().uuid(), z.literal(""), z.null()]).transform((v) => (v ? v : null));
 
@@ -72,7 +76,7 @@ export async function listLevelsWithClasses(
   database: Database,
   ctx: TenantContext,
 ): Promise<LevelWithClasses[]> {
-  assertCan(ctx.roles, "classes.view");
+  assertAllowed(ctx, "classes.view");
   return withTenant(database, scope(ctx), async (tx) => {
     const levelRows = await tx
       .select()
@@ -123,7 +127,7 @@ export async function setupDefaultLevels(
   ctx: TenantContext,
   input: unknown,
 ): Promise<number> {
-  assertCan(ctx.roles, "academics.manage");
+  assertAllowed(ctx, "academics.manage");
   const { stages } = z
     .object({ stages: z.array(z.enum(STAGES)).min(1, "Choose at least one stage.") })
     .parse(input);
@@ -157,7 +161,7 @@ export async function setupDefaultLevels(
 }
 
 export async function createLevel(database: Database, ctx: TenantContext, input: unknown): Promise<string> {
-  assertCan(ctx.roles, "academics.manage");
+  assertAllowed(ctx, "academics.manage");
   const data = z
     .object({ name: nameSchema, stage: z.enum(STAGES, { message: "Choose a stage." }) })
     .parse(input);
@@ -200,7 +204,7 @@ export async function renameLevel(
   levelId: string,
   input: unknown,
 ): Promise<void> {
-  assertCan(ctx.roles, "academics.manage");
+  assertAllowed(ctx, "academics.manage");
   const { name } = z.object({ name: nameSchema }).parse(input);
   await withTenant(database, scope(ctx), async (tx) => {
     const [level] = await tx
@@ -227,7 +231,7 @@ export interface TeacherOption {
 
 /** Active staff who can be class teachers. */
 export async function listTeacherOptions(database: Database, ctx: TenantContext): Promise<TeacherOption[]> {
-  assertCan(ctx.roles, "classes.view");
+  assertAllowed(ctx, "classes.view");
   return withTenant(database, scope(ctx), (tx) =>
     tx
       .select({ membershipId: memberships.id, name: users.name })
@@ -275,7 +279,7 @@ function assertCampus(ctx: TenantContext, campusId: string): void {
 }
 
 export async function createClass(database: Database, ctx: TenantContext, input: unknown): Promise<string> {
-  assertCan(ctx.roles, "academics.manage");
+  assertAllowed(ctx, "academics.manage");
   const data = classInputSchema.parse(input);
   assertCampus(ctx, data.campusId);
   return withTenant(database, scope(ctx), async (tx) => {
@@ -326,7 +330,7 @@ export async function updateClass(
   classId: string,
   input: unknown,
 ): Promise<void> {
-  assertCan(ctx.roles, "academics.manage");
+  assertAllowed(ctx, "academics.manage");
   const data = z
     .object({
       name: nameSchema,
@@ -370,7 +374,7 @@ export async function setClassStatus(
   classId: string,
   status: "active" | "archived",
 ): Promise<void> {
-  assertCan(ctx.roles, "academics.manage");
+  assertAllowed(ctx, "academics.manage");
   await withTenant(database, scope(ctx), async (tx) => {
     if (!z.string().uuid().safeParse(classId).success)
       throw new DomainError("class_not_found", "Class not found.");

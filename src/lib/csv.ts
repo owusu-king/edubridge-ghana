@@ -44,7 +44,24 @@ export function parseCsv(text: string): string[][] {
   return rows.filter((r) => r.some((cell) => cell.trim() !== ""));
 }
 
-/** Quotes a value for CSV output when needed. */
-export function csvCell(value: string): string {
-  return /[",\r\n;]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+export type CsvValue = string | number | boolean | null | undefined;
+
+/**
+ * One cell for CSV output. Text that a spreadsheet would run as a formula (starting with =, +, -, @ or a
+ * tab) gets a leading apostrophe, so an exported file can never execute anything when opened; plain
+ * numbers such as -50.00 are left alone. Quoted when it contains a delimiter, quote or line break.
+ */
+export function csvCell(value: CsvValue): string {
+  if (value === null || value === undefined) return "";
+  let text = typeof value === "string" ? value : String(value);
+  if (typeof value === "string" && /^[=+\-@\t\r]/.test(text) && !/^-?\d+(\.\d+)?$/.test(text))
+    text = `'${text}`;
+  return /[",\r\n;]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+const BOM = String.fromCharCode(0xfeff);
+
+/** A whole CSV file: a byte-order mark (so Excel reads UTF-8, and the cedi sign, correctly) and CRLF lines. */
+export function toCsv(rows: readonly (readonly CsvValue[])[]): string {
+  return BOM + rows.map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }

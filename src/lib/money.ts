@@ -61,3 +61,10 @@ export function sumPesewas(values: readonly number[]): number {
   assertPesewas(total);
   return total;
 }
+
+/** Pesewas as a plain decimal with two places ("1234.50", "-50.00"), for exports and spreadsheets. */
+export function pesewasToDecimal(pesewas: number): string {
+  assertPesewas(pesewas);
+  const abs = Math.abs(pesewas);
+  return `${pesewas < 0 ? "-" : ""}${Math.trunc(abs / 100)}.${String(abs % 100).padStart(2, "0")}`;
+}

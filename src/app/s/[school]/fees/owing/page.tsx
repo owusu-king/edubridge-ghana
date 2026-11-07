@@ -4,7 +4,7 @@ import { HandCoins } from "lucide-react";
 import { Button, buttonStyles } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/field";
 import { DescriptionList, EmptyState } from "@/components/ui/layout";
-import { can } from "@/server/authz/permissions";
+import { allowed, can } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { listOwing, OWING_PAGE_SIZE } from "@/server/fees/owing";
 import { listClassOptions } from "@/server/students/service";
@@ -41,7 +41,7 @@ export default async function OwingPage({
     listOwing(db(), ctx, { classId, minAmount, overdueOnly, page }),
     listClassOptions(db(), ctx),
   ]);
-  const canRemind = can(ctx.roles, "fees.remind");
+  const canRemind = allowed(ctx, "fees.remind");
   const today = todayIn(ctx.tenant.timezone);
   const filtered = Boolean(classId || minAmount || overdueOnly);
   const pages = Math.max(1, Math.ceil(result.total / OWING_PAGE_SIZE));
@@ -130,9 +130,10 @@ export default async function OwingPage({
         <>
           <OwingTable
             canRemind={canRemind}
+            canShare={can(ctx.roles, "fees.remind")}
             today={today}
             schoolName={ctx.tenant.name}
-            linkPreview={balanceLinkUrl("…")}
+            linkPreview={ctx.features.includes("parent_view") ? balanceLinkUrl("…") : null}
             send={sendRemindersAction.bind(null, slug)}
             rows={result.rows.map((r) => ({
               studentId: r.studentId,

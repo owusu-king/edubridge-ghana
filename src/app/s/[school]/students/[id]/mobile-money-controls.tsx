@@ -24,6 +24,7 @@ export function MobileMoneyDialog({
   defaultAmount,
   phones,
   testMode,
+  testHint,
 }: {
   action: Action;
   studentName: string;
@@ -31,6 +32,7 @@ export function MobileMoneyDialog({
   /** Guardians' phone numbers, primary contact first. */
   phones: PayerPhone[];
   testMode: boolean;
+  testHint?: string | null;
 }) {
   return (
     <FormDialog
@@ -47,7 +49,13 @@ export function MobileMoneyDialog({
       action={action}
     >
       {(state) => (
-        <MobileMoneyFields state={state} defaultAmount={defaultAmount} phones={phones} testMode={testMode} />
+        <MobileMoneyFields
+          state={state}
+          defaultAmount={defaultAmount}
+          phones={phones}
+          testMode={testMode}
+          testHint={testHint}
+        />
       )}
     </FormDialog>
   );
@@ -58,11 +66,13 @@ function MobileMoneyFields({
   defaultAmount,
   phones,
   testMode,
+  testHint,
 }: {
   state: FormState;
   defaultAmount: string;
   phones: PayerPhone[];
   testMode: boolean;
+  testHint?: string | null;
 }) {
   // A new key after each failed attempt: the failed request keeps the old one, and a corrected
   // submission is a new request. Within one attempt, submitting twice still sends one prompt.
@@ -77,12 +87,7 @@ function MobileMoneyFields({
   const [networkChosen, setNetworkChosen] = useState(Boolean(state.values?.network));
   return (
     <>
-      {testMode && (
-        <Alert>
-          Test mode: no prompt is sent and no money moves. Numbers ending 1111 decline, 2222 never answer,
-          3333 report a different amount and 4444 are not registered. Any other number approves.
-        </Alert>
-      )}
+      {testMode && <Alert>{testHint ?? "Test mode: no money moves."}</Alert>}
       <input type="hidden" name="idempotencyKey" value={key} />
       <Field label="Amount (GH₵)" error={state.fieldErrors?.amount}>
         {(p) => (

@@ -2,7 +2,7 @@ import "server-only";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "../audit/record";
-import { assertCan, type Role } from "../authz/permissions";
+import { assertAllowed, type Role } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import { auditEvents, campuses, invitations, membershipCampuses, memberships, users } from "../db/schema";
@@ -26,7 +26,11 @@ export const ASSIGNABLE_ROLES = [
 ] as const satisfies readonly Role[];
 export type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
 
-const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
+const scope = (ctx: TenantContext) => ({
+  tenantId: ctx.tenant.id,
+  userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
+});
 
 const rolesSchema = z
   .array(z.enum(ASSIGNABLE_ROLES, { message: "Choose a valid role." }))
@@ -47,7 +51,7 @@ export const inviteMemberSchema = z.object({
 export const updateMemberSchema = z.object({ roles: rolesSchema, campusIds: campusScopeSchema });
 
 function assertManager(ctx: TenantContext): void {
-  assertCan(ctx.roles, "members.manage");
+  assertAllowed(ctx, "members.manage");
   if (ctx.campusIds !== null) {
     throw new DomainError("campus_scope", "Only members with access to every campus can manage members.");
   }
@@ -146,7 +150,7 @@ export async function listPendingInvitations(
   database: Database,
   ctx: TenantContext,
 ): Promise<PendingInvitation[]> {
-  assertCan(ctx.roles, "members.view");
+  assertAllowed(ctx, "members.view");
   return withTenant(database, scope(ctx), (tx) =>
     tx
       .select({
@@ -356,6 +360,8 @@ export interface AuditEntry {
   entityId: string | null;
   actorName: string | null;
   metadata: Record<string, unknown>;
+  /** Made by EduBridge support during a support grant. */
+  bySupport: boolean;
 }
 
 export const AUDIT_PAGE_SIZE = 50;
@@ -366,7 +372,7 @@ export async function listAuditEvents(
   ctx: TenantContext,
   cursor?: string,
 ): Promise<{ entries: AuditEntry[]; nextCursor: string | null }> {
-  assertCan(ctx.roles, "audit.view");
+  assertAllowed(ctx, "audit.view");
   const [at, id] = (cursor ?? "").split("_");
   const validCursor = at && id && !Number.isNaN(Date.parse(at)) && z.string().uuid().safeParse(id).success;
   const rows = await withTenant(database, scope(ctx), (tx) =>
@@ -379,6 +385,7 @@ export async function listAuditEvents(
         entityId: auditEvents.entityId,
         actorName: users.name,
         metadata: auditEvents.metadata,
+        bySupport: sql<boolean>`${auditEvents.supportGrantId} is not null`,
       })
       .from(auditEvents)
       .leftJoin(users, eq(users.id, auditEvents.actorUserId))

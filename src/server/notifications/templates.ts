@@ -2,7 +2,7 @@
  * Message templates. Plain, readable, and free of tracking. Medical, safeguarding and statement details
  * never go into SMS (a fee reminder carries only the balance owed); links carry single-use tokens only.
  */
-import { feeReminderSms } from "@/lib/fee-messages";
+import { absenceAlertSms, announcementSms, feeReminderSms, paymentReceiptSms } from "@/lib/fee-messages";
 
 export interface RenderedEmail {
   subject: string;
@@ -80,6 +80,32 @@ export const TEMPLATES = {
       html: "",
       text: `EduBridge code: ${payload.code}. It expires in 10 minutes. Never share it.`,
     };
+  },
+
+  /** To the family when a payment is recorded, if the school turned it on. */
+  payment_receipt(payload: {
+    schoolName: string;
+    studentFirstName: string;
+    amountPesewas: number;
+    receiptNumber: string;
+    balancePesewas: number;
+  }): RenderedEmail {
+    return { subject: "", html: "", text: paymentReceiptSms(payload) };
+  },
+
+  /** A school announcement: title and a link to the parent view, where it is read in full. */
+  announcement(payload: { schoolName: string; title: string }): RenderedEmail {
+    return { subject: "", html: "", text: announcementSms({ ...payload, link: appUrl("/p") }) };
+  },
+
+  /** To a family after a run of absences or a term total (the school's settings); no reasons. */
+  absence_alert(payload: {
+    schoolName: string;
+    studentFirstName: string;
+    days: number;
+    kind: "consecutive" | "term_total";
+  }): RenderedEmail {
+    return { subject: "", html: "", text: absenceAlertSms(payload) };
   },
 
   /** A polite fee reminder to a guardian, with the balance when it was sent and a 7-day balance link. */

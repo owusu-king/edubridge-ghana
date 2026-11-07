@@ -406,10 +406,13 @@ export function RemarksForm({
   action,
   values,
   canWriteHeadRemark,
+  registers,
 }: {
   action: Action;
   values: Record<string, string>;
   canWriteHeadRemark: boolean;
+  /** Attendance from this term's registers, if any were taken. */
+  registers: { present: number; open: number } | null;
 }) {
   const { state, pending, onSubmit } = useFormAction(action);
   const v = (name: string) => state.values?.[name] ?? values[name] ?? "";
@@ -425,6 +428,11 @@ export function RemarksForm({
           </Field>
         ))}
       </div>
+      <p className="-mb-2 text-sm text-ink-3">
+        {registers
+          ? `From the registers: present ${registers.present} of ${registers.open} days. Fill these in only to use different figures.`
+          : "No registers taken this term. Enter attendance here, or leave it empty."}
+      </p>
       <div className="grid gap-4 sm:grid-cols-3">
         <Field label="Days present" error={state.fieldErrors?.daysPresent}>
           {(p) => (

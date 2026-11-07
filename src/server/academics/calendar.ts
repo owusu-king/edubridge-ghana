@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "../audit/record";
-import { assertCan } from "../authz/permissions";
+import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import { academicYears, terms } from "../db/schema";
@@ -69,7 +69,11 @@ export const academicYearSchema = z
     }
   });
 
-const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
+const scope = (ctx: TenantContext) => ({
+  tenantId: ctx.tenant.id,
+  userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
+});
 
 function mapConstraint(error: unknown): never {
   const code = pgErrorCode(error);
@@ -145,7 +149,7 @@ export async function createAcademicYear(
   ctx: TenantContext,
   input: unknown,
 ): Promise<string> {
-  assertCan(ctx.roles, "academics.manage");
+  assertAllowed(ctx, "academics.manage");
   const data = academicYearSchema.parse(input);
   return withTenant(database, scope(ctx), async (tx) => {
     const [year] = await tx
@@ -198,7 +202,7 @@ export async function updateTerm(
   termId: string,
   input: unknown,
 ): Promise<void> {
-  assertCan(ctx.roles, "academics.manage");
+  assertAllowed(ctx, "academics.manage");
   const data = termInput.parse(input);
   await withTenant(database, scope(ctx), async (tx) => {
     const term = await loadTerm(tx, ctx, termId);
@@ -245,7 +249,7 @@ export async function updateTerm(
 
 /** Marks the term the school is in now. Fees and attendance default to the current term. */
 export async function setCurrentTerm(database: Database, ctx: TenantContext, termId: string): Promise<void> {
-  assertCan(ctx.roles, "academics.manage");
+  assertAllowed(ctx, "academics.manage");
   await withTenant(database, scope(ctx), async (tx) => {
     const term = await loadTerm(tx, ctx, termId);
     if (term.isCurrent) return;

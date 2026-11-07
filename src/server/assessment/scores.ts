@@ -3,7 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { formatScore, parseScore, type AssessmentComponent, type GradeBand } from "../../lib/assessment";
 import { recordAudit } from "../audit/record";
-import { assertCan, can } from "../authz/permissions";
+import { allowed, assertAllowed } from "../authz/permissions";
 import type { Database } from "../db/client";
 import { withTenant } from "../db/context";
 import { assessmentScores, enrolments, reportCards } from "../db/schema";
@@ -19,7 +19,11 @@ import {
 import { classStudents, loadClassTermData } from "./class-data";
 import { ensureScheme, readLevelSubjects, readScheme } from "./setup";
 
-const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
+const scope = (ctx: TenantContext) => ({
+  tenantId: ctx.tenant.id,
+  userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
+});
 
 export interface ClassProgress {
   cls: AssessableClass;
@@ -36,7 +40,7 @@ export async function listAssessmentClasses(
   ctx: TenantContext,
   termId: string,
 ): Promise<{ term: TermRef; classes: ClassProgress[] } | null> {
-  assertCan(ctx.roles, "assessment.enter");
+  assertAllowed(ctx, "assessment.enter");
   return withTenant(database, scope(ctx), async (tx) => {
     const term = await loadTerm(tx, ctx.tenant.id, termId);
     if (!term) return null;
@@ -101,7 +105,7 @@ export async function getScoreSheet(
   classId: string,
   subjectId: string,
 ): Promise<ScoreSheet | null> {
-  assertCan(ctx.roles, "assessment.enter");
+  assertAllowed(ctx, "assessment.enter");
   return withTenant(database, scope(ctx), async (tx) => {
     const term = await loadTerm(tx, ctx.tenant.id, termId);
     const cls = await loadAssessableClass(tx, ctx, classId);
@@ -142,12 +146,23 @@ const cellSchema = z.object({
   value: z.string().max(10),
 });
 
+export interface ScoreConflict {
+  studentId: string;
+  key: string;
+  /** What this sheet tried to save. */
+  yours: string;
+  /** The mark now saved ("" for none), which someone else entered after the sheet was opened. */
+  theirs: string;
+}
+
 export interface SaveScoresResult {
   saved: number;
   /** Marks someone else changed since the sheet was opened; left as they are. */
   conflicts: number;
   /** Marks on report cards published since the sheet was opened; left as they are. */
   locked: number;
+  /** Each conflicting mark, so the person (or device) can decide. */
+  conflictCells?: ScoreConflict[];
 }
 
 /**
@@ -163,7 +178,7 @@ export async function saveScores(
   subjectId: string,
   input: unknown,
 ): Promise<SaveScoresResult> {
-  assertCan(ctx.roles, "assessment.enter");
+  assertAllowed(ctx, "assessment.enter");
   const { cells } = z.object({ cells: z.array(cellSchema).max(2000) }).parse(input);
   const changed = cells.filter((c) => c.value.trim() !== c.original.trim());
   return withTenant(database, scope(ctx), async (tx) => {
@@ -244,6 +259,12 @@ export async function saveScores(
       const now = existing?.tenths ?? null;
       if (now !== cell.originalTenths) {
         result.conflicts++;
+        (result.conflictCells ??= []).push({
+          studentId: cell.studentId,
+          key: cell.key,
+          yours: cell.value.trim(),
+          theirs: now === null ? "" : formatScore(now),
+        });
         continue;
       }
       if (cell.tenths === now) continue;
@@ -283,5 +304,5 @@ export async function saveScores(
 
 /** Whether this member may publish and write the head teacher's remark. */
 export function canPublish(ctx: TenantContext): boolean {
-  return can(ctx.roles, "reports.publish");
+  return allowed(ctx, "reports.publish");
 }

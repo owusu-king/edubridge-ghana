@@ -75,6 +75,58 @@ export function feeReminderSms(input: {
   return `${school}: ${owed} ${next}`;
 }
 
+/**
+ * The SMS to a family about absences: how many school days, never the reasons (COM-05). Plain GSM
+ * characters, one SMS for typical school names.
+ */
+export function absenceAlertSms(input: {
+  schoolName: string;
+  studentFirstName: string;
+  days: number;
+  kind: "consecutive" | "term_total";
+}): string {
+  const school =
+    input.schoolName.length > SMS_SCHOOL_NAME_MAX
+      ? `${input.schoolName.slice(0, SMS_SCHOOL_NAME_MAX - 1)}.`
+      : input.schoolName;
+  const days = `${input.days} school ${input.days === 1 ? "day" : "days"}`;
+  const what =
+    input.kind === "consecutive"
+      ? `${input.studentFirstName} has been absent for ${days} in a row.`
+      : `${input.studentFirstName} has been absent for ${days} this term.`;
+  return `${school}: ${what} Please contact the school.`;
+}
+
+/** The SMS confirming a payment: amount, receipt number and the balance after it. Plain GSM characters. */
+export function paymentReceiptSms(input: {
+  schoolName: string;
+  studentFirstName: string;
+  amountPesewas: number;
+  receiptNumber: string;
+  balancePesewas: number;
+}): string {
+  const school =
+    input.schoolName.length > SMS_SCHOOL_NAME_MAX
+      ? `${input.schoolName.slice(0, SMS_SCHOOL_NAME_MAX - 1)}.`
+      : input.schoolName;
+  const after =
+    input.balancePesewas > 0
+      ? `Balance now ${formatCedisSms(input.balancePesewas)}.`
+      : input.balancePesewas < 0
+        ? `${formatCedisSms(-input.balancePesewas)} in credit.`
+        : "Fees fully paid.";
+  return `${school}: ${formatCedisSms(input.amountPesewas)} received for ${input.studentFirstName}, receipt ${input.receiptNumber}. ${after} Thank you.`;
+}
+
+/** A school announcement by SMS: its title and where to read it in full. */
+export function announcementSms(input: { schoolName: string; title: string; link: string }): string {
+  const school =
+    input.schoolName.length > SMS_SCHOOL_NAME_MAX
+      ? `${input.schoolName.slice(0, SMS_SCHOOL_NAME_MAX - 1)}.`
+      : input.schoolName;
+  return `${school}: ${input.title.slice(0, 90)}. Read it here: ${input.link}`;
+}
+
 /** Opens WhatsApp (app or web) with a message ready to send to this number (E.164). */
 export function whatsappLink(phoneE164: string, text: string): string {
   return `https://wa.me/${phoneE164.replace(/\D/g, "")}?text=${encodeURIComponent(text)}`;

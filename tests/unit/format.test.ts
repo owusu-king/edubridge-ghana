@@ -12,6 +12,8 @@ describe("formatting", () => {
     expect(initials("Ama Serwaa Mensah")).toBe("AM");
     expect(initials("Kofi")).toBe("K");
     expect(initials("  ")).toBe("?");
+    // Only words starting with a letter count.
+    expect(initials("Asante Hills Academy (Demo)")).toBe("AA");
   });
 
   it("only allows relative redirect targets", () => {

@@ -3,7 +3,7 @@ import { and, asc, desc, eq, gte, inArray, isNull, max, sql } from "drizzle-orm"
 import { z } from "zod";
 import { todayIn } from "@/lib/format";
 import { parseCedis } from "@/lib/money";
-import { assertCan } from "../authz/permissions";
+import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import {
@@ -32,7 +32,11 @@ import { planProgress } from "./plan-schedule";
 
 export const OWING_PAGE_SIZE = 50;
 
-const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
+const scope = (ctx: TenantContext) => ({
+  tenantId: ctx.tenant.id,
+  userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
+});
 
 const owingSchema = z.object({
   classId: z.string().uuid().optional(),
@@ -85,7 +89,7 @@ export interface OwingPage {
 }
 
 export async function listOwing(database: Database, ctx: TenantContext, input: unknown): Promise<OwingPage> {
-  assertCan(ctx.roles, "fees.view");
+  assertAllowed(ctx, "fees.view");
   const filters = owingSchema.parse(input);
   return withTenant(database, scope(ctx), async (tx) => {
     const balances = tx
@@ -166,7 +170,7 @@ export async function listOwing(database: Database, ctx: TenantContext, input: u
 /** Who to contact per student: the primary guardian if they have a phone, else a guardian who does. */
 export async function contactsFor(
   tx: Transaction,
-  ctx: TenantContext,
+  ctx: { tenant: { id: string } },
   studentIds: string[],
 ): Promise<Map<string, OwingContact>> {
   const links = await tx

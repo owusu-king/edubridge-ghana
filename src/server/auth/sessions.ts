@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq, gt, lt, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { sessions, users } from "../db/schema";
+import { revokeAllDeviceTokens } from "./device-tokens";
 import { SESSION_LIFETIME_MS } from "./policy";
 import { generateSessionToken, sessionIdFromToken } from "./tokens";
 
@@ -76,8 +77,10 @@ export async function revokeSessionToken(database: Database, token: string): Pro
   await database.delete(sessions).where(eq(sessions.id, sessionIdFromToken(token)));
 }
 
+/** Signs the user out everywhere: web sessions and API device tokens. */
 export async function revokeAllUserSessions(database: Database, userId: string): Promise<void> {
   await database.delete(sessions).where(eq(sessions.userId, userId));
+  await revokeAllDeviceTokens(database, userId);
 }
 
 export async function purgeExpiredSessions(database: Database, now = new Date()): Promise<number> {

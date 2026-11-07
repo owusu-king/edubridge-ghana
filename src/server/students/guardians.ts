@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "../audit/record";
-import { assertCan } from "../authz/permissions";
+import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import { classes, enrolments, guardians, studentGuardians, students, terms } from "../db/schema";
@@ -33,7 +33,11 @@ export interface GuardianLink {
   otherStudents: { id: string; name: string; className: string | null }[];
 }
 
-const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
+const scope = (ctx: TenantContext) => ({
+  tenantId: ctx.tenant.id,
+  userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
+});
 
 /** Guardians of a student, visible to anyone who can see the student. */
 export async function listGuardians(
@@ -114,7 +118,7 @@ export async function addGuardian(
   studentId: string,
   input: unknown,
 ): Promise<{ guardianId: string; linkedExisting: boolean }> {
-  assertCan(ctx.roles, "students.manage");
+  assertAllowed(ctx, "students.manage");
   const data = addGuardianSchema.parse(input);
   return withTenant(database, scope(ctx), async (tx) => {
     const student = await loadStudentForUpdate(tx, ctx, studentId);
@@ -129,7 +133,7 @@ export async function updateGuardian(
   guardianId: string,
   input: unknown,
 ): Promise<void> {
-  assertCan(ctx.roles, "students.manage");
+  assertAllowed(ctx, "students.manage");
   const data = contactSchema.parse(input);
   await withTenant(database, scope(ctx), async (tx) => {
     if (!z.string().uuid().safeParse(guardianId).success)
@@ -176,7 +180,7 @@ export async function setPrimaryGuardian(
   studentId: string,
   guardianId: string,
 ): Promise<void> {
-  assertCan(ctx.roles, "students.manage");
+  assertAllowed(ctx, "students.manage");
   await withTenant(database, scope(ctx), async (tx) => {
     const student = await loadStudentForUpdate(tx, ctx, studentId);
     const [link] = await tx
@@ -210,7 +214,7 @@ export async function unlinkGuardian(
   studentId: string,
   guardianId: string,
 ): Promise<void> {
-  assertCan(ctx.roles, "students.manage");
+  assertAllowed(ctx, "students.manage");
   await withTenant(database, scope(ctx), async (tx) => {
     const student = await loadStudentForUpdate(tx, ctx, studentId);
     if (!z.string().uuid().safeParse(guardianId).success)
@@ -257,7 +261,7 @@ export async function setParentAccess(
   guardianId: string,
   input: { blocked: boolean },
 ): Promise<void> {
-  assertCan(ctx.roles, "parents.access.manage");
+  assertAllowed(ctx, "parents.access.manage");
   if (!z.string().uuid().safeParse(guardianId).success)
     throw new DomainError("guardian_not_found", "Guardian not found.");
   await withTenant(database, scope(ctx), async (tx) => {

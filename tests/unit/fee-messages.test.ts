@@ -112,3 +112,58 @@ describe("reminder summary", () => {
     );
   });
 });
+
+describe("payment receipt SMS", () => {
+  const base = {
+    schoolName: "Kpone Ridge International School",
+    studentFirstName: "Efua",
+    amountPesewas: 45_000,
+    receiptNumber: "R000123",
+  };
+
+  it("gives the amount, receipt number and balance in one plain SMS", () => {
+    const { text } = TEMPLATES.payment_receipt({ ...base, balancePesewas: 120_050 });
+    expect(text).toBe(
+      "Kpone Ridge International School: GHS 450.00 received for Efua, receipt R000123. Balance now GHS 1,200.50. Thank you.",
+    );
+    expect(text.length).toBeLessThanOrEqual(160);
+    expect(text).toMatch(GSM_7);
+  });
+
+  it("says when fees are fully paid or in credit", () => {
+    expect(TEMPLATES.payment_receipt({ ...base, balancePesewas: 0 }).text).toContain("Fees fully paid.");
+    expect(TEMPLATES.payment_receipt({ ...base, balancePesewas: -2_500 }).text).toContain(
+      "GHS 25.00 in credit.",
+    );
+  });
+
+  it("stays within one SMS for long school names", () => {
+    const { text } = TEMPLATES.payment_receipt({
+      ...base,
+      schoolName: "The Very Long Name Preparatory and International Academy of Greater Accra",
+      balancePesewas: 9_999_999,
+    });
+    expect(text.length).toBeLessThanOrEqual(160);
+    expect(text).toMatch(GSM_7);
+  });
+});
+
+describe("announcement SMS", () => {
+  it("carries the title and the parent view link", () => {
+    const { text } = TEMPLATES.announcement({
+      schoolName: "Kpone Ridge International School",
+      title: "School closes early on Friday",
+    });
+    expect(text).toMatch(
+      /^Kpone Ridge International School: School closes early on Friday\. Read it here: \S+\/p$/,
+    );
+    expect(text).toMatch(GSM_7);
+  });
+
+  it("shortens long titles so the link still fits in two SMS", () => {
+    const { text } = TEMPLATES.announcement({ schoolName: "A School", title: "x".repeat(200) });
+    expect(text).toContain("x".repeat(90) + ".");
+    expect(text).not.toContain("x".repeat(91));
+    expect(text.length).toBeLessThanOrEqual(306);
+  });
+});

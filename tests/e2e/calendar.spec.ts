@@ -15,7 +15,10 @@ test("a head teacher manages the academic calendar", async ({ page }) => {
   await page.goto(SCHOOL.path);
   await page.getByRole("navigation", { name: "School" }).getByRole("link", { name: "Settings" }).click();
   await expect(page).toHaveURL(`${SCHOOL.path}/settings/calendar`);
-  await expect(page.getByRole("navigation", { name: "Settings" }).getByRole("link")).toHaveText(["Calendar"]);
+  await expect(page.getByRole("navigation", { name: "Settings" }).getByRole("link")).toHaveText([
+    "Calendar",
+    "Attendance",
+  ]);
 
   await page.getByRole("button", { name: "Add academic year" }).click();
   const dialog = page.getByRole("dialog", { name: "Add academic year" });

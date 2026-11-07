@@ -1,10 +1,13 @@
 import "server-only";
 import { and, asc, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
+import { isIsoDate } from "@/lib/attendance";
+import { daysBetween } from "@/lib/dashboard";
 import { todayIn } from "@/lib/format";
 import { parseCedis, sumPesewas } from "@/lib/money";
 import { recordAudit } from "../audit/record";
-import { assertCan } from "../authz/permissions";
+import { queuePaymentReceipt } from "../messages/receipts";
+import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import {
@@ -33,7 +36,11 @@ export const METHOD_LABELS: Record<PaymentMethod, string> = {
   cheque: "Cheque",
 };
 
-const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
+const scope = (ctx: TenantContext) => ({
+  tenantId: ctx.tenant.id,
+  userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
+});
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Enter a date.");
 const blankToUndefined = (v: unknown) => (typeof v === "string" && v.trim() === "" ? undefined : v);
 
@@ -167,6 +174,8 @@ export async function insertPayment(
     entityId: payment!.id,
     metadata: { receipt: receiptNumber, amountPesewas: p.amountPesewas, method: p.method },
   });
+  // The family's SMS receipt, if the school sends them (same transaction: only if the payment is saved).
+  await queuePaymentReceipt(tx, { ...p, receiptNumber });
   return { paymentId: payment!.id, receiptNumber };
 }
 
@@ -179,7 +188,7 @@ export async function recordPayment(
   ctx: TenantContext,
   input: unknown,
 ): Promise<RecordedPayment> {
-  assertCan(ctx.roles, "payments.record");
+  assertAllowed(ctx, "payments.record");
   const data = recordSchema.parse(input);
   const today = todayIn(ctx.tenant.timezone);
   if (data.paidOn > today)
@@ -230,7 +239,7 @@ export async function voidPayment(
   paymentId: string,
   input: unknown,
 ): Promise<void> {
-  assertCan(ctx.roles, "payments.void");
+  assertAllowed(ctx, "payments.void");
   const { reason } = voidSchema.parse(input);
   if (!z.string().uuid().safeParse(paymentId).success)
     throw new DomainError("not_found", "Receipt not found.");
@@ -302,7 +311,7 @@ export async function getReceipt(
   ctx: TenantContext,
   paymentId: string,
 ): Promise<Receipt | null> {
-  assertCan(ctx.roles, "fees.view");
+  assertAllowed(ctx, "fees.view");
   if (!z.string().uuid().safeParse(paymentId).success) return null;
   return withTenant(database, scope(ctx), async (tx) => {
     const receipt = await readReceipt(tx, ctx.tenant.id, paymentId);
@@ -410,7 +419,7 @@ export async function listPaymentsOn(
   ctx: TenantContext,
   date: string,
 ): Promise<PaymentsDay> {
-  assertCan(ctx.roles, "fees.view");
+  assertAllowed(ctx, "fees.view");
   const day = isoDate.safeParse(date).success ? date : todayIn(ctx.tenant.timezone);
   return withTenant(database, scope(ctx), async (tx) => {
     const rows = await tx
@@ -453,6 +462,74 @@ export async function listPaymentsOn(
   });
 }
 
+export interface PaymentTotals {
+  from: string;
+  to: string;
+  /** Days with payments, in date order. */
+  days: { date: string; count: number; totalPesewas: number }[];
+  byMethod: { method: PaymentMethod; count: number; totalPesewas: number }[];
+  count: number;
+  totalPesewas: number;
+}
+
+/** The longest period one report covers. */
+export const MAX_PERIOD_DAYS = 366;
+
+/**
+ * Payments received over a period (voided ones left out), per day and per method: the weekly or termly
+ * view of the cash box, and the figures behind "collected" on the school overview.
+ */
+export async function listPaymentTotals(
+  database: Database,
+  ctx: TenantContext,
+  from: string,
+  to: string,
+): Promise<PaymentTotals> {
+  assertAllowed(ctx, "fees.view");
+  if (!isIsoDate(from) || !isIsoDate(to)) throw new DomainError("date_invalid", "Choose valid dates.");
+  if (to < from) throw new DomainError("period_invalid", "The period must end on or after its first day.");
+  if (daysBetween(from, to) >= MAX_PERIOD_DAYS)
+    throw new DomainError("period_too_long", "Choose a period of up to a year.");
+  return withTenant(database, scope(ctx), async (tx) => {
+    const rows = await tx
+      .select({
+        date: payments.paidOn,
+        method: payments.method,
+        count: sql<number>`count(*)::int`,
+        total: sql<string>`sum(${payments.amountPesewas})`,
+      })
+      .from(payments)
+      .leftJoin(paymentVoids, eq(paymentVoids.paymentId, payments.id))
+      .where(
+        and(
+          eq(payments.tenantId, ctx.tenant.id),
+          sql`${payments.paidOn} between ${from} and ${to}`,
+          sql`${paymentVoids.paymentId} is null`,
+          campusScopeFilter(ctx, payments.studentId),
+        ),
+      )
+      .groupBy(payments.paidOn, payments.method)
+      .orderBy(asc(payments.paidOn));
+    const dates = [...new Set(rows.map((r) => r.date))];
+    const total = (of: typeof rows) => sumPesewas(of.map((r) => Number(r.total)));
+    const count = (of: typeof rows) => of.reduce((n, r) => n + r.count, 0);
+    return {
+      from,
+      to,
+      days: dates.map((date) => {
+        const of = rows.filter((r) => r.date === date);
+        return { date, count: count(of), totalPesewas: total(of) };
+      }),
+      byMethod: PAYMENT_METHODS.map((method) => {
+        const of = rows.filter((r) => r.method === method);
+        return { method, count: count(of), totalPesewas: total(of) };
+      }).filter((m) => m.count > 0),
+      count: count(rows),
+      totalPesewas: total(rows),
+    };
+  });
+}
+
 export const ACCOUNTS_PAGE_SIZE = 50;
 
 export interface AccountRow {
@@ -486,7 +563,7 @@ export async function listAccounts(
   ctx: TenantContext,
   input: unknown,
 ): Promise<AccountsPage> {
-  assertCan(ctx.roles, "fees.view");
+  assertAllowed(ctx, "fees.view");
   const filters = accountsSchema.parse(input);
   const page = filters.page ?? 1;
   return withTenant(database, scope(ctx), async (tx) => {

@@ -1,4 +1,5 @@
 import "server-only";
+import { revokeAllDeviceTokens } from "./device-tokens";
 import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import type { Database } from "../db/client";
@@ -47,6 +48,8 @@ export async function changePassword(
   await database.transaction(async (tx) => {
     await tx.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, userId));
     await tx.delete(sessions).where(and(eq(sessions.userId, userId), ne(sessions.id, currentSessionId)));
+    // Devices signed in with the old password must sign in again.
+    await revokeAllDeviceTokens(tx, userId);
   });
 }
 

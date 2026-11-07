@@ -4,7 +4,15 @@ import { PARENT_SESSION_LIFETIME_MS } from "@/server/parents/policy";
 import { buildCsp } from "@/web/csp";
 import { PARENT_COOKIE, SESSION_COOKIE, sessionCookieOptions } from "@/web/session-cookie";
 
-const PUBLIC_PATHS = ["/login", "/login/verify", "/forgot-password", "/p/login", "/p/login/verify"];
+/** /verify: anyone can check a learner record (Transfer Passport). */
+const PUBLIC_PATHS = [
+  "/login",
+  "/login/verify",
+  "/forgot-password",
+  "/p/login",
+  "/p/login/verify",
+  "/verify",
+];
 /** Balance links (/b/) are read-only and carry their own secret. */
 const PUBLIC_PREFIXES = ["/invite/", "/reset-password/", "/b/"];
 
@@ -39,6 +47,8 @@ export function proxy(request: NextRequest) {
   const csp = buildCsp(nonce, process.env.NODE_ENV !== "production");
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("content-security-policy", csp);
+  // For the server's record of pages EduBridge support opens (always overwritten, never from the client).
+  requestHeaders.set("x-edubridge-path", pathname);
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set("content-security-policy", csp);
   if (token && request.method === "GET") {
@@ -50,6 +60,6 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!api/|_next/|icons/|manifest.webmanifest|icon.svg|apple-icon.png|favicon.ico|robots.txt).*)",
+    "/((?!api/|_next/|icons/|manifest.webmanifest|sw.js|icon.svg|apple-icon.png|favicon.ico|robots.txt).*)",
   ],
 };

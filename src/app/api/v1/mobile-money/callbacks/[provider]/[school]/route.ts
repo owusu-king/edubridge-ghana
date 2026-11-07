@@ -38,6 +38,7 @@ export async function POST(
     case "accepted":
       after(() => processMobileMoneyCallbacks(db(), receipt.school).then(() => undefined));
       return Response.json({ received: true }, { headers: { "Cache-Control": "no-store" } });
+    case "ignored":
     case "duplicate":
       return Response.json({ received: true }, { headers: { "Cache-Control": "no-store" } });
   }

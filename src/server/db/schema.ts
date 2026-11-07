@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  bigserial,
   boolean,
   check,
   date,
@@ -18,7 +19,9 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import type { AssessmentComponent, GradeBand, ReportCardSnapshot } from "../../lib/assessment";
+import { ATTENDANCE_STATUSES } from "../../lib/attendance";
 import { MOBILE_MONEY_NETWORKS } from "../../lib/mobile-money";
+import { BILLING_PERIODS, SUBSCRIPTION_STATUSES, type InvoiceLine } from "../../lib/plan";
 
 /** Case-insensitive text (requires the `citext` extension, enabled in the first migration). */
 const citext = customType<{ data: string }>({ dataType: () => "citext" });
@@ -52,6 +55,11 @@ export const tenants = pgTable(
       .array()
       .notNull()
       .default(sql`ARRAY['owner','bursar']::text[]`),
+    /**
+     * A demonstration school filled with made-up data (`npm run demo:school`). Labelled as such everywhere,
+     * never sends SMS or email, and is left out of parent sign-in. Set only by the demo script.
+     */
+    isDemo: boolean("is_demo").notNull().default(false),
     ...timestamps,
   },
   (t) => [
@@ -260,8 +268,33 @@ export const tenantEntitlements = pgTable(
       .references(() => tenants.id, { onDelete: "restrict" }),
     planName: text("plan_name").notNull().default("Pilot"),
     maxCampuses: integer("max_campuses").notNull().default(1),
-    /** Null means no limit. Enforced once student records exist. */
+    /** Active students allowed; null means no limit. Checked when students are added or reactivated. */
     maxStudents: integer("max_students"),
+    /** Modules the plan includes (src/lib/plan.ts); checked on the server for every request. */
+    features: text("features")
+      .array()
+      .notNull()
+      .default(sql`ARRAY['attendance','assessment','parent_view','fee_reminders','mobile_money']::text[]`),
+    /** SMS the school may send in a calendar month (reminders); null means no limit. */
+    maxSmsPerMonth: integer("max_sms_per_month"),
+    // The subscription (PLT-03). Billing is manual in R1: EduBridge records invoices and payments here.
+    subscriptionStatus: text("subscription_status", { enum: SUBSCRIPTION_STATUSES })
+      .notNull()
+      .default("trial"),
+    billingPeriod: text("billing_period", { enum: BILLING_PERIODS }).notNull().default("termly"),
+    trialEndsOn: date("trial_ends_on", { mode: "string" }),
+    /** The end of the period the school has paid for. */
+    paidUntil: date("paid_until", { mode: "string" }),
+    /** The agreed price per billing period, in the school's currency. */
+    pricePesewas: bigint("price_pesewas", { mode: "number" }),
+    /** Price per SMS for this school; null uses the platform's price (platform_settings). */
+    smsPricePesewas: bigint("sms_price_pesewas", { mode: "number" }),
+    /**
+     * The school's own account with the payment provider (a Paystack subaccount code, ACCT_...), so its
+     * money settles to the school directly (D-07). Set by platform staff.
+     */
+    settlementAccount: text("settlement_account"),
+    billingNotes: text("billing_notes"),
     ...timestamps,
   },
   (t) => [
@@ -269,6 +302,30 @@ export const tenantEntitlements = pgTable(
     check(
       "tenant_entitlements_max_students_range",
       sql`${t.maxStudents} is null or ${t.maxStudents} between 1 and 1000000`,
+    ),
+    check(
+      "tenant_entitlements_features_valid",
+      sql`${t.features} <@ ARRAY['attendance','assessment','parent_view','fee_reminders','mobile_money','assistant']::text[]`,
+    ),
+    check(
+      "tenant_entitlements_max_sms_range",
+      sql`${t.maxSmsPerMonth} is null or ${t.maxSmsPerMonth} between 0 and 1000000`,
+    ),
+    check(
+      "tenant_entitlements_price_range",
+      sql`${t.pricePesewas} is null or ${t.pricePesewas} between 0 and 1000000000`,
+    ),
+    check(
+      "tenant_entitlements_sms_price_range",
+      sql`${t.smsPricePesewas} is null or ${t.smsPricePesewas} between 0 and 100000`,
+    ),
+    check(
+      "tenant_entitlements_settlement_account_format",
+      sql`${t.settlementAccount} is null or ${t.settlementAccount} ~ '^[A-Za-z0-9_]{4,40}$'`,
+    ),
+    check(
+      "tenant_entitlements_notes_length",
+      sql`${t.billingNotes} is null or char_length(${t.billingNotes}) <= 500`,
     ),
   ],
 );
@@ -437,10 +494,18 @@ export const students = pgTable(
     status: text("status", { enum: ["active", "withdrawn", "graduated"] })
       .notNull()
       .default("active"),
+    /**
+     * The child's portable learner identity (Transfer Passport): the same across schools once records move
+     * with consent. Set by the database when a student is created without one.
+     */
+    learnerId: uuid("learner_id").references(() => learners.id, { onDelete: "restrict" }),
+    /** Why the student left (e.g. transferred to another school), when withdrawn. */
+    leftReason: text("left_reason"),
     ...timestamps,
   },
   (t) => [
     unique("students_tenant_admission_unique").on(t.tenantId, t.admissionNumber),
+    unique("students_tenant_learner_unique").on(t.tenantId, t.learnerId),
     unique("students_tenant_id_unique").on(t.tenantId, t.id),
     index("students_tenant_name_idx").on(t.tenantId, t.lastName, t.firstName),
     check(
@@ -613,6 +678,14 @@ export const auditEvents = pgTable(
     metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
     ipAddress: inet("ip_address"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Set when EduBridge support made the change during a support grant (PLT-02). Filled from the
+     * transaction's `app.support_grant_id`, which `withTenant` sets for support contexts, so no caller can
+     * forget it.
+     */
+    supportGrantId: uuid("support_grant_id").default(
+      sql`nullif(current_setting('app.support_grant_id', true), '')::uuid`,
+    ),
   },
   (t) => [index("audit_events_tenant_time_idx").on(t.tenantId, t.occurredAt)],
 );
@@ -855,6 +928,10 @@ export const feeConcessions = pgTable(
     feeItemId: uuid("fee_item_id"),
     percentBasisPoints: integer("percent_basis_points"),
     amountPesewas: bigint("amount_pesewas", { mode: "number" }),
+    /** Added by a person, or by the school's sibling discount rule (which also ends its own). */
+    source: text("source", { enum: ["manual", "sibling_rule"] })
+      .notNull()
+      .default("manual"),
     status: text("status", { enum: ["active", "ended"] })
       .notNull()
       .default("active"),
@@ -1449,5 +1526,794 @@ export const reportCardFiles = pgTable(
     }).onDelete("cascade"),
     unique("report_card_files_batch_class_unique").on(t.batchId, t.classId),
     check("report_card_files_pdf", sql`(${t.reportCount} = 0) = (${t.pdf} is null)`),
+  ],
+);
+
+/** A class register for one school day: that it was taken, by whom, in which term. One per class and date. */
+export const attendanceRegisters = pgTable(
+  "attendance_registers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    classId: uuid("class_id").notNull(),
+    termId: uuid("term_id").notNull(),
+    /** The school day (school-local calendar date). */
+    date: date("date", { mode: "string" }).notNull(),
+    takenByUserId: uuid("taken_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    ...timestamps,
+  },
+  (t) => [
+    foreignKey({
+      name: "attendance_registers_class_fk",
+      columns: [t.tenantId, t.classId],
+      foreignColumns: [classes.tenantId, classes.id],
+    }),
+    foreignKey({
+      name: "attendance_registers_term_fk",
+      columns: [t.tenantId, t.termId],
+      foreignColumns: [terms.tenantId, terms.id],
+    }),
+    unique("attendance_registers_class_date_unique").on(t.tenantId, t.classId, t.date),
+    unique("attendance_registers_tenant_id_unique").on(t.tenantId, t.id),
+    index("attendance_registers_term_idx").on(t.tenantId, t.termId),
+  ],
+);
+
+/**
+ * One student's mark on a register. `version` goes up by one on every change: a change made offline names
+ * the version it was based on, and is applied only if that is still the current one (never last-write-wins).
+ */
+export const attendanceMarks = pgTable(
+  "attendance_marks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    registerId: uuid("register_id").notNull(),
+    studentId: uuid("student_id").notNull(),
+    status: text("status", { enum: ATTENDANCE_STATUSES }).notNull(),
+    reason: text("reason"),
+    version: integer("version").notNull().default(1),
+    recordedByUserId: uuid("recorded_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    ...timestamps,
+  },
+  (t) => [
+    foreignKey({
+      name: "attendance_marks_register_fk",
+      columns: [t.tenantId, t.registerId],
+      foreignColumns: [attendanceRegisters.tenantId, attendanceRegisters.id],
+    }),
+    foreignKey({
+      name: "attendance_marks_student_fk",
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }).onDelete("cascade"),
+    unique("attendance_marks_register_student_unique").on(t.registerId, t.studentId),
+    unique("attendance_marks_tenant_id_unique").on(t.tenantId, t.id),
+    index("attendance_marks_student_idx").on(t.tenantId, t.studentId),
+    check("attendance_marks_reason_length", sql`coalesce(char_length(${t.reason}), 0) <= 120`),
+    check("attendance_marks_version", sql`${t.version} >= 1`),
+  ],
+);
+
+/**
+ * Every change to a mark, insert-only: before and after, who, how it arrived (online, synced from a device
+ * that was offline, or a conflict the teacher resolved by keeping their own mark) and when it was recorded on
+ * the device. Nothing about attendance is ever overwritten without a trace.
+ */
+export const attendanceChanges = pgTable(
+  "attendance_changes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    markId: uuid("mark_id").notNull(),
+    studentId: uuid("student_id").notNull(),
+    fromStatus: text("from_status", { enum: ATTENDANCE_STATUSES }),
+    toStatus: text("to_status", { enum: ATTENDANCE_STATUSES }).notNull(),
+    fromReason: text("from_reason"),
+    toReason: text("to_reason"),
+    version: integer("version").notNull(),
+    source: text("source", { enum: ["online", "offline", "kept_mine"] }).notNull(),
+    recordedOnDeviceAt: timestamp("recorded_on_device_at", { withTimezone: true }),
+    changedByUserId: uuid("changed_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "attendance_changes_mark_fk",
+      columns: [t.tenantId, t.markId],
+      foreignColumns: [attendanceMarks.tenantId, attendanceMarks.id],
+    }).onDelete("cascade"),
+    index("attendance_changes_mark_idx").on(t.tenantId, t.markId),
+  ],
+);
+
+/**
+ * SMS a school is charged for, one row per message (and per school, for a parent sign-in code sent to a
+ * number several schools have: `shared_with` says how many). Insert-only, written when the message is
+ * queued; whether it was delivered comes from the outbox. Kept after codes and sessions are purged.
+ */
+export const smsUsage = pgTable(
+  "sms_usage",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    kind: text("kind", {
+      enum: ["fee_reminder", "parent_code", "absence_alert", "payment_receipt", "announcement"],
+    }).notNull(),
+    /** The student the message was about (for each student's message history); null for codes and announcements. */
+    studentId: uuid("student_id"),
+    outboxId: uuid("outbox_id")
+      .notNull()
+      .references(() => notificationOutbox.id, { onDelete: "restrict" }),
+    sharedWith: integer("shared_with").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("sms_usage_outbox_tenant_unique").on(t.outboxId, t.tenantId),
+    index("sms_usage_tenant_created_idx").on(t.tenantId, t.createdAt),
+    check("sms_usage_shared_with_range", sql`${t.sharedWith} between 1 and 100`),
+  ],
+);
+
+/**
+ * EduBridge's invoices to a school for its subscription and usage (manual billing in R1). Issued
+ * invoices never change: they can only be marked paid, or voided with a reason, each once (trigger).
+ */
+export const subscriptionInvoices = pgTable(
+  "subscription_invoices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    /** EB-2026-000123, from a platform-wide sequence. */
+    invoiceNumber: text("invoice_number").notNull().unique(),
+    lines: jsonb("lines").$type<InvoiceLine[]>().notNull(),
+    totalPesewas: bigint("total_pesewas", { mode: "number" }).notNull(),
+    currencyCode: text("currency_code").notNull(),
+    periodStartsOn: date("period_starts_on", { mode: "string" }).notNull(),
+    periodEndsOn: date("period_ends_on", { mode: "string" }).notNull(),
+    issuedOn: date("issued_on", { mode: "string" }).notNull(),
+    dueOn: date("due_on", { mode: "string" }).notNull(),
+    paidOn: date("paid_on", { mode: "string" }),
+    paymentReference: text("payment_reference"),
+    paymentRecordedByUserId: uuid("payment_recorded_by_user_id").references(() => users.id, {
+      onDelete: "restrict",
+    }),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidReason: text("void_reason"),
+    voidedByUserId: uuid("voided_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("subscription_invoices_tenant_idx").on(t.tenantId, t.issuedOn),
+    check("subscription_invoices_total_range", sql`${t.totalPesewas} between 1 and 1000000000`),
+    check("subscription_invoices_period", sql`${t.periodEndsOn} >= ${t.periodStartsOn}`),
+    check("subscription_invoices_due", sql`${t.dueOn} >= ${t.issuedOn}`),
+    check("subscription_invoices_paid_or_void", sql`${t.paidOn} is null or ${t.voidedAt} is null`),
+    check("subscription_invoices_void_reason", sql`(${t.voidedAt} is null) = (${t.voidReason} is null)`),
+    check("subscription_invoices_currency_format", sql`${t.currencyCode} ~ '^[A-Z]{3}$'`),
+  ],
+);
+
+/**
+ * Students moved from one term's classes into another's in one step: the same classes within a year, or up a
+ * level at the start of a new year (with the last level graduating). Kept so a move can be undone while
+ * nothing has been recorded against it yet.
+ */
+export const termMoves = pgTable(
+  "term_moves",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    fromTermId: uuid("from_term_id").notNull(),
+    toTermId: uuid("to_term_id").notNull(),
+    newYear: boolean("new_year").notNull(),
+    placed: integer("placed").notNull(),
+    /** Students this move marked as graduated (set back to active if the move is undone). */
+    graduatedStudentIds: uuid("graduated_student_ids").array().notNull(),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    undoneAt: timestamp("undone_at", { withTimezone: true }),
+    undoneByUserId: uuid("undone_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+  },
+  (t) => [
+    foreignKey({
+      name: "term_moves_from_term_fk",
+      columns: [t.tenantId, t.fromTermId],
+      foreignColumns: [terms.tenantId, terms.id],
+    }),
+    foreignKey({
+      name: "term_moves_to_term_fk",
+      columns: [t.tenantId, t.toTermId],
+      foreignColumns: [terms.tenantId, terms.id],
+    }),
+    unique("term_moves_tenant_id_unique").on(t.tenantId, t.id),
+    index("term_moves_tenant_idx").on(t.tenantId, t.createdAt),
+    check("term_moves_terms_differ", sql`${t.fromTermId} <> ${t.toTermId}`),
+    check("term_moves_placed_range", sql`${t.placed} >= 0`),
+  ],
+);
+
+/** The class placements a move created (removed with them if the move is undone). */
+export const termMoveEnrolments = pgTable(
+  "term_move_enrolments",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    moveId: uuid("move_id").notNull(),
+    enrolmentId: uuid("enrolment_id")
+      .notNull()
+      .references(() => enrolments.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.moveId, t.enrolmentId] }),
+    foreignKey({
+      name: "term_move_enrolments_move_fk",
+      columns: [t.tenantId, t.moveId],
+      foreignColumns: [termMoves.tenantId, termMoves.id],
+    }).onDelete("cascade"),
+  ],
+);
+
+/**
+ * Settings for the whole platform (one row): the default price of an SMS charged to schools, and how many
+ * days a school has after an invoice falls due before school-initiated SMS pause. Platform staff only.
+ */
+export const platformSettings = pgTable(
+  "platform_settings",
+  {
+    id: boolean("id").primaryKey().default(true),
+    smsPricePesewas: bigint("sms_price_pesewas", { mode: "number" }),
+    graceDays: integer("grace_days").notNull().default(3),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedByUserId: uuid("updated_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+  },
+  (t) => [
+    check("platform_settings_single_row", sql`${t.id}`),
+    check("platform_settings_grace_range", sql`${t.graceDays} between 0 and 60`),
+    check(
+      "platform_settings_sms_price_range",
+      sql`${t.smsPricePesewas} is null or ${t.smsPricePesewas} between 0 and 100000`,
+    ),
+  ],
+);
+
+/** Days the school is closed within a term (public holidays, mid-term breaks): no registers are taken. */
+export const schoolHolidays = pgTable(
+  "school_holidays",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+    startsOn: date("starts_on", { mode: "string" }).notNull(),
+    endsOn: date("ends_on", { mode: "string" }).notNull(),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("school_holidays_tenant_idx").on(t.tenantId, t.startsOn),
+    check("school_holidays_dates", sql`${t.endsOn} >= ${t.startsOn}`),
+    check("school_holidays_span", sql`${t.endsOn} - ${t.startsOn} <= 60`),
+    check("school_holidays_name_length", sql`char_length(${t.name}) between 2 and 80`),
+  ],
+);
+
+/**
+ * When families get an SMS about absences: after a number of school days absent in a row, and/or a total in
+ * a term. Off until a school turns it on (each SMS costs the school).
+ */
+export const absenceAlertSettings = pgTable(
+  "absence_alert_settings",
+  {
+    tenantId: uuid("tenant_id")
+      .primaryKey()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    enabled: boolean("enabled").notNull().default(false),
+    consecutiveDays: integer("consecutive_days"),
+    termDays: integer("term_days"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedByUserId: uuid("updated_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+  },
+  (t) => [
+    check(
+      "absence_alert_settings_consecutive",
+      sql`${t.consecutiveDays} is null or ${t.consecutiveDays} between 1 and 30`,
+    ),
+    check("absence_alert_settings_term", sql`${t.termDays} is null or ${t.termDays} between 1 and 100`),
+    check(
+      "absence_alert_settings_some_rule",
+      sql`not ${t.enabled} or ${t.consecutiveDays} is not null or ${t.termDays} is not null`,
+    ),
+  ],
+);
+
+/**
+ * Absence SMS sent to families. Insert-only; one per student per run of absences (keyed by the run's first
+ * day) and one per term for the term total, so a family never gets the same alert twice.
+ */
+export const absenceAlerts = pgTable(
+  "absence_alerts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    studentId: uuid("student_id").notNull(),
+    termId: uuid("term_id").notNull(),
+    kind: text("kind", { enum: ["consecutive", "term_total"] }).notNull(),
+    /** The run's first day (consecutive) or the threshold reached (term total), as text. */
+    key: text("key").notNull(),
+    days: integer("days").notNull(),
+    guardianId: uuid("guardian_id"),
+    recipient: text("recipient").notNull(),
+    /** Null when nothing was sent (demo school). */
+    outboxId: uuid("outbox_id").references(() => notificationOutbox.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "absence_alerts_student_fk",
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }),
+    foreignKey({
+      name: "absence_alerts_term_fk",
+      columns: [t.tenantId, t.termId],
+      foreignColumns: [terms.tenantId, terms.id],
+    }),
+    unique("absence_alerts_once").on(t.tenantId, t.studentId, t.termId, t.kind, t.key),
+    index("absence_alerts_student_idx").on(t.tenantId, t.studentId),
+  ],
+);
+
+/**
+ * A school's own choices about how EduBridge works for it: whether Accountants may void receipts (the
+ * Proprietor decides), and how two overview figures are defined. Defaults apply when there is no row.
+ */
+export const schoolPreferences = pgTable(
+  "school_preferences",
+  {
+    tenantId: uuid("tenant_id")
+      .primaryKey()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    accountantsCanVoid: boolean("accountants_can_void").notNull().default(false),
+    /** "due": collected ÷ (owed at the start + billed); "billed": collected ÷ billed for the term. */
+    collectionRateBasis: text("collection_rate_basis", { enum: ["due", "billed"] })
+      .notNull()
+      .default("due"),
+    attendanceConcernPercent: integer("attendance_concern_percent").notNull().default(80),
+    attendanceConcernMinDays: integer("attendance_concern_min_days").notNull().default(5),
+    /** SMS the payer's family when a payment is recorded (each SMS is charged to the school). */
+    paymentReceiptSms: boolean("payment_receipt_sms").notNull().default(false),
+    /** Automatic fee reminders: every so many days to families owing at least the minimum. */
+    autoRemindersEnabled: boolean("auto_reminders_enabled").notNull().default(false),
+    autoReminderIntervalDays: integer("auto_reminder_interval_days").notNull().default(14),
+    autoReminderMinPesewas: bigint("auto_reminder_min_pesewas", { mode: "number" }).notNull().default(10_000),
+    /** The school day automatic reminders last ran (once a day, after 9:00 school time). */
+    autoRemindersLastRunOn: date("auto_reminders_last_run_on", { mode: "string" }),
+    /** How families reach the school (shown in the parent view). */
+    contactPhone: text("contact_phone"),
+    contactEmail: text("contact_email"),
+    contactWhatsapp: text("contact_whatsapp"),
+    officeHours: text("office_hours"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedByUserId: uuid("updated_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+  },
+  (t) => [
+    check("school_preferences_concern_percent", sql`${t.attendanceConcernPercent} between 1 and 100`),
+    check("school_preferences_concern_days", sql`${t.attendanceConcernMinDays} between 1 and 100`),
+    check("school_preferences_reminder_interval", sql`${t.autoReminderIntervalDays} between 7 and 90`),
+    check("school_preferences_reminder_min", sql`${t.autoReminderMinPesewas} between 0 and 1000000000`),
+    check(
+      "school_preferences_office_hours",
+      sql`${t.officeHours} is null or char_length(${t.officeHours}) <= 120`,
+    ),
+  ],
+);
+
+/**
+ * The school's sibling discount: which child counts as the first (paying in full), and the discount for the
+ * second child and for each later one, on one fee item or all. Applied as discounts on each child.
+ */
+export const siblingDiscountRules = pgTable(
+  "sibling_discount_rules",
+  {
+    tenantId: uuid("tenant_id")
+      .primaryKey()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    firstChild: text("first_child", { enum: ["eldest", "youngest", "highest_class", "lowest_class"] })
+      .notNull()
+      .default("eldest"),
+    secondPercentBasisPoints: integer("second_percent_basis_points"),
+    laterPercentBasisPoints: integer("later_percent_basis_points"),
+    /** Null: every fee item. */
+    feeItemId: uuid("fee_item_id"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedByUserId: uuid("updated_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+  },
+  (t) => [
+    foreignKey({
+      name: "sibling_discount_rules_item_fk",
+      columns: [t.tenantId, t.feeItemId],
+      foreignColumns: [feeItems.tenantId, feeItems.id],
+    }),
+    check(
+      "sibling_discount_rules_second",
+      sql`${t.secondPercentBasisPoints} is null or ${t.secondPercentBasisPoints} between 1 and 10000`,
+    ),
+    check(
+      "sibling_discount_rules_later",
+      sql`${t.laterPercentBasisPoints} is null or ${t.laterPercentBasisPoints} between 1 and 10000`,
+    ),
+  ],
+);
+
+/**
+ * School announcements to families: the whole school, or one level, class or campus. Shown in the parent
+ * view, and sent by SMS when chosen. Never edited once posted (a correction is a new announcement).
+ */
+export const announcements = pgTable(
+  "announcements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    audience: text("audience", { enum: ["school", "level", "class", "campus"] }).notNull(),
+    /** The level, class or campus; null for the whole school. */
+    audienceId: uuid("audience_id"),
+    smsCount: integer("sms_count").notNull().default(0),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("announcements_tenant_id_unique").on(t.tenantId, t.id),
+    index("announcements_tenant_idx").on(t.tenantId, t.createdAt),
+    check("announcements_title_length", sql`char_length(${t.title}) between 2 and 100`),
+    check("announcements_body_length", sql`char_length(${t.body}) between 1 and 2000`),
+    check("announcements_audience_id", sql`(${t.audience} = 'school') = (${t.audienceId} is null)`),
+  ],
+);
+
+/** Which parent numbers have read an announcement (PRT-05). */
+export const announcementReads = pgTable(
+  "announcement_reads",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    announcementId: uuid("announcement_id").notNull(),
+    /** E.164: parents are their verified phone numbers. */
+    phone: text("phone").notNull(),
+    readAt: timestamp("read_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.announcementId, t.phone] }),
+    foreignKey({
+      name: "announcement_reads_announcement_fk",
+      columns: [t.tenantId, t.announcementId],
+      foreignColumns: [announcements.tenantId, announcements.id],
+    }),
+  ],
+);
+
+/**
+ * Support access (PLT-02, D-08): the Proprietor lets EduBridge support into the school for a chosen time
+ * (at most 7 days), and can end it early. While a grant is live, platform staff can open the school with
+ * the Proprietor's permissions, except managing support access and exporting data. Never deleted; ending
+ * is the only change, once.
+ */
+export const supportGrants = pgTable(
+  "support_grants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    grantedByUserId: uuid("granted_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    /** What the school needs help with, for support to read. */
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    endedByUserId: uuid("ended_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+  },
+  (t) => [
+    unique("support_grants_tenant_id_unique").on(t.tenantId, t.id),
+    index("support_grants_tenant_time_idx").on(t.tenantId, t.createdAt),
+    check("support_grants_note_length", sql`char_length(${t.note}) <= 300`),
+    check(
+      "support_grants_duration",
+      sql`${t.expiresAt} > ${t.createdAt} and ${t.expiresAt} <= ${t.createdAt} + interval '7 days'`,
+    ),
+  ],
+);
+
+/** Every page support opened and every form it sent during a grant, shown to the Proprietor. */
+export const supportViews = pgTable(
+  "support_views",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    grantId: uuid("grant_id").notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    path: text("path").notNull(),
+    /** view: a page was opened; action: a form was sent (the change itself is in the audit log). */
+    kind: text("kind", { enum: ["view", "action"] }).notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("support_views_grant_time_idx").on(t.tenantId, t.grantId, t.at),
+    foreignKey({
+      name: "support_views_grant_fk",
+      columns: [t.tenantId, t.grantId],
+      foreignColumns: [supportGrants.tenantId, supportGrants.id],
+    }),
+  ],
+);
+
+/**
+ * Device tokens for the API (`/api/v1`): mobile apps, other clients and devices that sync offline. Issued
+ * after the same sign-in as the web (password, then the second step when the user has one); only the
+ * SHA-256 of the token is stored. Each is named, listed under Account, Devices, and revocable one by one;
+ * changing or resetting the password revokes them all.
+ */
+export const deviceTokens = pgTable(
+  "device_tokens",
+  {
+    /** SHA-256 of the token (hex), like session ids. */
+    id: text("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    userAgent: text("user_agent"),
+    ipAddress: inet("ip_address"),
+  },
+  (t) => [
+    index("device_tokens_user_idx").on(t.userId),
+    check("device_tokens_name_length", sql`char_length(${t.name}) between 1 and 80`),
+  ],
+);
+
+/**
+ * Operations sent by devices through the sync protocol (`src/server/sync`), recorded once per client
+ * operation id in the same transaction as their effects, so a retried batch never applies anything twice:
+ * a replay returns the stored outcome. Insert-only.
+ */
+export const syncOperations = pgTable(
+  "sync_operations",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    /** Chosen by the device (a UUID), unique per school. */
+    id: uuid("id").notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    kind: text("kind").notNull(),
+    status: text("status", { enum: ["applied", "conflict", "rejected"] }).notNull(),
+    outcome: jsonb("outcome").$type<Record<string, unknown>>(),
+    /** When the device says the change was made (offline changes are sent later). */
+    recordedAt: timestamp("recorded_at", { withTimezone: true }),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.id] }),
+    index("sync_operations_user_idx").on(t.tenantId, t.userId),
+  ],
+);
+
+/**
+ * The change feed for devices: one row per change to records devices keep (students, class placements,
+ * classes, register marks, marks), written by triggers so no code path can forget it. Devices ask for
+ * changes after the last sequence number they saw; entries are kept 90 days.
+ */
+export const syncChanges = pgTable(
+  "sync_changes",
+  {
+    seq: bigserial("seq", { mode: "number" }).primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    entity: text("entity", { enum: ["student", "class", "register", "score"] }).notNull(),
+    entityId: uuid("entity_id").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("sync_changes_tenant_seq_idx").on(t.tenantId, t.seq)],
+);
+
+/**
+ * Portable learner identity (Transfer Passport). Deliberately holds no personal details: names, dates and
+ * records stay in each school's rows, which point here. The id travels in signed learner records, so the
+ * receiving school links its new student to the same learner.
+ */
+export const learners = pgTable("learners", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Signed learner records issued by a school (Transfer Passport): the record exactly as signed, its
+ * SHA-256 and the Ed25519 signature. Never edited; a record can be revoked (once) if issued in error, which
+ * verification then reports.
+ */
+export const learnerRecords = pgTable(
+  "learner_records",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    learnerId: uuid("learner_id")
+      .notNull()
+      .references(() => learners.id, { onDelete: "restrict" }),
+    studentId: uuid("student_id").notNull(),
+    purpose: text("purpose", { enum: ["transfer", "export"] }).notNull(),
+    /** The signed record (its canonical JSON is what was signed). */
+    record: jsonb("record").$type<Record<string, unknown>>().notNull(),
+    sha256: text("sha256").notNull(),
+    keyId: text("key_id").notNull(),
+    signature: text("signature").notNull(),
+    issuedByUserId: uuid("issued_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedReason: text("revoked_reason"),
+  },
+  (t) => [
+    unique("learner_records_tenant_id_unique").on(t.tenantId, t.id),
+    index("learner_records_student_idx").on(t.tenantId, t.studentId),
+    foreignKey({
+      name: "learner_records_student_fk",
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }),
+  ],
+);
+
+export const TRANSFER_STATUSES = [
+  "awaiting_consent",
+  "awaiting_origin",
+  "approved",
+  "completed",
+  "declined",
+  "cancelled",
+] as const;
+
+/**
+ * A move between two independent schools (Transfer Passport). Visible to both schools (row-level security
+ * on either school id); what each sees is narrowed further by the service (the school a child is leaving
+ * sees nothing until the family has consented). The family consents in the parent view, the school being
+ * left approves (issuing a signed record, copied here) or declines, and the receiving school accepts,
+ * which creates its student linked to the same learner.
+ */
+export const transfers = pgTable(
+  "transfers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    fromTenantId: uuid("from_tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    toTenantId: uuid("to_tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    /** guardian: started by the family in the parent view; school: requested by the receiving school. */
+    requestedBy: text("requested_by", { enum: ["guardian", "school"] }).notNull(),
+    requestedByUserId: uuid("requested_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    /** The child as the requester described them (the receiving school is not told whether they match). */
+    childFirstName: text("child_first_name").notNull(),
+    childLastName: text("child_last_name").notNull(),
+    childDateOfBirth: date("child_date_of_birth", { mode: "string" }),
+    /** E.164: the guardian whose consent is needed (a number the school being left has on file). */
+    guardianPhone: text("guardian_phone").notNull(),
+    /** The student at the school being left, once matched. */
+    fromStudentId: uuid("from_student_id"),
+    status: text("status", { enum: TRANSFER_STATUSES }).notNull(),
+    consentPhone: text("consent_phone"),
+    consentedAt: timestamp("consented_at", { withTimezone: true }),
+    decidedByUserId: uuid("decided_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    declineReason: text("decline_reason"),
+    recordId: uuid("record_id").references(() => learnerRecords.id, { onDelete: "restrict" }),
+    /** The signed package, copied here on approval so the receiving school can read and verify it. */
+    package: jsonb("package").$type<Record<string, unknown>>(),
+    acceptedByUserId: uuid("accepted_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    toStudentId: uuid("to_student_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("transfers_from_idx").on(t.fromTenantId, t.status),
+    index("transfers_to_idx").on(t.toTenantId, t.status),
+    check("transfers_two_schools", sql`${t.fromTenantId} <> ${t.toTenantId}`),
+  ],
+);
+
+/**
+ * Records a school received about one of its students from a previous school: through a transfer on
+ * EduBridge (verified), or imported from a file (verified when it carries a valid EduBridge signature,
+ * otherwise kept as unverified). Insert-only; the original is kept exactly as received.
+ */
+export const priorRecords = pgTable(
+  "prior_records",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    studentId: uuid("student_id").notNull(),
+    source: text("source", { enum: ["transfer", "import"] }).notNull(),
+    verified: boolean("verified").notNull(),
+    issuerName: text("issuer_name").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }),
+    /** The issuing school's record id, when it came from EduBridge. */
+    sourceRecordId: uuid("source_record_id"),
+    sha256: text("sha256").notNull(),
+    package: jsonb("package").$type<Record<string, unknown>>().notNull(),
+    importedByUserId: uuid("imported_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    importedAt: timestamp("imported_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("prior_records_student_idx").on(t.tenantId, t.studentId),
+    foreignKey({
+      name: "prior_records_student_fk",
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }),
+  ],
+);
+
+/**
+ * Every question asked of the school assistant (AI), with the records it read (tool calls and their
+ * inputs), its answer, the model and token use. Insert-only, visible to those who see the audit log.
+ * Questions asked by EduBridge support during a support grant carry the grant, as audit events do.
+ */
+export const assistantQueries = pgTable(
+  "assistant_queries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    question: text("question").notNull(),
+    answer: text("answer"),
+    status: text("status", { enum: ["answered", "refused", "failed"] }).notNull(),
+    /** Each record the assistant read: tool name, input, and whether the person's role allowed it. */
+    tools: jsonb("tools").$type<{ name: string; input: unknown; allowed: boolean }[]>().notNull().default([]),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    supportGrantId: uuid("support_grant_id").default(
+      sql`nullif(current_setting('app.support_grant_id', true), '')::uuid`,
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("assistant_queries_tenant_time_idx").on(t.tenantId, t.createdAt),
+    check("assistant_queries_question_length", sql`char_length(${t.question}) between 1 and 500`),
   ],
 );

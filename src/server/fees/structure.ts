@@ -3,7 +3,7 @@ import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { parseCedis, sumPesewas } from "@/lib/money";
 import { recordAudit } from "../audit/record";
-import { assertCan } from "../authz/permissions";
+import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import { academicYears, classes, feeItems, feeStructureLines, levels, terms } from "../db/schema";
@@ -60,7 +60,11 @@ export const SUGGESTED_FEE_ITEMS = [
   "ICT",
 ] as const;
 
-const scope = (ctx: TenantContext) => ({ tenantId: ctx.tenant.id, userId: ctx.userId });
+const scope = (ctx: TenantContext) => ({
+  tenantId: ctx.tenant.id,
+  userId: ctx.userId,
+  supportGrantId: ctx.support?.grantId,
+});
 const itemName = z.string().trim().min(1, "Enter a name.").max(60, "Use 60 characters or fewer.");
 
 function duplicateName(error: unknown): never {
@@ -70,7 +74,7 @@ function duplicateName(error: unknown): never {
 }
 
 export async function listFeeItems(database: Database, ctx: TenantContext): Promise<FeeItem[]> {
-  assertCan(ctx.roles, "fees.view");
+  assertAllowed(ctx, "fees.view");
   return withTenant(database, scope(ctx), (tx) => selectItems(tx, ctx));
 }
 
@@ -192,7 +196,7 @@ export async function setFeeItemStatus(
 
 /** Every term, newest first, with how many fee amounts it has (for choosing and copying structures). */
 export async function listFeeTerms(database: Database, ctx: TenantContext): Promise<FeeTerm[]> {
-  assertCan(ctx.roles, "fees.view");
+  assertAllowed(ctx, "fees.view");
   return withTenant(database, scope(ctx), async (tx) => {
     const rows = await tx
       .select({
@@ -215,7 +219,7 @@ export async function getFeeStructure(
   ctx: TenantContext,
   termId: string,
 ): Promise<FeeStructure> {
-  assertCan(ctx.roles, "fees.view");
+  assertAllowed(ctx, "fees.view");
   return withTenant(database, scope(ctx), async (tx) => {
     // Sequential: queries in one transaction share a connection.
     const allItems = await selectItems(tx, ctx);

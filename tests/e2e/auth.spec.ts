@@ -37,17 +37,37 @@ test("signs out and invalidates the session", async ({ page }) => {
   await expect(page).toHaveURL(/\/login/);
 });
 
-test("the API accepts the session as a bearer token", async ({ page, request }) => {
+test("the API reads with the web session, but takes only device tokens as bearer tokens", async ({
+  page,
+  request,
+}) => {
   await signIn(page, "teacher@example.test");
   const cookie = (await page.context().cookies()).find((c) => c.name.endsWith("eb_session"));
   expect(cookie).toBeDefined();
   const unauthenticated = await request.get("/api/v1/me", { headers: { cookie: "" } });
   expect(unauthenticated.status()).toBe(401);
-  const response = await request.get("/api/v1/me", { headers: { authorization: `Bearer ${cookie!.value}` } });
+  // A web session token is not a device token: refused as a bearer token.
+  const asBearer = await request.get("/api/v1/me", {
+    headers: { cookie: "", authorization: `Bearer ${cookie!.value}` },
+  });
+  expect(asBearer.status()).toBe(401);
+  // The browser's own session cookie may read.
+  const response = await page.request.get("/api/v1/me");
   expect(response.status()).toBe(200);
   const body = await response.json();
   expect(body.user.email).toBe("teacher@example.test");
   expect(body.schools.map((s: { slug: string }) => s.slug)).toEqual(
     expect.arrayContaining(["kpone-ridge", "adenta-hall"]),
   );
+  // A device signs in for a token of its own.
+  const signedIn = await request.post("/api/v1/auth/token", {
+    headers: { cookie: "" },
+    data: { identifier: "teacher@example.test", password: "edubridge-dev-only", deviceName: "Playwright" },
+  });
+  const { token } = await signedIn.json();
+  expect(token).toMatch(/^ebd_/);
+  const withToken = await request.get("/api/v1/me", {
+    headers: { cookie: "", authorization: `Bearer ${token}` },
+  });
+  expect(withToken.status()).toBe(200);
 });

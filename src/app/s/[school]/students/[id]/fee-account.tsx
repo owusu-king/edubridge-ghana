@@ -73,6 +73,7 @@ export function FeeAccount({
     /** Whether prompts can be sent (a provider is configured). */
     enabled: boolean;
     testMode: boolean;
+    testHint: string | null;
     requests: MobileMoneyRequestRow[];
     phones: PayerPhone[];
     timeZone: string;
@@ -119,6 +120,7 @@ export function FeeAccount({
                 defaultAmount={account.balancePesewas > 0 ? pesewasToInput(account.balancePesewas) : ""}
                 phones={mobileMoney.phones}
                 testMode={mobileMoney.testMode}
+                testHint={mobileMoney.testHint}
               />
             )}
           </div>
