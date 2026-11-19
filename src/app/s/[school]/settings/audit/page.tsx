@@ -64,9 +64,11 @@ export default async function AuditPage({
                     <TD className="text-ink">{auditLabel(entry.action)}</TD>
                     <TD
                       className="hidden max-w-md truncate md:table-cell"
-                      title={auditSummary(entry.metadata)}
+                      title={auditSummary(entry.metadata, ctx.tenant.currencyCode)}
                     >
-                      {auditSummary(entry.metadata) || <span className="text-ink-3">—</span>}
+                      {auditSummary(entry.metadata, ctx.tenant.currencyCode) || (
+                        <span className="text-ink-3">—</span>
+                      )}
                     </TD>
                   </TR>
                 ))}

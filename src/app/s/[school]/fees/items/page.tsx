@@ -20,6 +20,10 @@ import {
   SetupFeeItemsDialog,
 } from "../fee-controls";
 
+import { FeeItemDetailsForm } from "@/components/fees/finance-forms";
+import { FEE_CATEGORY_LABELS } from "@/server/fees/structure";
+import { saveFeeItemDetailsAction } from "../finance-actions";
+
 export const metadata: Metadata = { title: "Fees · Fee items" };
 
 export default async function FeeItemsPage({ params }: { params: Promise<{ school: string }> }) {
@@ -63,6 +67,7 @@ export default async function FeeItemsPage({ params }: { params: Promise<{ schoo
             <THead>
               <tr>
                 <TH>Item</TH>
+                <TH>Category and billing</TH>
                 <TH>Status</TH>
                 {canManage && (
                   <TH>
@@ -75,6 +80,22 @@ export default async function FeeItemsPage({ params }: { params: Promise<{ schoo
               {items.map((item) => (
                 <TR key={item.id}>
                   <TD className="font-medium text-ink">{item.name}</TD>
+                  <TD>
+                    {canManage ? (
+                      <FeeItemDetailsForm
+                        action={saveFeeItemDetailsAction.bind(null, slug, item.id)}
+                        category={item.category}
+                        optional={item.optional}
+                        categories={Object.entries(FEE_CATEGORY_LABELS)}
+                        name={item.name}
+                      />
+                    ) : (
+                      <span className="text-sm text-ink-2">
+                        {FEE_CATEGORY_LABELS[item.category]}
+                        {item.optional ? ", optional" : ""}
+                      </span>
+                    )}
+                  </TD>
                   <TD>
                     {item.status === "active" ? (
                       <StatusText tone="positive">In use</StatusText>

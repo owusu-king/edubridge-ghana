@@ -1,14 +1,17 @@
 import "server-only";
+import { moduleActive } from "../entitlements/service";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import type { Database, Transaction } from "../db/client";
 import { setTenantContext, withTenant } from "../db/context";
-import { guardians, tenantEntitlements, tenants } from "../db/schema";
+import { guardians, tenants } from "../db/schema";
 
 export interface ParentSchoolRef {
   id: string;
   slug: string;
   name: string;
   timezone: string;
+  countryCode: string;
+  currencyCode: string;
 }
 
 /**
@@ -21,7 +24,14 @@ export async function schoolsForPhone(database: Database, phone: string): Promis
   const found = await database.transaction(async (tx) => {
     await tx.execute(sql`select set_config('app.parent_phone', ${phone}, true)`);
     return tx
-      .selectDistinct({ id: tenants.id, slug: tenants.slug, name: tenants.name, timezone: tenants.timezone })
+      .selectDistinct({
+        id: tenants.id,
+        slug: tenants.slug,
+        name: tenants.name,
+        timezone: tenants.timezone,
+        countryCode: tenants.countryCode,
+        currencyCode: tenants.currencyCode,
+      })
       .from(guardians)
       .innerJoin(tenants, eq(tenants.id, guardians.tenantId))
       .where(
@@ -42,11 +52,7 @@ export async function schoolsForPhone(database: Database, phone: string): Promis
 /** In the tenant transaction given: the school's plan includes the parent view (no plan row: it does). */
 export async function planIncludesParentView(tx: Transaction, tenantId: string): Promise<boolean> {
   await setTenantContext(tx, { tenantId, userId: "" });
-  const [plan] = await tx
-    .select({ features: tenantEntitlements.features })
-    .from(tenantEntitlements)
-    .where(eq(tenantEntitlements.tenantId, tenantId));
-  return !plan || plan.features.includes("parent_view");
+  return moduleActive(tx, tenantId, "parent_view");
 }
 
 async function offersParentView(database: Database, tenantId: string): Promise<boolean> {
@@ -56,7 +62,14 @@ async function offersParentView(database: Database, tenantId: string): Promise<b
 /** An active school by slug, for the parent view (never a demo school; access is checked separately). */
 export async function schoolBySlug(database: Database, slug: string): Promise<ParentSchoolRef | null> {
   const [row] = await database
-    .select({ id: tenants.id, slug: tenants.slug, name: tenants.name, timezone: tenants.timezone })
+    .select({
+      id: tenants.id,
+      slug: tenants.slug,
+      name: tenants.name,
+      timezone: tenants.timezone,
+      countryCode: tenants.countryCode,
+      currencyCode: tenants.currencyCode,
+    })
     .from(tenants)
     .where(and(eq(tenants.slug, slug), eq(tenants.status, "active"), eq(tenants.isDemo, false)))
     .limit(1);

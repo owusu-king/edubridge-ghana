@@ -1,18 +1,22 @@
 "use client";
 
 import { useActionState } from "react";
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import type { FormState } from "@/web/forms";
+import { currencySymbol } from "@/lib/money";
+import { FormMessage } from "@/components/ui/toast";
 
 /** SMS the school sends on its own: payment receipts and automatic fee reminders. Each SMS is charged. */
 export function MessageSettingsForm({
+  currency,
   action,
   defaults,
   example,
   smsPrice,
 }: {
+  /** The school's currency (ISO 4217). */
+  currency: string;
   action: (prev: FormState, formData: FormData) => Promise<FormState>;
   defaults: {
     paymentReceiptSms: boolean;
@@ -31,9 +35,7 @@ export function MessageSettingsForm({
     v ? v[name] === "on" : defaults[name];
   return (
     <form action={formAction} className="max-w-2xl space-y-8" noValidate>
-      {state.status !== "idle" && state.message && (
-        <Alert tone={state.status === "success" ? "positive" : "critical"}>{state.message}</Alert>
-      )}
+      {state.status !== "idle" && state.message && <FormMessage state={state} />}
       <p className="text-sm text-ink-3">
         Each SMS is charged to the school{smsPrice ? ` (${smsPrice} each)` : ""} and counts towards your
         plan&apos;s monthly SMS limit.
@@ -90,7 +92,10 @@ export function MessageSettingsForm({
               />
             )}
           </Field>
-          <Field label="To families owing at least (GH₵)" error={errors.autoReminderMin}>
+          <Field
+            label={`To families owing at least (${currencySymbol(currency)})`}
+            error={errors.autoReminderMin}
+          >
             {(p) => (
               <Input
                 {...p}

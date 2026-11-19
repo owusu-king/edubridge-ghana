@@ -53,8 +53,9 @@ export default async function DataExportPage({ params }: { params: Promise<{ sch
         </ul>
       )}
       <p className="text-sm text-ink-3">
-        Amounts are in cedis with two decimal places; dates are written as year-month-day. Files contain
-        personal information about students and families: store and share them with care.
+        Amounts are in the school&apos;s currency as plain numbers with its decimal places; dates are written
+        as year-month-day. Files contain personal information about students and families: store and share
+        them with care.
       </p>
     </Section>
   );

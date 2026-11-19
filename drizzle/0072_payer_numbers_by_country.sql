@@ -1,0 +1,2 @@
+ALTER TABLE "mobile_money_requests" DROP CONSTRAINT "mobile_money_requests_msisdn";--> statement-breakpoint
+ALTER TABLE "mobile_money_requests" ADD CONSTRAINT "mobile_money_requests_msisdn" CHECK ("mobile_money_requests"."msisdn" ~ '^[+][1-9][0-9]{7,14}$');

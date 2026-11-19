@@ -2,6 +2,7 @@ import type { Metadata, Route } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Figures } from "@/components/overview/figures";
+import { ProgressRings, type Ring } from "@/components/charts/rings-interactive";
 import { PageHeader, Section } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { allowed } from "@/server/authz/permissions";
@@ -17,7 +18,7 @@ import {
   seesFinance,
 } from "@/server/insights/service";
 import { formatCalendarDate } from "@/lib/format";
-import { formatCedis } from "@/lib/money";
+import { moneyFormatter } from "@/lib/money";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 
@@ -53,6 +54,7 @@ function Bar({ value, tone = "accent" }: { value: number | null; tone?: "accent"
 export default async function InsightsPage({ params }: { params: Promise<{ school: string }> }) {
   const { school } = await params;
   const { ctx } = await requireTenant(school);
+  const showMoney = moneyFormatter(ctx.tenant.currencyCode);
   if (!allowed(ctx, "insights.view")) notFound();
   const slug = ctx.tenant.slug;
   const academics = seesAcademics(ctx);
@@ -65,6 +67,33 @@ export default async function InsightsPage({ params }: { params: Promise<{ schoo
     getFinanceInsights(db(), ctx),
     getOperationsInsights(db(), ctx),
   ]);
+  // This term at a glance: each share out of 100 the member may see and that has records behind it.
+  const now = trends.find((t) => t.current);
+  const rings: Ring[] = [];
+  if (now && finance && now.collectionRate !== null)
+    rings.push({
+      label: "Fees collected",
+      value: now.collectionRate,
+      display: `${now.collectionRate}%`,
+      detail: `${showMoney(now.collectedPesewas ?? 0)} of ${showMoney(now.billedPesewas ?? 0)} billed`,
+      tone: "accent",
+    });
+  if (now && academics && now.attendanceRate !== null)
+    rings.push({
+      label: "Attendance",
+      value: now.attendanceRate,
+      display: `${now.attendanceRate}%`,
+      detail: `Late on ${pct(now.latenessRate)} of register marks`,
+      tone: "positive",
+    });
+  if (now && academics && now.averageScore !== null)
+    rings.push({
+      label: "Average result",
+      value: now.averageScore,
+      display: `${now.averageScore}`,
+      detail: `Out of 100, from ${now.publishedCards} report cards`,
+      tone: "neutral",
+    });
   const studentLink = (id: string, name: string) => (
     <Link href={schoolPath(slug, `students/${id}`) as Route} className="text-accent hover:underline">
       {name}
@@ -77,6 +106,14 @@ export default async function InsightsPage({ params }: { params: Promise<{ schoo
         title="Insights"
         description="The school term by term, the students to follow up and the work still outstanding. Every figure is counted from the school's records: published report cards, registers, fees and receipts."
       />
+
+      {now && rings.length > 0 && (
+        <Section title="This term" description={now.label}>
+          <div className="rounded-lg border border-line bg-surface p-5 sm:p-6">
+            <ProgressRings label={`This term, ${now.label}`} rings={rings} />
+          </div>
+        </Section>
+      )}
 
       <Section title="Term by term" description="The last six terms that have started.">
         {trends.length === 0 ? (
@@ -114,8 +151,8 @@ export default async function InsightsPage({ params }: { params: Promise<{ schoo
                         <span className="block text-xs text-ink-3">{t.publishedCards} report cards</span>
                       </TD>
                     )}
-                    {finance && <TD numeric>{formatCedis(t.billedPesewas ?? 0)}</TD>}
-                    {finance && <TD numeric>{formatCedis(t.collectedPesewas ?? 0)}</TD>}
+                    {finance && <TD numeric>{showMoney(t.billedPesewas ?? 0)}</TD>}
+                    {finance && <TD numeric>{showMoney(t.collectedPesewas ?? 0)}</TD>}
                     {finance && <TD numeric>{pct(t.collectionRate)}</TD>}
                   </TR>
                 ))}
@@ -307,14 +344,14 @@ export default async function InsightsPage({ params }: { params: Promise<{ schoo
             items={[
               {
                 label: "Overdue on payment plans",
-                value: formatCedis(money.planDue.overduePesewas),
+                value: showMoney(money.planDue.overduePesewas),
                 href: schoolPath(slug, "fees/owing"),
               },
-              { label: "Plan instalments due in 30 days", value: formatCedis(money.planDue.next30Pesewas) },
-              { label: "Due in 31 to 60 days", value: formatCedis(money.planDue.next60Pesewas) },
+              { label: "Plan instalments due in 30 days", value: showMoney(money.planDue.next30Pesewas) },
+              { label: "Due in 31 to 60 days", value: showMoney(money.planDue.next60Pesewas) },
               {
                 label: "Due in 61 to 90 days",
-                value: formatCedis(money.planDue.next90Pesewas),
+                value: showMoney(money.planDue.next90Pesewas),
                 note: `${money.planDue.plans} active plans`,
               },
             ]}
@@ -336,9 +373,9 @@ export default async function InsightsPage({ params }: { params: Promise<{ schoo
                     <TR key={l.levelName}>
                       <TD className="text-ink">{l.levelName}</TD>
                       <TD numeric>{l.students}</TD>
-                      <TD numeric>{formatCedis(l.billedPesewas)}</TD>
-                      <TD numeric>{formatCedis(l.collectedPesewas)}</TD>
-                      <TD numeric>{formatCedis(l.owedPesewas)}</TD>
+                      <TD numeric>{showMoney(l.billedPesewas)}</TD>
+                      <TD numeric>{showMoney(l.collectedPesewas)}</TD>
+                      <TD numeric>{showMoney(l.owedPesewas)}</TD>
                     </TR>
                   ))}
                 </TBody>

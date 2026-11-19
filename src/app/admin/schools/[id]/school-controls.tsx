@@ -1,19 +1,19 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/field";
 import type { FormState } from "@/web/forms";
 import type { InviteResult } from "../../actions";
 import { InviteLinkPanel } from "@/components/ui/invite-link";
+import { FormMessage } from "@/components/ui/toast";
 
 type Action<T = undefined> = (prev: FormState<T>, formData: FormData) => Promise<FormState<T>>;
 
 function Message({ state }: { state: FormState<unknown> }) {
   if (state.status === "idle" || !state.message) return null;
-  return <Alert tone={state.status === "success" ? "positive" : "critical"}>{state.message}</Alert>;
+  return <FormMessage state={state} />;
 }
 
 export function StatusControl({
@@ -52,7 +52,7 @@ export function StatusControl({
         }
       >
         <form action={formAction} className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => setOpen(false)}>
+          <Button variant="ghost" onClick={() => setOpen(false)}>
             Cancel
           </Button>
           <Button type="submit" variant={suspending ? "danger" : "primary"} pending={pending}>

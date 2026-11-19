@@ -8,7 +8,7 @@ test("the head teacher adds a school holiday from the suggestions and removes it
 
   // Republic Day falls in Term 3 of the seeded year, so no other test's registers are affected.
   await page.getByRole("button", { name: "Public holidays 2026/2027" }).click();
-  const dialog = page.getByRole("dialog", { name: "Ghana's public holidays, 2026/2027" });
+  const dialog = page.getByRole("dialog", { name: "Public holidays in Ghana, 2026/2027" });
   for (const box of await dialog.getByRole("checkbox").all())
     if (!(await box.isDisabled())) await box.uncheck();
   await dialog.getByRole("checkbox", { name: /^Republic Day/ }).check();

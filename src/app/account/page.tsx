@@ -1,37 +1,49 @@
 import type { Metadata } from "next";
-import { Section } from "@/components/ui/layout";
-import { PASSWORD_MIN_LENGTH } from "@/server/auth/password";
+import { SettingRow } from "@/components/ui/layout";
 import { getVerifiedPhone } from "@/server/auth/phone";
 import { db } from "@/server/db/client";
 import { requireUser } from "@/web/auth";
 import { PhoneSection } from "./phone-form";
-import { PasswordForm, ProfileForm, SignOutOthersForm } from "./account-forms";
+import { ProfileForm } from "./account-forms";
+import { PushToggle } from "@/components/parents/push-toggle";
+import { pushPublicKey } from "@/server/parents/push";
+import { removeStaffPushAction, saveStaffPushAction } from "./actions";
 
 export const metadata: Metadata = { title: "Profile" };
 
+/** Who you are and how to reach you: your name, your phone and notifications on this device. */
 export default async function AccountPage() {
   const user = await requireUser();
   const phone = await getVerifiedPhone(db(), user.id);
+  const publicKey = pushPublicKey();
   return (
-    <div className="space-y-12">
-      <Section title="Profile">
+    <div className="divide-y divide-line">
+      <SettingRow
+        title="Name"
+        description="How colleagues see you across EduBridge, in every school you belong to."
+      >
         <ProfileForm name={user.name} />
-      </Section>
-      <Section
+      </SettingRow>
+      <SettingRow
         title="Phone number"
-        description="Used for sign-in and account recovery by SMS. Ghanaian numbers can be entered as 024 123 4567."
+        description="Used for sign-in and account recovery by SMS. Enter it with the country code, or Ghanaian numbers as 024 123 4567."
       >
         <PhoneSection phone={phone} />
-      </Section>
-      <Section title="Password" description="Changing your password signs you out on other devices.">
-        <PasswordForm minLength={PASSWORD_MIN_LENGTH} email={user.email} />
-      </Section>
-      <Section
-        title="Sessions"
-        description="If you signed in on a shared or lost device, end those sessions here."
-      >
-        <SignOutOthersForm />
-      </Section>
+      </SettingRow>
+      {publicKey && (
+        <SettingRow
+          title="Notifications"
+          description="Be told on this device when something needs you. Each device is set separately."
+        >
+          <PushToggle
+            audience="staff"
+            framed={false}
+            publicKey={publicKey}
+            save={saveStaffPushAction}
+            remove={removeStaffPushAction}
+          />
+        </SettingRow>
+      )}
     </div>
   );
 }

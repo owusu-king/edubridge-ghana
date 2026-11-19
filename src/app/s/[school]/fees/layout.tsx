@@ -32,9 +32,21 @@ export default async function FeesLayout({
             { label: "Accounts", href: schoolPath(slug, "fees/accounts") },
             { label: "Owing", href: schoolPath(slug, "fees/owing") },
             { label: "Payments", href: schoolPath(slug, "fees/payments") },
+            ...(allowed(ctx, "payments.record")
+              ? [{ label: "Take payments offline", href: schoolPath(slug, "fees/offline-payments") }]
+              : []),
             { label: "Mobile Money", href: schoolPath(slug, "fees/mobile-money") },
             { label: "Families", href: schoolPath(slug, "fees/families") },
             { label: "Fee items", href: schoolPath(slug, "fees/items") },
+            { label: "Reports", href: schoolPath(slug, "fees/reports") },
+            ...(allowed(ctx, "forecasting.view")
+              ? [{ label: "Forecast", href: schoolPath(slug, "fees/forecast") }]
+              : []),
+            ...(allowed(ctx, "finance_checks.review")
+              ? [{ label: "Checks", href: schoolPath(slug, "fees/checks") }]
+              : []),
+            { label: "Refunds and approvals", href: schoolPath(slug, "fees/approvals") },
+            { label: "Closing", href: schoolPath(slug, "fees/closing") },
           ]}
         />
       </div>

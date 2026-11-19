@@ -77,7 +77,7 @@ async function loadFinanceTerm(
 const reversed = sql`exists (select 1 from ledger_entries r where r.reverses_entry_id = ledger_entries.id)`;
 
 /** A term's fees as billed: charges less discounts, leaving out any that were reversed. */
-async function readBilled(tx: Transaction, ctx: TenantContext, termId: string): Promise<number> {
+export async function readBilled(tx: Transaction, ctx: TenantContext, termId: string): Promise<number> {
   const [row] = await tx
     .select({ total: sql<string>`coalesce(sum(${ledgerEntries.amountPesewas}), 0)` })
     .from(ledgerEntries)

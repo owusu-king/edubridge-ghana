@@ -7,8 +7,9 @@ test("teachers see classes and class teachers, without management controls", asy
   await page.goto(SCHOOL.path);
   await page.getByRole("navigation", { name: "School" }).getByRole("link", { name: "Classes" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Classes" })).toBeVisible();
-  const basic4 = page.getByRole("table", { name: "Classes in Basic 4" });
-  await expect(basic4.getByRole("row", { name: /Basic 4A.*Yaw Boateng/ })).toBeVisible();
+  // One table for every level: Basic 4 has two classes, so each has its own row under the level.
+  const classes = page.getByRole("table", { name: "Classes by level, in promotion order" });
+  await expect(classes.getByRole("row", { name: /Basic 4A.*Yaw Boateng/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Add class/ })).toHaveCount(0);
 });
 
@@ -24,7 +25,7 @@ test("a head teacher adds, edits and archives a class", async ({ page }) => {
   await dialog.getByRole("button", { name: "Add class" }).click();
   await expect(dialog).toBeHidden();
 
-  const table = page.getByRole("table", { name: "Classes in Basic 5" });
+  const table = page.getByRole("table", { name: "Classes by level, in promotion order" });
   const row = table.getByRole("row", { name: new RegExp(name) });
   await expect(row.getByRole("cell", { name: "Not assigned" })).toBeVisible();
 
@@ -35,6 +36,10 @@ test("a head teacher adds, edits and archives a class", async ({ page }) => {
 
   await row.getByRole("button", { name: `Archive ${name}` }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Archive class" }).click();
+  // Archived classes leave the list, and are found again with the Archived filter.
+  await expect(row).toHaveCount(0);
+  await page.getByLabel("Which classes").selectOption("archived");
+  await page.getByRole("button", { name: "Search" }).click();
   await expect(row.getByText("Archived")).toBeVisible();
 
   // Duplicate names at the same campus are refused, with the typed values kept.

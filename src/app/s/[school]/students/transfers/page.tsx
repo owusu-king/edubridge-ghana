@@ -10,7 +10,7 @@ import { db } from "@/server/db/client";
 import { listTransferSchools, listTransfers, type TransferRow } from "@/server/passport/transfers";
 import { listClassOptions } from "@/server/students/service";
 import { formatDate } from "@/lib/format";
-import { formatCedis } from "@/lib/money";
+import { moneyFormatter } from "@/lib/money";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 import {
@@ -49,6 +49,7 @@ const STATUS: Record<
 export default async function TransfersPage({ params }: { params: Promise<{ school: string }> }) {
   const { school } = await params;
   const { ctx } = await requireTenant(school);
+  const showMoney = moneyFormatter(ctx.tenant.currencyCode);
   if (!allowed(ctx, "transfers.manage")) notFound();
   const slug = ctx.tenant.slug;
   const [rows, schools, classes] = await Promise.all([
@@ -118,7 +119,7 @@ export default async function TransfersPage({ params }: { params: Promise<{ scho
                         action={approveTransferAction.bind(null, slug, r.id)}
                         child={r.childName}
                         balance={
-                          r.balancePesewas && r.balancePesewas > 0 ? formatCedis(r.balancePesewas) : null
+                          r.balancePesewas && r.balancePesewas > 0 ? showMoney(r.balancePesewas) : null
                         }
                       />
                     </>

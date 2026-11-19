@@ -26,7 +26,10 @@ test("the class teacher enters marks and sees totals and grades as they type", a
   await expect(row).toContainText("Check marks");
   await classScore.fill("42");
   await page.getByRole("button", { name: "Save scores" }).click();
-  await expect(page.getByRole("status")).toContainText(/marks? saved|No changes/);
+  // The form's own message (the page also has a status area for short confirmations).
+  await expect(page.getByRole("form", { name: /scores$/ }).getByRole("status")).toContainText(
+    /marks? saved|No changes/,
+  );
   await page.reload();
   await expect(page.getByLabel("Akua Owusu, Class score (out of 50)")).toHaveValue("42");
 });

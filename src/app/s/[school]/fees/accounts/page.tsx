@@ -2,24 +2,26 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Users } from "lucide-react";
 import { Button, buttonStyles } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/field";
+import { Select } from "@/components/ui/field";
 import { DescriptionList, EmptyState } from "@/components/ui/layout";
+import { PageNav } from "@/components/ui/page-nav";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { ACCOUNTS_PAGE_SIZE, listAccounts } from "@/server/fees/payments";
 import { listClassOptions } from "@/server/students/service";
-import { formatCedis } from "@/lib/money";
+import { moneyFormatter } from "@/lib/money";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
+import { ExpandingSearch } from "@/components/ui/expanding-search";
 
 export const metadata: Metadata = { title: "Fees · Accounts" };
 
 type Search = { q?: string; class?: string; owing?: string; page?: string };
 
-function Balance({ pesewas }: { pesewas: number }) {
-  if (pesewas > 0) return <span className="font-medium text-ink">{formatCedis(pesewas)}</span>;
-  if (pesewas < 0) return <span className="text-ink-2">{formatCedis(-pesewas)} credit</span>;
+function Balance({ pesewas, showMoney }: { pesewas: number; showMoney: (minor: number) => string }) {
+  if (pesewas > 0) return <span className="font-medium text-ink">{showMoney(pesewas)}</span>;
+  if (pesewas < 0) return <span className="text-ink-2">{showMoney(-pesewas)} credit</span>;
   return <span className="text-ink-3">Paid up</span>;
 }
 
@@ -32,6 +34,7 @@ export default async function AccountsPage({
 }) {
   const [{ school }, search] = await Promise.all([params, searchParams]);
   const { ctx } = await requireTenant(school);
+  const showMoney = moneyFormatter(ctx.tenant.currencyCode);
   const slug = ctx.tenant.slug;
   const classId = search.class && /^[0-9a-f-]{36}$/.test(search.class) ? search.class : undefined;
   const owing = search.owing === "1";
@@ -56,40 +59,37 @@ export default async function AccountsPage({
 
   return (
     <div className="space-y-6">
-      {canImport && (
-        <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <ExpandingSearch
+          form="account-filters"
+          defaultValue={search.q}
+          placeholder="Name or admission number"
+          label="Search by name or admission number"
+          buttonLabel="Find accounts"
+        />
+        {canImport && (
           <Link href={schoolPath(slug, "fees/opening-balances")} className={buttonStyles("secondary")}>
             Import opening balances
           </Link>
-        </div>
-      )}
+        )}
+      </div>
       <DescriptionList
         items={[
           {
             term: filtered ? "Owed by these students" : "Owed to the school",
-            detail: formatCedis(result.owedPesewas),
+            detail: showMoney(result.owedPesewas),
           },
-          { term: "Paid in advance", detail: formatCedis(result.creditPesewas) },
+          { term: "Paid in advance", detail: showMoney(result.creditPesewas) },
         ]}
       />
 
       <form
+        id="account-filters"
         method="get"
         className="flex flex-col gap-2 sm:flex-row sm:items-center"
         role="search"
         aria-label="Find accounts"
       >
-        <label htmlFor="account-search" className="sr-only">
-          Search by name or admission number
-        </label>
-        <Input
-          id="account-search"
-          name="q"
-          type="search"
-          defaultValue={search.q}
-          placeholder="Name or admission number"
-          className="sm:max-w-xs"
-        />
         <label htmlFor="account-class" className="sr-only">
           Class
         </label>
@@ -162,32 +162,14 @@ export default async function AccountsPage({
                       {row.className ?? <span className="text-ink-3">Not in a class</span>}
                     </TD>
                     <TD className="text-right whitespace-nowrap tabular-nums">
-                      <Balance pesewas={row.balancePesewas} />
+                      <Balance showMoney={showMoney} pesewas={row.balancePesewas} />
                     </TD>
                   </TR>
                 ))}
               </TBody>
             </Table>
           </TableFrame>
-          {pages > 1 && (
-            <nav aria-label="Account pages" className="flex items-center justify-between text-sm text-ink-2">
-              <span>
-                Page {result.page} of {pages}
-              </span>
-              <span className="flex gap-2">
-                {result.page > 1 && (
-                  <Link href={pageHref(result.page - 1)} className={buttonStyles("secondary", "sm")}>
-                    Previous
-                  </Link>
-                )}
-                {result.page < pages && (
-                  <Link href={pageHref(result.page + 1)} className={buttonStyles("secondary", "sm")}>
-                    Next
-                  </Link>
-                )}
-              </span>
-            </nav>
-          )}
+          <PageNav label="Account pages" page={result.page} pages={pages} href={pageHref} />
         </>
       )}
     </div>

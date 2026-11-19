@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, eq, gte, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { todayIn } from "@/lib/format";
-import { parseCedis } from "@/lib/money";
+import { formatMoney, minorDigits, parseMoney } from "@/lib/money";
 import { recordAudit } from "../audit/record";
 import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
@@ -91,19 +91,24 @@ export async function readPaymentPlan(
   return { ...plan, progress: planProgress(instalments, Number(paid!.total), today) };
 }
 
-const createSchema = z.object({
-  total: z.string().transform((text, ctx) => {
-    const pesewas = parseCedis(text);
-    if (pesewas === null || pesewas < 200) {
-      ctx.addIssue({ code: "custom", message: "Enter the amount to spread, at least GH₵2.00." });
-      return z.NEVER;
-    }
-    return pesewas;
-  }),
-  count: z.coerce.number().int().min(2, "Use 2 to 12 instalments.").max(12, "Use 2 to 12 instalments."),
-  firstDueOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Enter a date."),
-  frequency: z.enum(FREQUENCIES, { message: "Choose how often." }),
-});
+const createSchema = (currency: string) =>
+  z.object({
+    total: z.string().transform((text, ctx) => {
+      const pesewas = parseMoney(text, currency);
+      const least = 2 * 10 ** minorDigits(currency);
+      if (pesewas === null || pesewas < least) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Enter the amount to spread, at least ${formatMoney(least, currency)}.`,
+        });
+        return z.NEVER;
+      }
+      return pesewas;
+    }),
+    count: z.coerce.number().int().min(2, "Use 2 to 12 instalments.").max(12, "Use 2 to 12 instalments."),
+    firstDueOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Enter a date."),
+    frequency: z.enum(FREQUENCIES, { message: "Choose how often." }),
+  });
 
 /** Agrees an instalment plan with the family. One active plan per student; cancel it to agree a new one. */
 export async function createPaymentPlan(
@@ -113,7 +118,7 @@ export async function createPaymentPlan(
   input: unknown,
 ): Promise<string> {
   assertAllowed(ctx, "fees.manage");
-  const data = createSchema.parse(input);
+  const data = createSchema(ctx.tenant.currencyCode).parse(input);
   const today = todayIn(ctx.tenant.timezone);
   if (data.firstDueOn < today)
     throw new DomainError("past_date", "The first instalment cannot be due in the past.", "firstDueOn");

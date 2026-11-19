@@ -6,6 +6,7 @@ import { changePassword, signOutOtherSessions, updateProfile } from "@/server/au
 import { beginEnrollment, confirmEnrollment, disableMfa, regenerateRecoveryCodes } from "@/server/auth/mfa";
 import { confirmPhoneVerification, removePhone, startPhoneVerification } from "@/server/auth/phone";
 import { db } from "@/server/db/client";
+import { removeStaffPushSubscription, saveStaffPushSubscription } from "@/server/notifications/staff-push";
 import { dispatchAfterResponse } from "@/web/notify";
 import { requireSession } from "@/web/auth";
 import { toFormError, type FormState } from "@/web/forms";
@@ -153,4 +154,27 @@ export async function removePhoneAction(_prev: FormState): Promise<FormState> {
   await removePhone(db(), user.id);
   revalidatePath("/account");
   return { status: "success", message: "Phone number removed." };
+}
+
+type PushAnswer = { ok: true } | { ok: false; message: string };
+
+/** This device turns staff notifications on (PSH-01): the subscription belongs to the current sign-in. */
+export async function saveStaffPushAction(subscription: unknown): Promise<PushAnswer> {
+  const session = await requireSession();
+  try {
+    await saveStaffPushSubscription(
+      db(),
+      { sessionId: session.sessionId, userId: session.user.id },
+      subscription,
+    );
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, message: toFormError(error).message ?? "Notifications could not be turned on." };
+  }
+}
+
+export async function removeStaffPushAction(endpoint: string): Promise<PushAnswer> {
+  const session = await requireSession();
+  await removeStaffPushSubscription(db(), { sessionId: session.sessionId }, endpoint);
+  return { ok: true };
 }

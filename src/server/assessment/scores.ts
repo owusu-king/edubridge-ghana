@@ -9,15 +9,10 @@ import { withTenant } from "../db/context";
 import { assessmentScores, enrolments, reportCards } from "../db/schema";
 import { DomainError } from "../errors";
 import type { TenantContext } from "../tenancy/service";
-import {
-  listAssessableClasses,
-  loadAssessableClass,
-  loadTerm,
-  type AssessableClass,
-  type TermRef,
-} from "./access";
+import { loadTerm, type AssessableClass, type TermRef } from "./access";
 import { classStudents, loadClassTermData } from "./class-data";
 import { ensureScheme, readLevelSubjects, readScheme } from "./setup";
+import { listScoreSheetAccess, loadScoreSheetClass } from "./teaching";
 
 const scope = (ctx: TenantContext) => ({
   tenantId: ctx.tenant.id,
@@ -29,6 +24,10 @@ export interface ClassProgress {
   cls: AssessableClass;
   students: number;
   subjects: number;
+  /** The subjects this member enters marks for here (all of the class's for its class teacher). */
+  mySubjects: { id: string; name: string }[];
+  /** Class teacher or lead: the class overview, remarks and report cards. Subject teachers: their sheets only. */
+  wholeClass: boolean;
   /** Subject sheets where every student has every part scored. */
   completeSheets: number;
   published: number;
@@ -44,9 +43,9 @@ export async function listAssessmentClasses(
   return withTenant(database, scope(ctx), async (tx) => {
     const term = await loadTerm(tx, ctx.tenant.id, termId);
     if (!term) return null;
-    const list = await listAssessableClasses(tx, ctx);
+    const access = await listScoreSheetAccess(tx, ctx);
     const classes: ClassProgress[] = [];
-    for (const cls of list) {
+    for (const { cls, subjectIds, wholeClass } of access) {
       const enrolled = await tx
         .select({ n: sql<number>`count(*)::int` })
         .from(enrolments)
@@ -61,7 +60,8 @@ export async function listAssessmentClasses(
       // Archived classes only appear when they have students this term.
       if (cls.status === "archived" && count === 0) continue;
       const data = await loadClassTermData(tx, ctx.tenant.id, term, cls);
-      const completeSheets = data.subjects.filter(
+      const mine = data.subjects.filter((subject) => subjectIds.includes(subject.id));
+      const completeSheets = mine.filter(
         (subject) =>
           data.students.length > 0 &&
           data.students.every((s) =>
@@ -71,7 +71,9 @@ export async function listAssessmentClasses(
       classes.push({
         cls,
         students: data.students.length,
-        subjects: data.subjects.length,
+        subjects: mine.length,
+        mySubjects: mine.map((m) => ({ id: m.id, name: m.name })),
+        wholeClass,
         completeSheets,
         published: [...data.cards.values()].filter((c) => c.status === "published").length,
       });
@@ -108,7 +110,8 @@ export async function getScoreSheet(
   assertAllowed(ctx, "assessment.enter");
   return withTenant(database, scope(ctx), async (tx) => {
     const term = await loadTerm(tx, ctx.tenant.id, termId);
-    const cls = await loadAssessableClass(tx, ctx, classId);
+    // The class teacher, a lead, or (teaching by subject) this subject's teacher in the class.
+    const cls = await loadScoreSheetClass(tx, ctx, classId, subjectId);
     if (!term || !cls) return null;
     const subject = (await readLevelSubjects(tx, ctx.tenant.id, cls.levelId)).find((s) => s.id === subjectId);
     if (!subject) return null;
@@ -183,7 +186,7 @@ export async function saveScores(
   const changed = cells.filter((c) => c.value.trim() !== c.original.trim());
   return withTenant(database, scope(ctx), async (tx) => {
     const term = await loadTerm(tx, ctx.tenant.id, termId);
-    const cls = await loadAssessableClass(tx, ctx, classId);
+    const cls = await loadScoreSheetClass(tx, ctx, classId, subjectId);
     if (!term || !cls) throw new DomainError("class_not_found", "Class not found.");
     const subject = (await readLevelSubjects(tx, ctx.tenant.id, cls.levelId)).find((s) => s.id === subjectId);
     if (!subject) throw new DomainError("subject_not_found", "This class does not take that subject.");

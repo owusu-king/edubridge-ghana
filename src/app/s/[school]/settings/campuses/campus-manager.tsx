@@ -8,6 +8,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/field";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import type { FormState } from "@/web/forms";
+import { FormMessage } from "@/components/ui/toast";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
 
@@ -26,9 +27,7 @@ export function AddCampusForm({ action, disabledReason }: { action: Action; disa
   const [state, formAction, pending] = useActionState(action, initial);
   return (
     <form action={formAction} className="space-y-3" noValidate>
-      {state.status !== "idle" && state.message && (
-        <Alert tone={state.status === "success" ? "positive" : "critical"}>{state.message}</Alert>
-      )}
+      {state.status !== "idle" && state.message && <FormMessage state={state} />}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
         <Field label="New campus name" error={state.fieldErrors?.name} className="flex-1">
           {(props) => (
@@ -83,7 +82,7 @@ function RenameDialog({
           )}
         </Field>
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
           <Button type="submit" pending={pending}>
@@ -124,7 +123,7 @@ function StatusDialog({
       <form action={formAction} className="space-y-5">
         {state.status === "error" && <Alert tone="critical">{state.message}</Alert>}
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
           <Button type="submit" variant={archiving ? "danger" : "primary"} pending={pending}>

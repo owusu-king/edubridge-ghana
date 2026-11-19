@@ -29,7 +29,8 @@ import {
 
 export const PAYSTACK_TEST_NUMBER = "0551234987";
 
-const NETWORK_CODES: Record<MobileMoneyNetwork, string> = { mtn: "mtn", telecel: "vod", at: "atl" };
+/** Paystack's Mobile Money codes for the Ghanaian networks it supports (the only currency enabled here). */
+const NETWORK_CODES: Partial<Record<MobileMoneyNetwork, string>> = { mtn: "mtn", telecel: "vod", at: "atl" };
 
 /** Charge statuses meaning the payer has been asked (or it already went through): wait for the outcome. */
 const STARTED = new Set(["success", "pay_offline", "pending", "ongoing", "processing", "queued"]);
@@ -110,6 +111,8 @@ export function paystackProvider(config: PaystackConfig): MobileMoneyProvider {
   return {
     name: "paystack",
     testMode,
+    // Ghana only for now; Kenya (M-Pesa) also works with Paystack but needs its own testing first.
+    currencies: ["GHS"],
     testHint: testMode
       ? "Paystack test mode: no money moves. Use the MTN test number 055 123 4987, which approves at once; Paystack declines every other number in test mode."
       : undefined,
@@ -120,6 +123,8 @@ export function paystackProvider(config: PaystackConfig): MobileMoneyProvider {
           "This school's Paystack account is not set up yet, so Mobile Money cannot be used. Ask EduBridge.",
           true,
         );
+      const network = NETWORK_CODES[request.network];
+      if (!network) throw new ProviderError("Paystack does not support this network.", true);
       const digits = request.msisdn.replace(/\D/g, "");
       const local = digits.startsWith("233") ? `0${digits.slice(3)}` : digits;
       const { http, body } = await call("/charge", {
@@ -129,7 +134,7 @@ export function paystackProvider(config: PaystackConfig): MobileMoneyProvider {
           amount: request.amountPesewas,
           currency: request.currency,
           reference: paystackReference(request.tenantId, request.reference),
-          mobile_money: { phone: local, provider: NETWORK_CODES[request.network] },
+          mobile_money: { phone: local, provider: network },
           ...(request.settlementAccount ? { subaccount: request.settlementAccount } : {}),
           metadata: { edubridge_request: request.reference, description: request.payerMessage.slice(0, 120) },
         }),

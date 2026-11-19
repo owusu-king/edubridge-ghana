@@ -1,7 +1,7 @@
 import "server-only";
 import { randomInt, randomUUID } from "node:crypto";
 import { and, eq, gt, isNull, lt, sql } from "drizzle-orm";
-import { normalizePhone } from "@/lib/phone";
+import { normalizePhoneAnywhere } from "@/lib/phone";
 import { hashToken } from "../auth/tokens";
 import type { ClientInfo } from "../auth/sessions";
 import type { Database } from "../db/client";
@@ -52,7 +52,7 @@ export async function requestParentCode(
   now = new Date(),
   limits: CodeLimits = CODE_LIMITS,
 ): Promise<{ requestId: string; phone: string }> {
-  const phone = normalizePhone(String(rawPhone ?? "").slice(0, 32));
+  const phone = normalizePhoneAnywhere(String(rawPhone ?? "").slice(0, 32));
   if (!phone)
     throw new DomainError("phone_invalid", "Enter a valid mobile number, e.g. 024 123 4567.", "phone");
   const ip = client.ipAddress ?? null;

@@ -1,9 +1,10 @@
 import "server-only";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, count, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { parseCedis } from "@/lib/money";
+import { parseMoney } from "@/lib/money";
+import { normalizePhone } from "@/lib/phone";
 import { recordAudit } from "../audit/record";
-import { assertAllowed } from "../authz/permissions";
+import { allowed, assertAllowed } from "../authz/permissions";
 import type { Database } from "../db/client";
 import { withTenant } from "../db/context";
 import {
@@ -18,6 +19,7 @@ import {
   users,
 } from "../db/schema";
 import { DomainError } from "../errors";
+import { readPreferences } from "../tenancy/preferences";
 import type { TenantContext } from "../tenancy/service";
 import { loadFinanceStudent } from "./access";
 
@@ -32,7 +34,7 @@ export interface Concession {
   feeItemName: string | null;
   percentBasisPoints: number | null;
   amountPesewas: number | null;
-  status: "active" | "ended";
+  status: "pending" | "active" | "ended";
   createdBy: string | null;
   createdAt: Date;
 }
@@ -86,45 +88,46 @@ export async function listConcessions(
   });
 }
 
-const addSchema = z
-  .object({
-    label: z
-      .string()
-      .trim()
-      .min(2, "Name the discount, e.g. Academic scholarship.")
-      .max(60, "Use 60 characters or fewer."),
-    feeItemId: z.preprocess((v) => (v === "" ? null : v), z.string().uuid().nullable()),
-    kind: z.enum(["percent", "amount"], { message: "Choose a percentage or an amount." }),
-    value: z.string(),
-  })
-  .transform((v, ctx) => {
-    if (v.kind === "percent") {
-      const bp = parsePercent(v.value);
-      if (bp === null) {
-        ctx.addIssue({ code: "custom", path: ["value"], message: "Enter a percentage from 0.01 to 100." });
+const addSchema = (currency: string) =>
+  z
+    .object({
+      label: z
+        .string()
+        .trim()
+        .min(2, "Name the discount, e.g. Academic scholarship.")
+        .max(60, "Use 60 characters or fewer."),
+      feeItemId: z.preprocess((v) => (v === "" ? null : v), z.string().uuid().nullable()),
+      kind: z.enum(["percent", "amount"], { message: "Choose a percentage or an amount." }),
+      value: z.string(),
+    })
+    .transform((v, ctx) => {
+      if (v.kind === "percent") {
+        const bp = parsePercent(v.value);
+        if (bp === null) {
+          ctx.addIssue({ code: "custom", path: ["value"], message: "Enter a percentage from 0.01 to 100." });
+          return z.NEVER;
+        }
+        return { label: v.label, feeItemId: v.feeItemId, percentBasisPoints: bp, amountPesewas: null };
+      }
+      const pesewas = parseMoney(v.value, currency);
+      if (pesewas === null || pesewas === 0) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["value"],
+          message: "Enter an amount, like 100 or 100.50.",
+        });
         return z.NEVER;
       }
-      return { label: v.label, feeItemId: v.feeItemId, percentBasisPoints: bp, amountPesewas: null };
-    }
-    const pesewas = parseCedis(v.value);
-    if (pesewas === null || pesewas === 0) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["value"],
-        message: "Enter an amount in cedis, like 100 or 100.50.",
-      });
-      return z.NEVER;
-    }
-    if (!v.feeItemId) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["feeItemId"],
-        message: "A fixed amount must come off one fee item.",
-      });
-      return z.NEVER;
-    }
-    return { label: v.label, feeItemId: v.feeItemId, percentBasisPoints: null, amountPesewas: pesewas };
-  });
+      if (!v.feeItemId) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["feeItemId"],
+          message: "A fixed amount must come off one fee item.",
+        });
+        return z.NEVER;
+      }
+      return { label: v.label, feeItemId: v.feeItemId, percentBasisPoints: null, amountPesewas: pesewas };
+    });
 
 /** Adds a concession. It takes effect the next time the term is billed (Fees → Fee structure → Bill). */
 export async function addConcession(
@@ -134,7 +137,7 @@ export async function addConcession(
   input: unknown,
 ): Promise<string> {
   assertAllowed(ctx, "fees.manage");
-  const data = addSchema.parse(input);
+  const data = addSchema(ctx.tenant.currencyCode).parse(input);
   return withTenant(database, scope(ctx), async (tx) => {
     const student = await loadFinanceStudent(tx, ctx, studentId);
     if (!student) throw new DomainError("student_not_found", "Student not found.");
@@ -151,9 +154,27 @@ export async function addConcession(
         );
       if (!item) throw new DomainError("unknown_item", "Choose a fee item.", "feeItemId");
     }
+    // Above the school's threshold, a discount waits for the Proprietor (who approves their own at once).
+    const prefs = await readPreferences(tx, ctx.tenant.id);
+    const overPercent =
+      data.percentBasisPoints !== null &&
+      prefs.discountApprovalBasisPoints !== null &&
+      data.percentBasisPoints > prefs.discountApprovalBasisPoints;
+    const overAmount =
+      data.amountPesewas !== null &&
+      prefs.discountApprovalPesewas !== null &&
+      data.amountPesewas > prefs.discountApprovalPesewas;
+    const pending = (overPercent || overAmount) && !allowed(ctx, "fees.approve_discounts");
     const [row] = await tx
       .insert(feeConcessions)
-      .values({ tenantId: ctx.tenant.id, studentId: student.id, ...data, createdByUserId: ctx.userId })
+      .values({
+        tenantId: ctx.tenant.id,
+        studentId: student.id,
+        ...data,
+        status: pending ? "pending" : "active",
+        createdByUserId: ctx.userId,
+        ...(pending ? {} : { approvedByUserId: ctx.userId, approvedAt: new Date() }),
+      })
       .returning({ id: feeConcessions.id });
     await recordAudit(tx, {
       tenantId: ctx.tenant.id,
@@ -163,6 +184,7 @@ export async function addConcession(
       entityId: student.id,
       metadata: {
         label: data.label,
+        ...(pending ? { awaitingApproval: true } : {}),
         ...(data.percentBasisPoints !== null ? { percent: formatPercent(data.percentBasisPoints) } : {}),
         ...(data.amountPesewas !== null ? { amountPesewas: data.amountPesewas } : {}),
       },
@@ -202,6 +224,77 @@ export async function endConcession(
   });
 }
 
+/** The Proprietor approves a discount above the school's threshold; it is billed from the next billing. */
+export async function approveConcession(
+  database: Database,
+  ctx: TenantContext,
+  concessionId: string,
+): Promise<void> {
+  assertAllowed(ctx, "fees.approve_discounts");
+  if (!z.string().uuid().safeParse(concessionId).success) throw new DomainError("not_found", "Not found.");
+  await withTenant(database, scope(ctx), async (tx) => {
+    const [row] = await tx
+      .update(feeConcessions)
+      .set({ status: "active", approvedByUserId: ctx.userId, approvedAt: new Date(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(feeConcessions.tenantId, ctx.tenant.id),
+          eq(feeConcessions.id, concessionId),
+          eq(feeConcessions.status, "pending"),
+        ),
+      )
+      .returning({ studentId: feeConcessions.studentId, label: feeConcessions.label });
+    if (!row) throw new DomainError("not_found", "This discount is not waiting for approval.");
+    await recordAudit(tx, {
+      tenantId: ctx.tenant.id,
+      actorUserId: ctx.userId,
+      action: "fees.concession_approved",
+      entityType: "student",
+      entityId: row.studentId,
+      metadata: { label: row.label },
+    });
+  });
+}
+
+/** Discounts waiting for the Proprietor's approval, across the school. */
+export async function listPendingConcessions(
+  database: Database,
+  ctx: TenantContext,
+): Promise<
+  {
+    id: string;
+    studentId: string;
+    studentName: string;
+    label: string;
+    percentBasisPoints: number | null;
+    amountPesewas: number | null;
+    requestedBy: string | null;
+    createdAt: Date;
+  }[]
+> {
+  assertAllowed(ctx, "fees.view");
+  return withTenant(database, scope(ctx), async (tx) => {
+    const rows = await tx
+      .select({
+        id: feeConcessions.id,
+        studentId: feeConcessions.studentId,
+        first: students.firstName,
+        last: students.lastName,
+        label: feeConcessions.label,
+        percentBasisPoints: feeConcessions.percentBasisPoints,
+        amountPesewas: feeConcessions.amountPesewas,
+        requestedBy: users.name,
+        createdAt: feeConcessions.createdAt,
+      })
+      .from(feeConcessions)
+      .innerJoin(students, eq(students.id, feeConcessions.studentId))
+      .leftJoin(users, eq(users.id, feeConcessions.createdByUserId))
+      .where(and(eq(feeConcessions.tenantId, ctx.tenant.id), eq(feeConcessions.status, "pending")))
+      .orderBy(asc(feeConcessions.createdAt));
+    return rows.map(({ first, last, ...r }) => ({ ...r, studentName: `${first} ${last}` }));
+  });
+}
+
 export interface Family {
   guardianId: string;
   guardianName: string;
@@ -215,13 +308,30 @@ export interface Family {
   }[];
 }
 
-/** Guardians with two or more active children, for deciding sibling discounts. */
-export async function listFamilies(database: Database, ctx: TenantContext): Promise<Family[]> {
+export const FAMILIES_PAGE_SIZE = 25;
+
+export interface FamiliesPage {
+  families: Family[];
+  /** Families matching the search, on every page. */
+  total: number;
+  page: number;
+}
+
+/**
+ * Guardians with two or more active children, for deciding sibling discounts, a page at a time (a large
+ * school has hundreds). The search matches the guardian's name or phone, or a child's name or admission
+ * number. Campus scope applies to the children: a family counts only if two of its children are visible.
+ */
+export async function listFamilies(
+  database: Database,
+  ctx: TenantContext,
+  input: { q?: string; page?: number } = {},
+): Promise<FamiliesPage> {
   assertAllowed(ctx, "fees.view");
   return withTenant(database, scope(ctx), async (tx) => {
-    const rows = await tx
+    const visible = tx
       .select({
-        guardianId: guardians.id,
+        guardianId: studentGuardians.guardianId,
         guardianName: guardians.fullName,
         phone: guardians.phone,
         studentId: students.id,
@@ -229,7 +339,6 @@ export async function listFamilies(database: Database, ctx: TenantContext): Prom
         lastName: students.lastName,
         admissionNumber: students.admissionNumber,
         className: classes.name,
-        campusId: classes.campusId,
       })
       .from(studentGuardians)
       .innerJoin(guardians, eq(guardians.id, studentGuardians.guardianId))
@@ -242,38 +351,94 @@ export async function listFamilies(database: Database, ctx: TenantContext): Prom
         ),
       )
       .leftJoin(classes, eq(classes.id, enrolments.classId))
-      .where(eq(studentGuardians.tenantId, ctx.tenant.id))
-      .orderBy(asc(guardians.fullName), asc(students.lastName), asc(students.firstName));
-    const visible = rows.filter(
-      (r) => ctx.campusIds === null || (r.campusId !== null && ctx.campusIds.includes(r.campusId)),
+      .where(
+        and(
+          eq(studentGuardians.tenantId, ctx.tenant.id),
+          ctx.campusIds === null
+            ? undefined
+            : ctx.campusIds.length
+              ? inArray(classes.campusId, ctx.campusIds)
+              : sql`false`,
+        ),
+      )
+      .as("visible");
+
+    const conditions: SQL[] = [sql`count(distinct ${visible.studentId}) >= 2`];
+    const q = input.q?.trim().slice(0, 60);
+    if (q) {
+      const pattern = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+      const matches: SQL[] = [
+        sql`${visible.guardianName} ilike ${pattern}`,
+        sql`bool_or((${visible.firstName} || ' ' || ${visible.lastName}) ilike ${pattern} or ${visible.admissionNumber} ilike ${pattern})`,
+      ];
+      const digits = q.replace(/\D/g, "");
+      if (digits.length >= 6 && !/[A-Za-z]/.test(q)) {
+        const full = normalizePhone(q, ctx.tenant.countryCode);
+        matches.push(
+          full
+            ? sql`(${visible.phone} = ${full} or ${visible.phone} like ${`%${digits.replace(/^0/, "")}%`})`
+            : sql`${visible.phone} like ${`%${digits.replace(/^0/, "")}%`}`,
+        );
+      }
+      conditions.push(sql`(${sql.join(matches, sql` or `)})`);
+    }
+    const families = tx
+      .select({ guardianId: visible.guardianId, guardianName: visible.guardianName })
+      .from(visible)
+      .groupBy(visible.guardianId, visible.guardianName, visible.phone)
+      .having(and(...conditions))
+      .as("families");
+
+    const [{ total } = { total: 0 }] = await tx.select({ total: count() }).from(families);
+    const page = Math.min(
+      Math.max(1, Math.floor(input.page ?? 1)),
+      Math.max(1, Math.ceil(total / FAMILIES_PAGE_SIZE)),
     );
-    const byGuardian = new Map<string, typeof visible>();
-    for (const r of visible) byGuardian.set(r.guardianId, [...(byGuardian.get(r.guardianId) ?? []), r]);
-    const families = [...byGuardian.values()].filter((kids) => kids.length >= 2);
-    const studentIds = [...new Set(families.flat().map((r) => r.studentId))];
-    const active = studentIds.length
-      ? await tx
-          .select({ studentId: feeConcessions.studentId, label: feeConcessions.label })
-          .from(feeConcessions)
-          .where(
-            and(
-              eq(feeConcessions.tenantId, ctx.tenant.id),
-              eq(feeConcessions.status, "active"),
-              inArray(feeConcessions.studentId, studentIds),
-            ),
-          )
-      : [];
-    return families.map((kids) => ({
-      guardianId: kids[0]!.guardianId,
-      guardianName: kids[0]!.guardianName,
-      phone: kids[0]!.phone,
-      children: kids.map((k) => ({
-        id: k.studentId,
-        name: `${k.firstName} ${k.lastName}`,
-        admissionNumber: k.admissionNumber,
-        className: k.className,
-        concessions: active.filter((a) => a.studentId === k.studentId).map((a) => a.label),
-      })),
-    }));
+    const ids = (
+      await tx
+        .select({ guardianId: families.guardianId })
+        .from(families)
+        .orderBy(asc(families.guardianName), asc(families.guardianId))
+        .limit(FAMILIES_PAGE_SIZE)
+        .offset((page - 1) * FAMILIES_PAGE_SIZE)
+    ).map((r) => r.guardianId);
+    if (!ids.length) return { families: [], total, page };
+
+    const rows = await tx
+      .select()
+      .from(visible)
+      .where(inArray(visible.guardianId, ids))
+      .orderBy(asc(visible.lastName), asc(visible.firstName), asc(visible.studentId));
+    const active = await tx
+      .select({ studentId: feeConcessions.studentId, label: feeConcessions.label })
+      .from(feeConcessions)
+      .where(
+        and(
+          eq(feeConcessions.tenantId, ctx.tenant.id),
+          eq(feeConcessions.status, "active"),
+          inArray(feeConcessions.studentId, [...new Set(rows.map((r) => r.studentId))]),
+        ),
+      );
+    const labels = new Map<string, string[]>();
+    for (const a of active) labels.set(a.studentId, [...(labels.get(a.studentId) ?? []), a.label]);
+    return {
+      total,
+      page,
+      families: ids.map((guardianId) => {
+        const kids = rows.filter((r) => r.guardianId === guardianId);
+        return {
+          guardianId,
+          guardianName: kids[0]!.guardianName,
+          phone: kids[0]!.phone,
+          children: kids.map((k) => ({
+            id: k.studentId,
+            name: `${k.firstName} ${k.lastName}`,
+            admissionNumber: k.admissionNumber,
+            className: k.className,
+            concessions: labels.get(k.studentId) ?? [],
+          })),
+        };
+      }),
+    };
   });
 }

@@ -21,7 +21,14 @@ export async function queuePaymentReceipt(
   const prefs = await readPreferences(tx, payment.tenantId);
   if (!prefs.paymentReceiptSms) return false;
   const [tenant] = await tx
-    .select({ id: tenants.id, name: tenants.name, timezone: tenants.timezone, isDemo: tenants.isDemo })
+    .select({
+      id: tenants.id,
+      name: tenants.name,
+      slug: tenants.slug,
+      timezone: tenants.timezone,
+      currencyCode: tenants.currencyCode,
+      isDemo: tenants.isDemo,
+    })
     .from(tenants)
     .where(eq(tenants.id, payment.tenantId));
   if (!tenant || tenant.isDemo) return false;
@@ -48,6 +55,8 @@ export async function queuePaymentReceipt(
       amountPesewas: payment.amountPesewas,
       receiptNumber: payment.receiptNumber,
       balancePesewas: Number(balance?.total ?? 0),
+      schoolSlug: tenant.slug,
+      currency: tenant.currencyCode,
     },
   });
   await recordSmsUsage(tx, tenant.id, "payment_receipt", outboxId, payment.studentId);

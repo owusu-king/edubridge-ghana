@@ -21,6 +21,11 @@ export function formatDateTime(value: Date, timeZone: string): string {
   }).format(value);
 }
 
+/** The time of day only, e.g. "14:05", in a time zone. */
+export function formatTime(value: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat(LOCALE, { hour: "2-digit", minute: "2-digit", timeZone }).format(value);
+}
+
 export function initials(name: string): string {
   // Words that start with a letter, so "(Demo)" or "&" never become an initial.
   const parts = name
@@ -63,4 +68,21 @@ export function todayIn(timeZone: string, now: Date = new Date()): string {
     month: "2-digit",
     day: "2-digit",
   }).format(now);
+}
+
+/** "2026-11-20T09:30" in a time zone → the instant. */
+export function localToUtc(local: string, timeZone: string): Date {
+  const asUtc = new Date(`${local}:00Z`);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(asUtc);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  const zoned = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"));
+  return new Date(asUtc.getTime() - (zoned - asUtc.getTime()));
 }

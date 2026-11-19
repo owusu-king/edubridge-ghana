@@ -217,8 +217,8 @@ export async function sendAbsenceAlerts(
           kind: lead.kind,
         },
       });
-      await recordSmsUsage(tx, ctx.tenant.id, "absence_alert", outboxId, studentId);
-      if (allowance !== null) allowance--;
+      const used = await recordSmsUsage(tx, ctx.tenant.id, "absence_alert", outboxId, studentId);
+      if (allowance !== null) allowance -= used;
     }
     await tx
       .insert(absenceAlerts)

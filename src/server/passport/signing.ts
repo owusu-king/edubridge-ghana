@@ -1,21 +1,34 @@
 import "server-only";
-import { createHash, createPrivateKey, createPublicKey, sign, verify, type KeyObject } from "node:crypto";
+import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  generateKeyPairSync,
+  sign,
+  verify,
+  type KeyObject,
+} from "node:crypto";
+import { desc, eq } from "drizzle-orm";
+import { open, seal } from "../auth/secret-box";
+import type { Queryable } from "../db/client";
+import { recordSigningKeys } from "../db/schema";
 import { DomainError } from "../errors";
 
 /**
  * Signing learner records (Transfer Passport) with Ed25519. A record is signed over its canonical JSON
- * (keys sorted, no spaces), so anyone holding the package and EduBridge's public key can check that it was
+ * (keys sorted, no spaces), so anyone holding the package and EduBridge's public keys can check that it was
  * issued by EduBridge for that school and has not been changed by a single character.
  *
- * Keys: RECORD_SIGNING_KEY (Ed25519 private key, PKCS#8, base64 DER or PEM) with RECORD_SIGNING_KEY_ID.
- * Earlier public keys stay trusted for verification through RECORD_SIGNING_PUBLIC_KEYS, a JSON object of
- * key id to SPKI (base64 DER or PEM), so keys can be rotated without invalidating issued records. Outside
- * production a fixed development key is used when none is set; production never trusts it.
+ * Keys are managed by EduBridge staff in the app (Admin, Integrations): generated on the server, private
+ * keys sealed with the application encryption key, one active key for new records, retired keys kept so
+ * every record they signed still verifies. Keys can also come from the environment (RECORD_SIGNING_KEY with
+ * RECORD_SIGNING_KEY_ID, and RECORD_SIGNING_PUBLIC_KEYS for earlier public keys). Outside production a
+ * fixed development key is used when no other key exists; production never trusts it.
  */
 
 export const PACKAGE_FORMAT = "edubridge.learner-record";
 export const PACKAGE_VERSION = 1;
-const DEV_KEY_ID = "dev-1";
+export const DEV_KEY_ID = "dev-1";
 
 /** JSON with object keys sorted at every level and no whitespace: the exact bytes that are signed. */
 export function canonicalJson(value: unknown): string {
@@ -50,8 +63,24 @@ function parsePublic(value: string): KeyObject {
     : createPublicKey({ key: Buffer.from(value, "base64"), format: "der", type: "spki" });
 }
 
-/** The key new records are signed with. */
-export function signingKey(): { keyId: string; privateKey: KeyObject } {
+/** A new key pair, ready to store: the public key as SPKI base64 and the private key sealed. */
+export function generateSigningKey(): { publicKey: string; privateKeySealed: string } {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  return {
+    publicKey: publicKey.export({ format: "der", type: "spki" }).toString("base64"),
+    privateKeySealed: seal(privateKey.export({ format: "der", type: "pkcs8" }).toString("base64")),
+  };
+}
+
+/** The key new records are signed with: the active platform key, else the environment's, else (not in production) the development key. */
+export async function activeSigningKey(
+  database: Queryable,
+): Promise<{ keyId: string; privateKey: KeyObject }> {
+  const [stored] = await database
+    .select({ keyId: recordSigningKeys.keyId, sealed: recordSigningKeys.privateKeySealed })
+    .from(recordSigningKeys)
+    .where(eq(recordSigningKeys.status, "active"));
+  if (stored) return { keyId: stored.keyId, privateKey: parsePrivate(open(stored.sealed)) };
   const configured = process.env.RECORD_SIGNING_KEY;
   if (configured) {
     const keyId = process.env.RECORD_SIGNING_KEY_ID;
@@ -66,28 +95,30 @@ export function signingKey(): { keyId: string; privateKey: KeyObject } {
   return { keyId: DEV_KEY_ID, privateKey: devPrivateKey() };
 }
 
-/** Every public key records may be verified with, by key id. */
-export function trustedKeys(): Map<string, KeyObject> {
+/** Every public key records may be verified with, by key id (active and retired). */
+export async function trustedKeys(database: Queryable): Promise<Map<string, KeyObject>> {
   const keys = new Map<string, KeyObject>();
+  const stored = await database
+    .select({ keyId: recordSigningKeys.keyId, publicKey: recordSigningKeys.publicKey })
+    .from(recordSigningKeys)
+    .orderBy(desc(recordSigningKeys.createdAt));
+  for (const k of stored) keys.set(k.keyId, parsePublic(k.publicKey));
   const configured = process.env.RECORD_SIGNING_KEY;
-  if (configured && process.env.RECORD_SIGNING_KEY_ID)
+  if (configured && process.env.RECORD_SIGNING_KEY_ID && !keys.has(process.env.RECORD_SIGNING_KEY_ID))
     keys.set(process.env.RECORD_SIGNING_KEY_ID, createPublicKey(parsePrivate(configured)));
   const earlier = process.env.RECORD_SIGNING_PUBLIC_KEYS;
   if (earlier)
     for (const [id, value] of Object.entries(JSON.parse(earlier) as Record<string, string>))
-      keys.set(id, parsePublic(value));
+      if (!keys.has(id)) keys.set(id, parsePublic(value));
   if (!production() && !keys.has(DEV_KEY_ID)) keys.set(DEV_KEY_ID, createPublicKey(devPrivateKey()));
   return keys;
 }
 
 /** Public keys for anyone verifying records outside EduBridge (published at /api/v1/passport/keys). */
-export function publishedKeys(): {
-  keyId: string;
-  algorithm: "Ed25519";
-  publicKey: string;
-  development: boolean;
-}[] {
-  return [...trustedKeys()].map(([keyId, key]) => ({
+export async function publishedKeys(
+  database: Queryable,
+): Promise<{ keyId: string; algorithm: "Ed25519"; publicKey: string; development: boolean }[]> {
+  return [...(await trustedKeys(database))].map(([keyId, key]) => ({
     keyId,
     algorithm: "Ed25519" as const,
     publicKey: key.export({ format: "der", type: "spki" }).toString("base64"),
@@ -102,8 +133,11 @@ export interface SignedPackage {
   signature: { algorithm: "Ed25519"; keyId: string; value: string };
 }
 
-export function signRecord(record: Record<string, unknown>): { pkg: SignedPackage; sha256: string } {
-  const { keyId, privateKey } = signingKey();
+export async function signRecord(
+  database: Queryable,
+  record: Record<string, unknown>,
+): Promise<{ pkg: SignedPackage; sha256: string }> {
+  const { keyId, privateKey } = await activeSigningKey(database);
   const bytes = canonicalJson(record);
   const value = sign(null, Buffer.from(bytes, "utf8"), privateKey).toString("base64url");
   return {
@@ -123,7 +157,7 @@ export type SignatureCheck =
   | { status: "invalid"; reason: string };
 
 /** Checks a package's form and signature (not whether it was revoked: see verifyLearnerPackage). */
-export function checkSignature(input: unknown): SignatureCheck {
+export async function checkSignature(database: Queryable, input: unknown): Promise<SignatureCheck> {
   if (!input || typeof input !== "object")
     return { status: "invalid", reason: "This is not a learner record." };
   const pkg = input as Partial<SignedPackage> & { signature?: unknown };
@@ -140,7 +174,7 @@ export function checkSignature(input: unknown): SignatureCheck {
   const sig = pkg.signature as Partial<SignedPackage["signature"]>;
   if (sig.algorithm !== "Ed25519" || typeof sig.keyId !== "string" || typeof sig.value !== "string")
     return { status: "invalid", reason: "The signature is malformed." };
-  const key = trustedKeys().get(sig.keyId);
+  const key = (await trustedKeys(database)).get(sig.keyId);
   if (!key) return { status: "invalid", reason: "It was signed with a key EduBridge does not recognise." };
   let ok = false;
   try {

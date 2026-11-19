@@ -1,16 +1,16 @@
 "use client";
 
 import { useActionState } from "react";
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import type { FormState } from "@/web/forms";
+import { FormMessage } from "@/components/ui/toast";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
 
 function Message({ state }: { state: FormState }) {
   if (state.status === "idle" || !state.message) return null;
-  return <Alert tone={state.status === "success" ? "positive" : "critical"}>{state.message}</Alert>;
+  return <FormMessage state={state} />;
 }
 
 /** Who may void receipts. The Proprietor decides (Settings, Security). */
@@ -218,6 +218,41 @@ export function SchoolContactsForm({
           Save
         </Button>
       </div>
+    </form>
+  );
+}
+
+/** A list of on/off choices with an explanation each, saved together. */
+export function SwitchesForm({
+  action,
+  switches,
+  submitLabel = "Save",
+}: {
+  action: Action;
+  switches: { name: string; label: string; note: string; checked: boolean }[];
+  submitLabel?: string;
+}) {
+  const [state, formAction, pending] = useActionState(action, { status: "idle" } as FormState);
+  return (
+    <form action={formAction} className="max-w-2xl space-y-4">
+      <Message state={state} />
+      {switches.map((s) => (
+        <label key={s.name} className="flex items-start gap-3 text-base text-ink">
+          <input
+            type="checkbox"
+            name={s.name}
+            defaultChecked={state.values ? state.values[s.name] === "on" : s.checked}
+            className="mt-1 size-4 accent-accent"
+          />
+          <span>
+            {s.label}
+            <span className="block text-sm text-ink-3">{s.note}</span>
+          </span>
+        </label>
+      ))}
+      <Button type="submit" variant="secondary" pending={pending}>
+        {submitLabel}
+      </Button>
     </form>
   );
 }

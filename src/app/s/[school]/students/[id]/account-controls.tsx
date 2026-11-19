@@ -5,6 +5,7 @@ import { BadgePercent, Banknote, CalendarClock, History, Plus } from "lucide-rea
 import { Field, Input, Select } from "@/components/ui/field";
 import { FormDialog } from "@/components/ui/form-dialog";
 import type { FormState } from "@/web/forms";
+import { currencySymbol } from "@/lib/money";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
 
@@ -51,11 +52,14 @@ const METHODS = [
 ];
 
 export function RecordPaymentDialog({
+  currency,
   action,
   studentName,
   payerName,
   today,
 }: {
+  /** The school's currency (ISO 4217). */
+  currency: string;
   action: Action;
   studentName: string;
   payerName?: string;
@@ -76,19 +80,29 @@ export function RecordPaymentDialog({
       submitLabel="Record and issue receipt"
       action={action}
     >
-      {(state) => <PaymentFields state={state} payerName={payerName} today={today} />}
+      {(state) => <PaymentFields currency={currency} state={state} payerName={payerName} today={today} />}
     </FormDialog>
   );
 }
 
-function PaymentFields({ state, payerName, today }: { state: FormState; payerName?: string; today: string }) {
+function PaymentFields({
+  currency,
+  state,
+  payerName,
+  today,
+}: {
+  currency: string;
+  state: FormState;
+  payerName?: string;
+  today: string;
+}) {
   // One key per opened form: submitting it twice records a single payment.
   const [key] = useState(() => crypto.randomUUID());
   const [method, setMethod] = useState(state.values?.method ?? "cash");
   return (
     <>
       <input type="hidden" name="idempotencyKey" value={key} />
-      <Field label="Amount (GH₵)" error={state.fieldErrors?.amount}>
+      <Field label={`Amount (${currencySymbol(currency)})`} error={state.fieldErrors?.amount}>
         {(p) => (
           <Input
             {...p}
@@ -128,6 +142,12 @@ function PaymentFields({ state, payerName, today }: { state: FormState; payerNam
           )}
         </Field>
       )}
+      {state.fieldErrors?.reference?.includes("is already on receipt") && (
+        <label className="flex items-start gap-3 text-base text-ink">
+          <input type="checkbox" name="confirmDuplicate" className="mt-1 size-4 accent-accent" />
+          <span>This is a different payment with the same reference</span>
+        </label>
+      )}
       <Field
         label="Received from"
         description="Optional. The person who brought the money."
@@ -158,7 +178,7 @@ function PaymentFields({ state, payerName, today }: { state: FormState; payerNam
   );
 }
 
-export function AdjustmentDialog({ action }: { action: Action }) {
+export function AdjustmentDialog({ currency, action }: { currency: string; action: Action }) {
   return (
     <FormDialog
       trigger={
@@ -194,7 +214,7 @@ export function AdjustmentDialog({ action }: { action: Action }) {
               </label>
             ))}
           </fieldset>
-          <Field label="Amount (GH₵)" error={state.fieldErrors?.amount}>
+          <Field label={`Amount (${currencySymbol(currency)})`} error={state.fieldErrors?.amount}>
             {(p) => (
               <Input
                 {...p}
@@ -227,7 +247,15 @@ export function AdjustmentDialog({ action }: { action: Action }) {
   );
 }
 
-export function OpeningBalanceDialog({ action, asOf }: { action: Action; asOf: string }) {
+export function OpeningBalanceDialog({
+  currency,
+  action,
+  asOf,
+}: {
+  currency: string;
+  action: Action;
+  asOf: string;
+}) {
   return (
     <FormDialog
       trigger={
@@ -246,7 +274,7 @@ export function OpeningBalanceDialog({ action, asOf }: { action: Action; asOf: s
       {(state) => (
         <>
           <Field
-            label="Balance (GH₵)"
+            label={`Balance (${currencySymbol(currency)})`}
             description="For example 450.50 owed, or -120 for a credit."
             error={state.fieldErrors?.amount}
           >
@@ -277,9 +305,12 @@ export function OpeningBalanceDialog({ action, asOf }: { action: Action; asOf: s
 }
 
 export function AddConcessionDialog({
+  currency,
   action,
   items,
 }: {
+  /** The school's currency (ISO 4217). */
+  currency: string;
   action: Action;
   items: { value: string; label: string }[];
 }) {
@@ -298,12 +329,20 @@ export function AddConcessionDialog({
       submitLabel="Add"
       action={action}
     >
-      {(state) => <ConcessionFields state={state} items={items} />}
+      {(state) => <ConcessionFields currency={currency} state={state} items={items} />}
     </FormDialog>
   );
 }
 
-function ConcessionFields({ state, items }: { state: FormState; items: { value: string; label: string }[] }) {
+function ConcessionFields({
+  currency,
+  state,
+  items,
+}: {
+  currency: string;
+  state: FormState;
+  items: { value: string; label: string }[];
+}) {
   const [kind, setKind] = useState(state.values?.kind ?? "percent");
   return (
     <>
@@ -333,7 +372,10 @@ function ConcessionFields({ state, items }: { state: FormState; items: { value: 
           </label>
         ))}
       </fieldset>
-      <Field label={kind === "percent" ? "Percentage (%)" : "Amount (GH₵)"} error={state.fieldErrors?.value}>
+      <Field
+        label={kind === "percent" ? "Percentage (%)" : `Amount (${currencySymbol(currency)})`}
+        error={state.fieldErrors?.value}
+      >
         {(p) => (
           <Input
             {...p}
@@ -382,10 +424,13 @@ export function EndConcessionButton({ action, label }: { action: Action; label: 
 }
 
 export function PaymentPlanDialog({
+  currency,
   action,
   defaultTotal,
   firstDue,
 }: {
+  /** The school's currency (ISO 4217). */
+  currency: string;
   action: Action;
   defaultTotal: string;
   firstDue: string;
@@ -407,7 +452,7 @@ export function PaymentPlanDialog({
     >
       {(state) => (
         <>
-          <Field label="Amount to spread (GH₵)" error={state.fieldErrors?.total}>
+          <Field label={`Amount to spread (${currencySymbol(currency)})`} error={state.fieldErrors?.total}>
             {(p) => (
               <Input
                 {...p}

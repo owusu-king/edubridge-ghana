@@ -4,15 +4,15 @@ import type { Route } from "next";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { FileDown, MessageCircle, MessageSquareText } from "lucide-react";
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { feeReminderSms } from "@/lib/fee-messages";
 import { formatCalendarDate } from "@/lib/format";
-import { formatCedis } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { formatPhone } from "@/lib/phone";
 import type { FormState } from "@/web/forms";
+import { FormMessage } from "@/components/ui/toast";
 
 export interface OwingTableRow {
   studentId: string;
@@ -37,6 +37,7 @@ export interface OwingTableRow {
  * asks for confirmation and says who will be skipped (no phone, already reminded today).
  */
 export function OwingTable({
+  currency,
   rows,
   canRemind,
   canShare,
@@ -45,6 +46,8 @@ export function OwingTable({
   linkPreview,
   send,
 }: {
+  /** The school's currency (ISO 4217). */
+  currency: string;
   rows: OwingTableRow[];
   canRemind: boolean;
   /** WhatsApp links are free (sent from the member's own phone), so the plan does not limit them. */
@@ -86,9 +89,7 @@ export function OwingTable({
 
   return (
     <div className="space-y-4">
-      {result?.message && (
-        <Alert tone={result.status === "success" ? "positive" : "critical"}>{result.message}</Alert>
-      )}
+      {result?.message && <FormMessage state={result} />}
       {canRemind && (
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-base text-ink">
@@ -164,10 +165,10 @@ export function OwingTable({
                   <span className="block text-sm text-ink-3">{r.className ?? "Not in a class"}</span>
                 </TD>
                 <TD className="text-right whitespace-nowrap tabular-nums">
-                  <span className="font-medium text-ink">{formatCedis(r.balancePesewas)}</span>
+                  <span className="font-medium text-ink">{formatMoney(r.balancePesewas, currency)}</span>
                   {r.overduePesewas > 0 && (
                     <span className="block text-sm font-medium text-critical">
-                      {formatCedis(r.overduePesewas)} overdue on plan
+                      {formatMoney(r.overduePesewas, currency)} overdue on plan
                     </span>
                   )}
                 </TD>
@@ -260,7 +261,7 @@ export function OwingTable({
               </p>
             )}
             <div className="flex justify-end gap-2 border-t border-line pt-5">
-              <Button variant="secondary" onClick={() => setConfirming(false)}>
+              <Button variant="ghost" onClick={() => setConfirming(false)}>
                 Cancel
               </Button>
               <Button pending={pending} disabled={willSend === 0} onClick={confirmSend}>

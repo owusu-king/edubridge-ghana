@@ -6,7 +6,7 @@ import { getSchoolBilling } from "@/server/billing/subscriptions";
 import { db } from "@/server/db/client";
 import { getSchoolPreferences } from "@/server/tenancy/preferences";
 import { paymentReceiptSms } from "@/lib/fee-messages";
-import { formatCedis, pesewasToInput } from "@/lib/money";
+import { minorToInput, moneyFormatter } from "@/lib/money";
 import { requireTenant } from "@/web/auth";
 import { saveMessageSettingsAction } from "./actions";
 import { MessageSettingsForm } from "./messages-form";
@@ -16,6 +16,7 @@ export const metadata: Metadata = { title: "Settings · Messages" };
 export default async function MessageSettingsPage({ params }: { params: Promise<{ school: string }> }) {
   const { school } = await params;
   const { ctx } = await requireTenant(school);
+  const showMoney = moneyFormatter(ctx.tenant.currencyCode);
   if (!allowed(ctx, "fees.manage")) notFound();
   const [prefs, billing] = await Promise.all([
     getSchoolPreferences(db(), ctx),
@@ -31,8 +32,9 @@ export default async function MessageSettingsPage({ params }: { params: Promise<
         <p className="text-sm text-ink-3">This is a demo school: messages are recorded but never sent.</p>
       )}
       <MessageSettingsForm
+        currency={ctx.tenant.currencyCode}
         action={saveMessageSettingsAction.bind(null, ctx.tenant.slug)}
-        smsPrice={price !== null && price !== undefined ? formatCedis(price) : null}
+        smsPrice={price !== null && price !== undefined ? showMoney(price) : null}
         example={paymentReceiptSms({
           schoolName: ctx.tenant.name,
           studentFirstName: "Ama",
@@ -44,7 +46,7 @@ export default async function MessageSettingsPage({ params }: { params: Promise<
           paymentReceiptSms: prefs.paymentReceiptSms,
           autoRemindersEnabled: prefs.autoRemindersEnabled,
           autoReminderIntervalDays: prefs.autoReminderIntervalDays,
-          autoReminderMin: pesewasToInput(prefs.autoReminderMinPesewas),
+          autoReminderMin: minorToInput(prefs.autoReminderMinPesewas, ctx.tenant.currencyCode),
         }}
       />
     </Section>

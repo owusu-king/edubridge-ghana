@@ -51,6 +51,8 @@ interface Props {
   classId: string;
   className: string;
   date: string;
+  /** A lesson register: the timetable period (absent for the daily class register). */
+  periodId?: string;
   lock: string | null;
   students: RegisterStudent[];
   send: SendRegister;
@@ -66,10 +68,10 @@ type Message = { tone: "positive" | "critical" | "info"; text: string } | null;
  * changed a mark meanwhile, both are shown and the person chooses: nothing is overwritten silently.
  */
 export function RegisterScreen(props: Props) {
-  const { slug, userId, classId, className, date, send, timeZone } = props;
+  const { slug, userId, classId, className, date, periodId, send, timeZone } = props;
   const timeFormat = new Intl.DateTimeFormat("en-GH", { hour: "2-digit", minute: "2-digit", timeZone });
   const router = useRouter();
-  const key = registerKey(userId, slug, classId, date);
+  const key = registerKey(userId, slug, classId, date, periodId);
   const online = useOnline();
   const [message, setMessage] = useState<Message>(null);
   const [queued, setQueued] = useState<QueuedRegister | undefined>();
@@ -135,7 +137,15 @@ export function RegisterScreen(props: Props) {
   async function submit(marks: QueuedMark[], source: "online" | "kept_mine"): Promise<boolean> {
     setBusy(true);
     try {
-      const entry = { userId, school: slug, classId, className, date, marks };
+      const entry = {
+        userId,
+        school: slug,
+        classId,
+        className,
+        date,
+        marks,
+        ...(periodId ? { periodId } : {}),
+      };
       // Marks already waiting on this device go first, together with these, so they keep their order.
       if (queued) {
         await queueMarks({ ...entry, source: source === "kept_mine" ? "kept_mine" : "offline" });

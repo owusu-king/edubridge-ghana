@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/server/db/client";
-import { postAnnouncement } from "@/server/messages/announcements";
+import { resolveDraft } from "@/server/drafting/service";
+import { cancelScheduledAnnouncement, postAnnouncement } from "@/server/messages/announcements";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 import { toFormError, type FormState } from "@/web/forms";
@@ -23,9 +24,22 @@ export async function postAnnouncementAction(
       audience,
       audienceId: audienceId || null,
       sms: formData.get("sms") === "on",
+      sendAt: formData.get("when") === "later" ? formData.get("sendAt") : undefined,
     });
+    // A drafted announcement: posted as drafted, or changed first (R5-5, DRF-04).
+    await resolveDraft(
+      db(),
+      ctx,
+      String(formData.get("draftId") ?? ""),
+      `${String(formData.get("title") ?? "").trim()}\n\n${String(formData.get("body") ?? "").trim()}`,
+    );
     if (posted.sms) dispatchAfterResponse();
     revalidatePath(schoolPath(slug, "announcements"));
+    if (posted.scheduledFor)
+      return {
+        status: "success",
+        message: "Announcement scheduled. Nothing is sent until then, and you can cancel it until it goes.",
+      };
     return {
       status: "success",
       message: posted.sms
@@ -34,5 +48,16 @@ export async function postAnnouncementAction(
     };
   } catch (error) {
     return toFormError(error, formData);
+  }
+}
+
+export async function cancelScheduledAction(slug: string, id: string, _prev: FormState): Promise<FormState> {
+  const { ctx } = await requireTenant(slug);
+  try {
+    await cancelScheduledAnnouncement(db(), ctx, id);
+    revalidatePath(schoolPath(slug, "announcements"));
+    return { status: "success", message: "Scheduled announcement cancelled." };
+  } catch (error) {
+    return toFormError(error);
   }
 }

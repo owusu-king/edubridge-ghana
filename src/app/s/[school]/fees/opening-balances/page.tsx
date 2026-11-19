@@ -22,6 +22,7 @@ export default async function OpeningBalancesPage({ params }: { params: Promise<
       description="Bring in what each family owed, or had paid in advance, in your records before EduBridge. Each student gets one opening balance."
     >
       <BalancesImport
+        currency={ctx.tenant.currencyCode}
         check={checkBalancesAction.bind(null, slug)}
         runImport={importBalancesAction.bind(null, slug)}
         defaultAsOf={await suggestedAsOf(db(), ctx)}

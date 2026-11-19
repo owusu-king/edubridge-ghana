@@ -25,7 +25,7 @@ export function ReviewDialog({ action, summary }: { action: Action; summary: str
               {...p}
               name="note"
               defaultValue={state.values?.note}
-              placeholder="e.g. GH₵399 arrived; recorded as R000123"
+              placeholder="e.g. 399 arrived; recorded as R000123"
               required
               maxLength={200}
             />

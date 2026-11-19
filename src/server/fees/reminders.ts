@@ -1,4 +1,5 @@
 import "server-only";
+import { readActiveModules } from "../entitlements/service";
 import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { z } from "zod";
 import { addDays } from "@/lib/attendance";
@@ -7,7 +8,7 @@ import { recordAudit } from "../audit/record";
 import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
-import { feeReminders, ledgerEntries, schoolPreferences, tenantEntitlements, tenants } from "../db/schema";
+import { feeReminders, ledgerEntries, schoolPreferences, tenants } from "../db/schema";
 import { readBillingState } from "../billing/state";
 import { recordSmsUsage, smsAllowance } from "../billing/usage";
 import { readPreferences } from "../tenancy/preferences";
@@ -57,7 +58,7 @@ export interface ReminderResult {
 
 /** Who sends reminders: a member, or the school's automatic reminders (no user). */
 export interface ReminderSender {
-  tenant: Pick<TenantContext["tenant"], "id" | "name" | "timezone" | "isDemo">;
+  tenant: Pick<TenantContext["tenant"], "id" | "name" | "timezone" | "isDemo" | "currencyCode">;
   userId: string | null;
   /** Balance links open the parent view, so they are only sent when the plan includes it. */
   withLinks: boolean;
@@ -141,10 +142,11 @@ export async function queueFeeReminders(
           studentFirstName: student.firstName,
           balancePesewas: balance,
           balanceLinkToken,
+          currency: tenant.currencyCode,
         },
       });
-      await recordSmsUsage(tx, tenant.id, "fee_reminder", outboxId, student.id);
-      if (allowance !== null) allowance--;
+      const used = await recordSmsUsage(tx, tenant.id, "fee_reminder", outboxId, student.id);
+      if (allowance !== null) allowance -= used;
     }
   }
   return result;
@@ -235,7 +237,13 @@ export async function runAutoReminders(
   now = new Date(),
 ): Promise<{ schools: number; sent: number }> {
   const schools = await database
-    .select({ id: tenants.id, name: tenants.name, timezone: tenants.timezone, isDemo: tenants.isDemo })
+    .select({
+      id: tenants.id,
+      name: tenants.name,
+      timezone: tenants.timezone,
+      isDemo: tenants.isDemo,
+      currencyCode: tenants.currencyCode,
+    })
     .from(tenants)
     .where(and(eq(tenants.status, "active"), eq(tenants.isDemo, false)));
   let ran = 0;
@@ -255,11 +263,8 @@ export async function runAutoReminders(
       );
       const prefs = await readPreferences(tx, school.id);
       if (!prefs.autoRemindersEnabled || prefs.autoRemindersLastRunOn === today) return null;
-      const [plan] = await tx
-        .select({ features: tenantEntitlements.features })
-        .from(tenantEntitlements)
-        .where(eq(tenantEntitlements.tenantId, school.id));
-      const features = plan?.features ?? ["fee_reminders", "parent_view"];
+      // ENT-06: the same resolver as the staff pages (plan, add-ons, release, dependencies).
+      const features: readonly string[] = await readActiveModules(tx, school, now);
       await tx
         .update(schoolPreferences)
         .set({ autoRemindersLastRunOn: today })

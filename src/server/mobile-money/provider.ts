@@ -14,6 +14,8 @@ export interface MobileMoneyProvider {
   testMode: boolean;
   /** In test mode: how to try it (which numbers approve, decline...), shown to staff. */
   testHint?: string;
+  /** Currencies it can collect (ISO 4217). Without it: GHS only. Schools in other currencies cannot use it. */
+  currencies?: readonly string[];
   requestPayment(request: CollectionRequest): Promise<CollectionStarted>;
   getStatus(ref: CollectionRef): Promise<CollectionStatus>;
   /**
@@ -45,7 +47,8 @@ export interface CollectionRequest {
   /** Our request id; providers that accept a client reference receive this. */
   reference: string;
   amountPesewas: number;
-  currency: "GHS";
+  /** The school's currency, which the provider supports (see `supportsCurrency`). */
+  currency: string;
   /** E.164, e.g. +233241234567. */
   msisdn: string;
   network: MobileMoneyNetwork;
@@ -95,4 +98,9 @@ export class ProviderError extends Error {
     super(message);
     this.name = "ProviderError";
   }
+}
+
+/** Whether a provider can collect in a school's currency. */
+export function supportsCurrency(provider: MobileMoneyProvider, currency: string): boolean {
+  return (provider.currencies ?? ["GHS"]).includes(currency);
 }

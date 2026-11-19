@@ -1,8 +1,16 @@
 import { AGE_BUCKETS } from "@/lib/dashboard";
-import { formatCedis } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 
 /** What is owed, by how long it has been owed: one row per age, with a bar for its share. */
-export function Aging({ buckets, totalPesewas }: { buckets: number[]; totalPesewas: number }) {
+export function Aging({
+  currency,
+  buckets,
+  totalPesewas,
+}: {
+  currency: string;
+  buckets: number[];
+  totalPesewas: number;
+}) {
   return (
     <table className="w-full text-left text-sm">
       <caption className="sr-only">Owed today by how long it has been owed</caption>
@@ -23,7 +31,7 @@ export function Aging({ buckets, totalPesewas }: { buckets: number[]; totalPesew
                 {bucket.label}
               </th>
               <td className="py-2 pr-3 text-right whitespace-nowrap text-ink tabular-nums">
-                {formatCedis(amount)}
+                {formatMoney(amount, currency)}
               </td>
               <td className="w-[45%] py-2">
                 <span className="flex items-center gap-2">

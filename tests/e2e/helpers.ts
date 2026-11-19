@@ -74,7 +74,8 @@ interface MailboxEntry {
   text: string;
 }
 
-function readMailbox(to: string, match?: RegExp): MailboxEntry[] {
+/** Messages to a recipient in the local mailbox file, oldest first (it keeps earlier runs' messages too). */
+export function readMailbox(to: string, match?: RegExp): MailboxEntry[] {
   let lines: string[] = [];
   try {
     lines = readFileSync(".dev-mailbox.jsonl", "utf8").trim().split("\n");

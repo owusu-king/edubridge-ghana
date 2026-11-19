@@ -17,12 +17,17 @@ import {
   students,
   terms,
   users,
+  studentFeeOptions,
 } from "../db/schema";
 import { DomainError, PG_UNIQUE_VIOLATION, pgErrorCode } from "../errors";
 import type { TenantContext } from "../tenancy/service";
 import { assertCanManageSchoolFees, loadFinanceStudent } from "./access";
+import { queueBillingNotices } from "../messages/billing-notices";
+import { firstOpenDate } from "./period-lock";
 import { planBilling, type BillingPlan } from "./billing-plan";
 import { planDiscounts, type ChargeBase, type PlannedDiscount } from "./discount-plan";
+import { readTransportCharges } from "../transport/billing";
+import { readBoardingCharges } from "../boarding/billing";
 
 const scope = (ctx: TenantContext) => ({
   tenantId: ctx.tenant.id,
@@ -82,7 +87,8 @@ async function planTerm(tx: Transaction, ctx: TenantContext, termId: string): Pr
       and(
         eq(enrolments.tenantId, ctx.tenant.id),
         eq(enrolments.termId, termId),
-        eq(students.status, "active"),
+        // Suspended students stay placed and are billed.
+        inArray(students.status, ["active", "suspended"]),
       ),
     );
   const lines = await tx
@@ -120,6 +126,29 @@ async function planTerm(tx: Transaction, ctx: TenantContext, termId: string): Pr
       ),
     );
   const existing = automatic.filter((e) => e.kind === "charge");
+  // Optional items (transport, feeding, ...) are charged only to students who take them.
+  const optional = new Set(
+    (
+      await tx
+        .select({ id: feeItems.id })
+        .from(feeItems)
+        .where(and(eq(feeItems.tenantId, ctx.tenant.id), eq(feeItems.optional, true)))
+    ).map((r) => r.id),
+  );
+  const taken = new Set(
+    optional.size
+      ? (
+          await tx
+            .select({ studentId: studentFeeOptions.studentId, feeItemId: studentFeeOptions.feeItemId })
+            .from(studentFeeOptions)
+            .where(eq(studentFeeOptions.tenantId, ctx.tenant.id))
+        ).map((r) => `${r.studentId}|${r.feeItemId}`)
+      : [],
+  );
+  // Transport (R4-5): the transport item is charged from each student's route and stop this term (TRN-02b).
+  const transport = await readTransportCharges(tx, ctx, termId);
+  // Boarding (R4-8): the boarding item goes to students with a bed this term, at the structure's amount (BRD-02).
+  const boarding = await readBoardingCharges(tx, ctx, termId);
   const plan = planBilling(
     termId,
     enrolled,
@@ -130,6 +159,11 @@ async function planTerm(tx: Transaction, ctx: TenantContext, termId: string): Pr
       billingKey: e.billingKey!,
       netPesewas: e.reversed ? 0 : e.amountPesewas,
     })),
+    (studentId, feeItemId) =>
+      boarding && feeItemId === boarding.feeItemId
+        ? boarding.boarders.has(studentId)
+        : !optional.has(feeItemId) || taken.has(`${studentId}|${feeItemId}`),
+    transport && { feeItemId: transport.feeItemId, amounts: transport.fares },
   );
 
   // Discounts apply to each student's live charges: those already billed plus those about to be.
@@ -246,7 +280,9 @@ export async function billTerm(
   database: Database,
   ctx: TenantContext,
   termId: string,
-): Promise<BillingStatus> {
+  /** notify: SMS each family billed with the new balance (COM-01). */
+  options: { notify?: boolean } = {},
+): Promise<BillingStatus & { notified: number }> {
   assertCanManageSchoolFees(ctx);
   return withTenant(database, scope(ctx), async (tx) => {
     const term = await loadTerm(tx, ctx, termId);
@@ -271,6 +307,8 @@ export async function billTerm(
       ).map((i) => [i.id, i.name]),
     );
     const termLabel = `${term.name} ${term.yearName}`;
+    // In a closed period, the term's fees are posted on the first open day instead (FIN-16).
+    const postOn = await firstOpenDate(tx, ctx.tenant.id, term.startsOn);
     // Insert in batches to keep statements a sensible size for large schools.
     for (let i = 0; i < plan.toCreate.length; i += 500) {
       await tx
@@ -285,7 +323,7 @@ export async function billTerm(
             description: `${names.get(c.feeItemId) ?? "Fees"}, ${termLabel}`,
             amountPesewas: c.amountPesewas,
             billingKey: c.billingKey,
-            effectiveOn: term.startsOn,
+            effectiveOn: postOn,
             recordedByUserId: ctx.userId,
           })),
         )
@@ -311,7 +349,7 @@ export async function billTerm(
               ),
             amountPesewas: d.amountPesewas,
             billingKey: d.billingKey,
-            effectiveOn: term.startsOn,
+            effectiveOn: postOn,
             recordedByUserId: ctx.userId,
           })),
         )
@@ -320,6 +358,14 @@ export async function billTerm(
         });
     }
     const status = await summarise(tx, ctx, plan);
+    const notified = options.notify
+      ? await queueBillingNotices(
+          tx,
+          ctx.tenant.id,
+          [...new Set(plan.toCreate.map((c) => c.studentId))],
+          termLabel,
+        )
+      : 0;
     await recordAudit(tx, {
       tenantId: ctx.tenant.id,
       actorUserId: ctx.userId,
@@ -332,9 +378,10 @@ export async function billTerm(
         charges: status.chargesToCreate,
         discounts: status.discountsToCreate,
         totalPesewas: status.amountToBillPesewas,
+        sms: notified,
       },
     });
-    return status;
+    return { ...status, notified };
   });
 }
 

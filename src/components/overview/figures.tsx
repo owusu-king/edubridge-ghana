@@ -30,12 +30,12 @@ export function Figures({ items, className }: { items: FigureItem[]; className?:
             {item.href ? (
               <Link
                 href={item.href as Route}
-                className="font-display text-lg text-ink decoration-line-strong underline-offset-4 hover:text-accent hover:underline sm:text-xl"
+                className="font-display text-lg text-ink tabular-nums decoration-line-strong underline-offset-4 transition-colors hover:text-accent hover:underline sm:text-xl"
               >
                 {item.value}
               </Link>
             ) : (
-              <span className="font-display text-lg text-ink sm:text-xl">{item.value}</span>
+              <span className="font-display text-lg text-ink tabular-nums sm:text-xl">{item.value}</span>
             )}
             {item.note && <p className="mt-1 text-sm text-ink-3">{item.note}</p>}
           </dd>

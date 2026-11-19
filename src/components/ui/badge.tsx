@@ -5,10 +5,10 @@ export type Tone = "neutral" | "accent" | "positive" | "caution" | "critical";
 
 const tones: Record<Tone, string> = {
   neutral: "bg-subtle text-ink-2 ring-line",
-  accent: "bg-accent-soft text-accent ring-accent/15",
-  positive: "bg-positive-soft text-positive ring-positive/15",
-  caution: "bg-caution-soft text-caution ring-caution/15",
-  critical: "bg-critical-soft text-critical ring-critical/15",
+  accent: "bg-accent-soft text-accent ring-accent/20",
+  positive: "bg-positive-soft text-positive ring-positive/20",
+  caution: "bg-caution-soft text-caution ring-caution/20",
+  critical: "bg-critical-soft text-critical ring-critical/20",
 };
 
 export function Badge({
@@ -23,7 +23,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center rounded-sm px-1.5 text-xs font-medium whitespace-nowrap ring-1 ring-inset",
+        "inline-flex h-5 items-center rounded-full px-2 text-xs font-medium whitespace-nowrap ring-1 ring-inset",
         tones[tone],
         className,
       )}

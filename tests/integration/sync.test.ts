@@ -6,7 +6,16 @@ import { getScoreSheet } from "@/server/assessment/scores";
 import { getAssessmentSetup, setupDefaultSubjects } from "@/server/assessment/setup";
 import { getRegister } from "@/server/attendance/registers";
 import { withTenant } from "@/server/db/context";
-import { academicYears, attendanceChanges, students, syncOperations, terms } from "@/server/db/schema";
+import {
+  academicYears,
+  attendanceChanges,
+  payments,
+  students,
+  syncOperations,
+  terms,
+} from "@/server/db/schema";
+import { closePeriod } from "@/server/fees/period-lock";
+import { saveOfflineReceiptsPreference } from "@/server/tenancy/preferences";
 import { assignClass } from "@/server/students/service";
 import { getSyncChanges } from "@/server/sync/changes";
 import { SYNC_HANDLERS } from "@/server/sync/handlers";
@@ -246,6 +255,67 @@ describe("the sync protocol", () => {
     expect(reused).toMatchObject({ status: "rejected", error: { code: "operation_id_reused" } });
     const same = op("student.register", { firstName: "A", lastName: "B", sex: "male" });
     await expect(send(s.owner, same, same)).rejects.toMatchObject({ code: "operation_repeated" });
+  });
+});
+
+describe("payments taken offline", () => {
+  it("need the Proprietor's permission, get the official receipt once, and keep the provisional number", async () => {
+    const { s, today, ama, kofi } = await setUp();
+    const payment = (studentId: string, provisional: string, extra: Record<string, unknown> = {}) =>
+      op("payment.record", {
+        studentId,
+        amount: "150",
+        method: "cash",
+        paidOn: today,
+        provisionalReference: provisional,
+        ...extra,
+      });
+    expect(await one(s.bursar, payment(ama, "P-0A1B2C3D-0001"))).toMatchObject({
+      status: "rejected",
+      error: { code: "offline_receipts_off" },
+    });
+    await saveOfflineReceiptsPreference(conn.app, s.owner, { offlineReceiptsEnabled: true });
+    const taken = payment(ama, "P-0A1B2C3D-0002");
+    const first = await one(s.bursar, taken);
+    expect(first).toMatchObject({
+      status: "applied",
+      result: { receiptNumber: expect.stringMatching(/^R\d{6}$/) },
+    });
+    expect(await one(s.bursar, taken)).toMatchObject({ status: "applied", replayed: true });
+    const [row] = await asSchool(s, (tx) =>
+      tx.select().from(payments).where(eq(payments.provisionalReference, "P-0A1B2C3D-0002")),
+    );
+    expect(row).toMatchObject({ studentId: ama, amountPesewas: 15_000 });
+    expect(first.status !== "rejected" && first.result.receiptNumber).toBe(row!.receiptNumber);
+
+    // A reference already used comes back for the person to confirm, not as a silent duplicate.
+    await one(s.bursar, payment(kofi, "P-0A1B2C3D-0003", { method: "bank_deposit", reference: "SLIP-9" }));
+    expect(
+      await one(s.bursar, payment(kofi, "P-0A1B2C3D-0004", { method: "bank_deposit", reference: "SLIP-9" })),
+    ).toMatchObject({
+      status: "conflict",
+      result: { duplicateReference: expect.stringContaining("SLIP-9") },
+    });
+    expect(
+      await one(
+        s.bursar,
+        payment(kofi, "P-0A1B2C3D-0005", {
+          method: "bank_deposit",
+          reference: "SLIP-9",
+          confirmDuplicate: true,
+        }),
+      ),
+    ).toMatchObject({ status: "applied" });
+    // Teachers cannot take payments; a closed period refuses back-dated ones.
+    expect(await one(s.teacher, payment(ama, "P-0A1B2C3D-0006"))).toMatchObject({
+      status: "rejected",
+      error: { code: "forbidden" },
+    });
+    await closePeriod(conn.app, s.owner, { through: today });
+    expect(await one(s.bursar, payment(ama, "P-0A1B2C3D-0007"))).toMatchObject({
+      status: "rejected",
+      error: { code: "period_locked" },
+    });
   });
 });
 

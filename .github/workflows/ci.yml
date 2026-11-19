@@ -44,6 +44,8 @@ jobs:
       - run: npm run db:migrate
       - run: npm run db:seed
       - run: npm run build
+      - name: Parent view JavaScript budget (170 KB compressed)
+        run: npm run check:parent-bundle
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
       - uses: actions/upload-artifact@v4

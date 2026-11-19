@@ -1,5 +1,6 @@
 import "server-only";
 import { hasMfa } from "../auth/mfa";
+import type { PlanModuleId } from "../../lib/modules";
 import type { Database } from "../db/client";
 import { recordSupportView } from "../support/access";
 import { resolveTenantContext, type TenantContext } from "../tenancy/service";
@@ -58,6 +59,8 @@ export type ApiRoute =
       path: string;
       summary: string;
       auth: "school";
+      /** The module the route belongs to (ENT-04): 404 for a school where it is not active. Omit for core. */
+      module?: PlanModuleId;
       handler: (c: SchoolRouteContext) => Promise<Result>;
     };
 
@@ -119,6 +122,9 @@ export async function dispatch(
         const ctx = await resolveTenantContext(database, found.params.school ?? "", caller.user.id);
         // Not found whether the school does not exist or the caller cannot use it (no disclosure).
         if (!ctx) return apiError(404, "not_found", "Not found.");
+        // A module the school does not have is indistinguishable from a route that does not exist.
+        if (route.module && !ctx.features.includes(route.module))
+          return apiError(404, "not_found", "Not found.");
         if (ctx.mfaRequired && !(await hasMfa(database, caller.user.id)))
           return apiError(
             403,

@@ -19,11 +19,14 @@ export function LearnerRecords({
   prior,
   downloadUrl,
   timezone,
+  owed,
 }: {
   prior: PriorRecordRow[];
   /** Where to POST to issue and download this school's record; null without permission. */
   downloadUrl: string | null;
   timezone: string;
+  /** Fees owed, formatted, when the family owes anything: shown before the record is released. */
+  owed?: string | null;
 }) {
   if (!prior.length && !downloadUrl) return null;
   return (
@@ -87,7 +90,13 @@ export function LearnerRecords({
         </ul>
       )}
       {downloadUrl && (
-        <form method="post" action={downloadUrl}>
+        <form method="post" action={downloadUrl} className="space-y-2">
+          {owed && (
+            <p className="text-sm text-caution">
+              The family owes {owed}. Releasing the record is the school&apos;s decision; it is not blocked
+              for fees.
+            </p>
+          )}
           <button type="submit" className={buttonStyles("secondary", "sm")}>
             <FileDown aria-hidden="true" className="size-4" />
             Download signed learner record

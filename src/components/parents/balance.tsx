@@ -1,5 +1,5 @@
 import { formatCalendarDate } from "@/lib/format";
-import { formatCedis } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/cn";
 
 /** What a balance means for a family, in words parents use. */
@@ -11,10 +11,13 @@ export function balanceLabel(pesewas: number): string {
 
 /** The balance as a figure with its meaning; credits are shown as a positive amount "in credit". */
 export function BalanceFigure({
+  currency,
   pesewas,
   size = "md",
   className,
 }: {
+  /** The school's currency (ISO 4217). */
+  currency: string;
   pesewas: number;
   size?: "md" | "lg";
   className?: string;
@@ -29,7 +32,7 @@ export function BalanceFigure({
           pesewas > 0 ? "text-ink" : "text-positive",
         )}
       >
-        {formatCedis(Math.abs(pesewas))}
+        {formatMoney(Math.abs(pesewas), currency)}
       </p>
     </div>
   );
@@ -42,23 +45,23 @@ export interface ChildFactsInput {
 }
 
 /** Last payment and payment-plan position, as short lines. */
-export function ChildFacts({ child }: { child: ChildFactsInput }) {
+export function ChildFacts({ currency, child }: { currency: string; child: ChildFactsInput }) {
   return (
     <ul className="space-y-1 text-sm text-ink-2">
       {child.overduePesewas > 0 && (
         <li className="font-medium text-critical">
-          {formatCedis(child.overduePesewas)} overdue on the payment plan
+          {formatMoney(child.overduePesewas, currency)} overdue on the payment plan
         </li>
       )}
       {child.nextDue && (
         <li>
-          Next instalment: {formatCedis(child.nextDue.amountPesewas)} by{" "}
+          Next instalment: {formatMoney(child.nextDue.amountPesewas, currency)} by{" "}
           {formatCalendarDate(child.nextDue.dueOn)}
         </li>
       )}
       <li>
         {child.lastPayment
-          ? `Last payment: ${formatCedis(child.lastPayment.amountPesewas)} on ${formatCalendarDate(child.lastPayment.paidOn)}`
+          ? `Last payment: ${formatMoney(child.lastPayment.amountPesewas, currency)} on ${formatCalendarDate(child.lastPayment.paidOn)}`
           : "No payments recorded yet"}
       </li>
     </ul>

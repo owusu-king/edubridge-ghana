@@ -12,6 +12,7 @@ import { DomainError } from "../errors";
 import type { TenantContext } from "../tenancy/service";
 import { loadAssessableClass, loadTerm, type AssessableClass, type TermRef } from "./access";
 import { buildSnapshot, loadClassTermData, termContext, type ClassTermData } from "./class-data";
+import { listScoreSheetAccess, subjectTeachersIn } from "./teaching";
 
 const scope = (ctx: TenantContext) => ({
   tenantId: ctx.tenant.id,
@@ -22,7 +23,16 @@ const scope = (ctx: TenantContext) => ({
 export interface ClassOverview {
   term: TermRef;
   cls: AssessableClass;
-  subjects: { id: string; name: string; complete: number; entered: number }[];
+  subjects: {
+    id: string;
+    name: string;
+    complete: number;
+    entered: number;
+    /** The subject teacher in this class (teaching by subject), or null. */
+    teacher: string | null;
+    /** Whether this member enters this subject's marks here. */
+    canEnter: boolean;
+  }[];
   students: {
     id: string;
     name: string;
@@ -54,6 +64,12 @@ export async function getClassOverview(
   return withTenant(database, scope(ctx), async (tx) => {
     const data = await loadClass(tx, ctx, termId, classId);
     if (!data) return null;
+    const mine = new Set(
+      (await listScoreSheetAccess(tx, ctx)).find((a) => a.cls.id === data.cls.id)?.subjectIds ?? [],
+    );
+    const teachers = new Map(
+      (await subjectTeachersIn(tx, ctx.tenant.id, data.cls.id)).map((t) => [t.subjectId, t.teacherName]),
+    );
     return {
       term: data.term,
       cls: data.cls,
@@ -67,6 +83,8 @@ export async function getClassOverview(
         );
         return {
           ...subject,
+          teacher: teachers.get(subject.id) ?? null,
+          canEnter: mine.has(subject.id),
           complete: counts.filter((n) => n === data.components.length).length,
           entered: counts.filter((n) => n > 0).length,
         };

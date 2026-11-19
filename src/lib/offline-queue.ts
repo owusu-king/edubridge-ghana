@@ -22,6 +22,8 @@ export interface QueuedRegister {
   classId: string;
   className: string;
   date: string;
+  /** Set for a lesson register (the timetable period); absent for the daily class register. */
+  periodId?: string;
   marks: QueuedMark[];
   source: "offline" | "kept_mine";
   /** When the marks were last changed on the device (ISO). */
@@ -42,6 +44,7 @@ export interface ConflictEntry {
   classId: string;
   className: string;
   date: string;
+  periodId?: string;
   items: StoredConflict[];
 }
 
@@ -49,8 +52,13 @@ const DB = "edubridge-offline";
 const QUEUE = "registers";
 const CONFLICTS = "conflicts";
 
-export const registerKey = (userId: string, school: string, classId: string, date: string) =>
-  `${userId}:${school}:${classId}:${date}`;
+export const registerKey = (
+  userId: string,
+  school: string,
+  classId: string,
+  date: string,
+  periodId?: string,
+) => `${userId}:${school}:${classId}:${date}${periodId ? `:${periodId}` : ""}`;
 
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -99,7 +107,7 @@ export async function getQueued(key: string): Promise<QueuedRegister | undefined
 
 /** Adds marks to the register's queued entry, keeping each student's first base version. */
 export async function queueMarks(entry: Omit<QueuedRegister, "key" | "recordedAt">): Promise<void> {
-  const key = registerKey(entry.userId, entry.school, entry.classId, entry.date);
+  const key = registerKey(entry.userId, entry.school, entry.classId, entry.date, entry.periodId);
   const existing = await getQueued(key);
   const byStudent = new Map((existing?.marks ?? []).map((m) => [m.studentId, m]));
   for (const mark of entry.marks) {

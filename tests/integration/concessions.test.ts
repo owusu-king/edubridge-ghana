@@ -7,6 +7,7 @@ import { campuses, membershipCampuses } from "@/server/db/schema";
 import {
   addConcession,
   endConcession,
+  FAMILIES_PAGE_SIZE,
   formatPercent,
   listConcessions,
   listFamilies,
@@ -280,7 +281,8 @@ describe("families", () => {
       value: "10",
     });
 
-    const families = await listFamilies(conn.app, s.head);
+    const { families, total, page } = await listFamilies(conn.app, s.head);
+    expect({ total, page }).toEqual({ total: 1, page: 1 });
     expect(families).toHaveLength(1);
     expect(families[0]).toMatchObject({ guardianName: "Grace Mensah", phone: "+233245550111" });
     expect(families[0]!.children.map((c) => [c.name, c.className, c.concessions])).toEqual([
@@ -289,6 +291,36 @@ describe("families", () => {
       ["Kofi Mensah", "Basic 4A", ["Sibling discount"]],
     ]);
     // A campus accountant only sees the children at their campus, so no family of two.
-    expect(await listFamilies(conn.app, s.eastBursar)).toEqual([]);
+    expect(await listFamilies(conn.app, s.eastBursar)).toEqual({ families: [], total: 0, page: 1 });
+
+    // Search: the guardian's name or phone, or a child's name or admission number.
+    const found = async (q: string) =>
+      (await listFamilies(conn.app, s.head, { q })).families.map((f) => f.guardianName);
+    expect(await found("grace")).toEqual(["Grace Mensah"]);
+    expect(await found("024 555 0111")).toEqual(["Grace Mensah"]);
+    expect(await found("Efua Mens")).toEqual(["Grace Mensah"]);
+    expect(await found(kofi.admissionNumber)).toEqual(["Grace Mensah"]);
+    // The only child of another guardian, and wildcards typed as text, match no family.
+    expect(await found("Only")).toEqual([]);
+    expect(await found("%")).toEqual([]);
+  });
+
+  it("pages families in name order and keeps a page past the end on the last page", async () => {
+    const s = await school();
+    const names = Array.from({ length: 27 }, (_, i) => `Guardian ${String(i + 1).padStart(2, "0")}`);
+    for (const [i, fullName] of names.entries()) {
+      const phone = `02455${String(70000 + i)}`;
+      for (const first of ["Abena", "Yaw"]) {
+        const child = await s.add(`${first}${i}`, s.classA);
+        await addGuardian(conn.app, s.owner, child.id, { fullName, phone, relationship: "mother" });
+      }
+    }
+    const first = await listFamilies(conn.app, s.bursar);
+    expect(first.total).toBe(27);
+    expect(first.families.map((f) => f.guardianName)).toEqual(names.slice(0, FAMILIES_PAGE_SIZE));
+    expect(first.families.every((f) => f.children.length === 2)).toBe(true);
+    const second = await listFamilies(conn.app, s.bursar, { page: 2 });
+    expect(second.families.map((f) => f.guardianName)).toEqual(names.slice(FAMILIES_PAGE_SIZE));
+    expect((await listFamilies(conn.app, s.bursar, { page: 99 })).page).toBe(2);
   });
 });

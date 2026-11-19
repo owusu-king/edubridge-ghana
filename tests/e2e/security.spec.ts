@@ -15,7 +15,7 @@ test("pages send a nonce-based CSP and the app runs without violations", async (
 
   // Exercises hydration, client navigation and Radix popovers under the policy.
   await signIn(page, "admin@example.test", `${SCHOOL.path}/members`);
-  await page.getByRole("button", { name: /^Account:/ }).click();
+  await page.getByRole("button", { name: /^Profile:/ }).click();
   await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
   expect(violations).toEqual([]);
 });

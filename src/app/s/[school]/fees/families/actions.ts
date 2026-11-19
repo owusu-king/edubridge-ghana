@@ -15,7 +15,7 @@ export async function saveSiblingRuleAction(
   const { ctx } = await requireTenant(slug);
   try {
     await saveSiblingRule(db(), ctx, {
-      firstChild: formData.get("firstChild"),
+      firstChild: formData.get("paysInFull"),
       secondPercent: formData.get("secondPercent"),
       laterPercent: formData.get("laterPercent"),
       feeItemId: formData.get("feeItemId"),

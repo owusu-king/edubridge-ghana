@@ -2,7 +2,9 @@ import "server-only";
 import { z } from "zod";
 import { getCurrentTerm } from "../../academics/calendar";
 import { getScoreSheet, listAssessmentClasses } from "../../assessment/scores";
+import { getLessonRegister, listLessonRegisters } from "../../attendance/lessons";
 import { getRegister, listRegisters } from "../../attendance/registers";
+import { getTeacherTimetable } from "../../timetable/service";
 import { allowed, PERMISSIONS } from "../../authz/permissions";
 import { getStudent, listClassOptions, listStudents } from "../../students/service";
 import { notFound, type ApiRoute } from "../router";
@@ -78,6 +80,7 @@ export const schoolRoutes: ApiRoute[] = [
     path: "/schools/:school/attendance/:date",
     summary: "Registers for a school day (YYYY-MM-DD): the caller's classes and whether each is taken.",
     auth: "school",
+    module: "attendance",
     handler: async ({ database, ctx, params }) => listRegisters(database, ctx, params.date!),
   },
   {
@@ -85,6 +88,7 @@ export const schoolRoutes: ApiRoute[] = [
     path: "/schools/:school/attendance/:date/:classId",
     summary: "One class register with each mark's version (send changes through /sync).",
     auth: "school",
+    module: "attendance",
     handler: async ({ database, ctx, params }) => {
       if (!z.string().uuid().safeParse(params.classId).success) throw notFound();
       return (await getRegister(database, ctx, params.classId!, params.date!)) ?? Promise.reject(notFound());
@@ -92,9 +96,47 @@ export const schoolRoutes: ApiRoute[] = [
   },
   {
     method: "GET",
+    path: "/schools/:school/lessons/:date",
+    summary:
+      "Lesson registers for a school day: the timetabled lessons the caller takes a register for (when the school takes lesson registers).",
+    auth: "school",
+    module: "attendance",
+    handler: async ({ database, ctx, params }) => listLessonRegisters(database, ctx, params.date!),
+  },
+  {
+    method: "GET",
+    path: "/schools/:school/lessons/:date/:classId/:periodId",
+    summary:
+      "One lesson register with each mark's version (send changes through /sync as attendance.register with periodId).",
+    auth: "school",
+    module: "attendance",
+    handler: async ({ database, ctx, params }) => {
+      const view = await getLessonRegister(database, ctx, params.classId!, params.date!, params.periodId!);
+      if (!view) throw notFound();
+      return {
+        ...view,
+        termSummary: view.termSummary
+          ? { held: view.termSummary.held, attended: Object.fromEntries(view.termSummary.attended) }
+          : null,
+      };
+    },
+  },
+  {
+    method: "GET",
+    path: "/schools/:school/timetable/:termId",
+    summary: "The caller's own lessons for a term, with the school day's periods.",
+    auth: "school",
+    handler: async ({ database, ctx, params }) => {
+      if (!z.string().uuid().safeParse(params.termId).success) throw notFound();
+      return (await getTeacherTimetable(database, ctx, params.termId!)) ?? Promise.reject(notFound());
+    },
+  },
+  {
+    method: "GET",
     path: "/schools/:school/assessment/:termId",
     summary: "Classes the caller enters marks for in a term, with progress.",
     auth: "school",
+    module: "assessment",
     handler: async ({ database, ctx, params }) => {
       if (!z.string().uuid().safeParse(params.termId).success) throw notFound();
       return (await listAssessmentClasses(database, ctx, params.termId!)) ?? Promise.reject(notFound());
@@ -105,6 +147,7 @@ export const schoolRoutes: ApiRoute[] = [
     path: "/schools/:school/assessment/:termId/:classId/:subjectId",
     summary: "A score sheet: each student's marks for a subject (send changes through /sync).",
     auth: "school",
+    module: "assessment",
     handler: async ({ database, ctx, params }) => {
       const ids = [params.termId, params.classId, params.subjectId];
       if (!ids.every((id) => z.string().uuid().safeParse(id).success)) throw notFound();

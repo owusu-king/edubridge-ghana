@@ -147,7 +147,7 @@ export default async function MoveStudentsPage({
               <FormDialog
                 trigger={`Make ${to.name} current`}
                 title={`Make ${label(to)} the current term?`}
-                description="Fees, registers and the overview default to the current term."
+                description="Fees, registers and the Command Center default to the current term."
                 submitLabel="Make current"
                 action={makeTermCurrentAction.bind(null, slug, to.id)}
               />

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { suggestNetwork } from "@/lib/mobile-money";
-import { mobileMoneyProviderFromEnv } from "@/server/mobile-money/config";
+import {
+  mobileMoneyProviderFromEnv,
+  mobileMoneyRegistryFromEnv,
+  providerChoicesForAdmin,
+  providerForSchool,
+} from "@/server/mobile-money/config";
 import { mockProvider } from "@/server/mobile-money/mock";
 import { ProviderError } from "@/server/mobile-money/provider";
 
@@ -114,5 +119,56 @@ describe("mobileMoneyProviderFromEnv", () => {
     expect(() =>
       mobileMoneyProviderFromEnv({ NODE_ENV: "production", MOBILE_MONEY_PROVIDER: "mtn" }),
     ).toThrow(/Unknown MOBILE_MONEY_PROVIDER/);
+  });
+});
+
+describe("providers per school (PAY-06)", () => {
+  const TEST_KEY = "sk_test_" + "a".repeat(40);
+  const dev = mobileMoneyRegistryFromEnv({ NODE_ENV: "development", PAYSTACK_TEST_SECRET_KEY: TEST_KEY });
+  const prod = mobileMoneyRegistryFromEnv({
+    NODE_ENV: "production",
+    MOBILE_MONEY_PROVIDER: "paystack",
+    PAYSTACK_SECRET_KEY: TEST_KEY,
+  });
+
+  it("lists every provider the deployment can use, with the default", () => {
+    expect([...dev.providers.keys()].sort()).toEqual(["mock", "paystack"]);
+    expect(dev.defaultName).toBe("paystack");
+    // In production the test provider exists only when asked for (e.g. for demo schools).
+    expect([...prod.providers.keys()]).toEqual(["paystack"]);
+    const withDemo = mobileMoneyRegistryFromEnv({
+      NODE_ENV: "production",
+      MOBILE_MONEY_PROVIDER: "paystack",
+      PAYSTACK_SECRET_KEY: TEST_KEY,
+      MOBILE_MONEY_MOCK_SECRET: "demo-secret",
+    });
+    expect([...withDemo.providers.keys()].sort()).toEqual(["mock", "paystack"]);
+  });
+
+  it("gives each school its choice, else the default; Off turns Mobile Money off", () => {
+    expect(providerForSchool({ choice: null, isDemo: false }, dev)?.name).toBe("paystack");
+    expect(providerForSchool({ choice: "mock", isDemo: false }, dev)?.name).toBe("mock");
+    expect(providerForSchool({ choice: "none", isDemo: false }, dev)).toBeNull();
+  });
+
+  it("keeps demo schools on the test provider and real schools off it in production", () => {
+    expect(providerForSchool({ choice: "paystack", isDemo: true }, dev)?.name).toBe("mock");
+    expect(providerForSchool({ choice: null, isDemo: true }, prod)).toBeNull();
+    const withDemo = mobileMoneyRegistryFromEnv({
+      NODE_ENV: "production",
+      MOBILE_MONEY_PROVIDER: "paystack",
+      PAYSTACK_SECRET_KEY: TEST_KEY,
+      MOBILE_MONEY_MOCK_SECRET: "demo-secret",
+    });
+    expect(providerForSchool({ choice: "mock", isDemo: false }, withDemo)).toBeNull();
+    expect(providerForSchool({ choice: null, isDemo: true }, withDemo)?.name).toBe("mock");
+  });
+
+  it("offers platform staff only what this deployment can use, and keeps a stale choice visible", () => {
+    expect(providerChoicesForAdmin(null, prod).map((o) => o.value)).toEqual(["", "paystack", "none"]);
+    expect(providerChoicesForAdmin("mock", prod).find((o) => o.value === "mock")?.label).toMatch(
+      /not available/,
+    );
+    expect(providerChoicesForAdmin(null, prod)[0]!.label).toBe("Deployment default (Paystack)");
   });
 });

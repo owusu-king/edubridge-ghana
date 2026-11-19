@@ -12,35 +12,82 @@ interface Option {
   label: string;
 }
 
-export function SetupLevelsDialog({ action, stages }: { action: Action; stages: Option[] }) {
+/** A starter template, as offered when setting up levels (see src/lib/curricula.ts). */
+export interface TemplateChoice {
+  id: string;
+  name: string;
+  description: string;
+  stages: { value: string; label: string; levels: string[] }[];
+}
+
+export function SetupLevelsDialog({
+  action,
+  templates,
+  defaultTemplate,
+}: {
+  action: Action;
+  templates: TemplateChoice[];
+  /** The school's country's template, chosen unless the school picks another. */
+  defaultTemplate: string;
+}) {
   return (
     <FormDialog
       trigger="Set up levels"
       triggerVariant="primary"
       title="Set up levels"
-      description="Choose the stages your school runs. You can rename or add levels afterwards."
+      description="Choose a starting point and the stages your school runs. The template also suggests subjects and grade bands. You can rename or add levels afterwards."
       submitLabel="Create levels"
       action={action}
     >
-      {(state) => (
-        <fieldset className="space-y-2">
-          <legend className="mb-1.5 text-sm font-medium text-ink">Stages</legend>
-          {stages.map((stage) => (
-            <label key={stage.value} className="flex items-center gap-2.5 text-base text-ink">
-              <input
-                type="checkbox"
-                name="stages"
-                value={stage.value}
-                defaultChecked
-                className="size-4 accent-ink"
-              />
-              {stage.label}
-            </label>
-          ))}
-          {state.fieldErrors?.stages && <p className="text-sm text-critical">{state.fieldErrors.stages}</p>}
-        </fieldset>
-      )}
+      {(state) => <SetupLevelsFields state={state} templates={templates} defaultTemplate={defaultTemplate} />}
     </FormDialog>
+  );
+}
+
+function SetupLevelsFields({
+  state,
+  templates,
+  defaultTemplate,
+}: {
+  state: FormState;
+  templates: TemplateChoice[];
+  defaultTemplate: string;
+}) {
+  const [templateId, setTemplateId] = useState(state.values?.template ?? defaultTemplate);
+  const template = templates.find((t) => t.id === templateId) ?? templates[0]!;
+  return (
+    <div className="space-y-5">
+      <Field label="Starting point" description={template.description} error={state.fieldErrors?.template}>
+        {(p) => (
+          <Select {...p} name="template" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </Select>
+        )}
+      </Field>
+      <fieldset className="space-y-2">
+        <legend className="mb-1.5 text-sm font-medium text-ink">Stages</legend>
+        {template.stages.map((stage) => (
+          <label key={stage.value} className="flex items-start gap-2.5 text-base text-ink">
+            <input
+              type="checkbox"
+              name="stages"
+              value={stage.value}
+              defaultChecked
+              className="mt-1 size-4 accent-ink"
+            />
+            <span>
+              {stage.label}
+              <span className="block text-sm text-ink-3">{stage.levels.join(", ")}</span>
+            </span>
+          </label>
+        ))}
+        {state.fieldErrors?.stages && <p className="text-sm text-critical">{state.fieldErrors.stages}</p>}
+      </fieldset>
+    </div>
   );
 }
 
@@ -101,7 +148,7 @@ function TeacherSelect({
   error?: string;
 }) {
   return (
-    <Field label="Class teacher" description="Optional." error={error}>
+    <Field label="Class teacher" optional error={error}>
       {(p) => (
         <Select {...p} name="classTeacherMembershipId" defaultValue={defaultValue ?? ""}>
           <option value="">No class teacher yet</option>

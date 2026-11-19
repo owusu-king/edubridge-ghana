@@ -1,12 +1,18 @@
-import { bandRanges, ordinal, weightedScore, type ReportCardSnapshot } from "@/lib/assessment";
+import { bandFor, bandRanges, ordinal, type ReportCardSnapshot } from "@/lib/assessment";
 import { formatCalendarDate } from "@/lib/format";
 import { cn } from "@/lib/cn";
+import { formatGpa, partHeader, partValue, REPORT_CARD_STYLE_INFO } from "@/lib/report-styles";
 
 /**
- * A report card on screen, from the same snapshot the PDF prints. On phones the subject table keeps only
- * total and grade; the parts and positions appear from the small breakpoint up.
+ * A report card on screen, from the same snapshot the PDF prints, in the school's layout. On phones the
+ * subject table keeps only the total and grade; the parts and positions appear from the small breakpoint up.
  */
 export function ReportCardView({ card }: { card: ReportCardSnapshot }) {
+  const style = card.style ?? "ges";
+  const info = REPORT_CARD_STYLE_INFO[style];
+  const positionsShown = card.showPositions && info.allowPositions;
+  const pointsShown = info.showGpa && card.bands.some((b) => b.points !== undefined && b.points !== null);
+  const gpa = card.overall.gpa ?? null;
   const facts: [string, string][] = [
     ["Class", card.student.className],
     ["Number on roll", String(card.classSize)],
@@ -19,13 +25,21 @@ export function ReportCardView({ card }: { card: ReportCardSnapshot }) {
         : "—",
     ],
     ["Next term begins", card.term.nextTermBeginsOn ? formatCalendarDate(card.term.nextTermBeginsOn) : "—"],
-    ["Average", card.overall.average !== null ? card.overall.average.toFixed(1) : "Not graded"],
   ];
-  if (card.showPositions)
+  if (info.showAverage)
+    facts.push([
+      "Average",
+      card.overall.average !== null
+        ? `${card.overall.average.toFixed(1)}${style === "ges" ? "" : "%"}`
+        : "Not graded",
+    ]);
+  if (info.showGpa) facts.push(["Term GPA", gpa !== null ? formatGpa(gpa) : "—"]);
+  if (positionsShown)
     facts.push([
       "Position in class",
       card.overall.position !== null ? `${ordinal(card.overall.position)} of ${card.classSize}` : "—",
     ]);
+  const th = "h-9 px-3 text-xs font-medium tracking-wide text-ink-3 uppercase";
 
   return (
     <div className="space-y-6">
@@ -41,76 +55,98 @@ export function ReportCardView({ card }: { card: ReportCardSnapshot }) {
       <div className="overflow-x-auto rounded-lg border border-line bg-surface shadow-raised">
         <table className="w-full border-collapse text-left text-base">
           <caption className="sr-only">
-            Results, {card.term.name} {card.term.yearName}
+            {info.title}, {card.term.name} {card.term.yearName}
           </caption>
           <thead className="border-b border-line bg-canvas/60">
             <tr>
-              <th
-                scope="col"
-                className="h-9 px-4 pl-5 text-xs font-medium tracking-wide text-ink-3 uppercase"
-              >
+              <th scope="col" className={cn(th, "px-4 pl-5")}>
                 Subject
               </th>
               {card.components.map((c) => (
                 <th
                   key={c.key}
                   scope="col"
-                  className="hidden h-9 px-3 text-right text-xs font-medium tracking-wide whitespace-nowrap text-ink-3 uppercase sm:table-cell"
+                  className={cn(th, "hidden text-right whitespace-nowrap sm:table-cell")}
                 >
-                  {c.name} {c.weight}%
+                  {partHeader(c, info.parts)}
                 </th>
               ))}
-              <th
-                scope="col"
-                className="h-9 px-3 text-right text-xs font-medium tracking-wide text-ink-3 uppercase"
-              >
-                Total
+              {info.showTotal && (
+                <th scope="col" className={cn(th, "text-right")}>
+                  {style === "ges" ? "Total" : "Overall"}
+                </th>
+              )}
+              <th scope="col" className={th}>
+                {info.labels.grade}
               </th>
-              <th scope="col" className="h-9 px-3 text-xs font-medium tracking-wide text-ink-3 uppercase">
-                Grade
-              </th>
-              {card.showPositions && (
-                <th
-                  scope="col"
-                  className="hidden h-9 px-3 pr-5 text-right text-xs font-medium tracking-wide text-ink-3 uppercase sm:table-cell"
-                >
+              {pointsShown && (
+                <th scope="col" className={cn(th, "hidden text-right sm:table-cell")}>
+                  Points
+                </th>
+              )}
+              {positionsShown && (
+                <th scope="col" className={cn(th, "hidden pr-5 text-right sm:table-cell")}>
                   Position
                 </th>
               )}
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
-            {card.subjects.map((s) => (
-              <tr key={s.name}>
-                <th scope="row" className="px-4 py-3 pl-5 text-left font-normal text-ink">
-                  {s.name}
-                </th>
-                {card.components.map((c, i) => (
-                  <td
-                    key={c.key}
-                    className="hidden px-3 py-3 text-right text-ink-2 tabular-nums sm:table-cell"
-                  >
-                    {s.scores[i] !== null && s.scores[i] !== undefined ? weightedScore(s.scores[i]!, c) : "—"}
-                  </td>
-                ))}
-                <td className="px-3 py-3 text-right font-medium text-ink tabular-nums">{s.total ?? "—"}</td>
-                <td className="px-3 py-3">
-                  {s.total === null ? (
-                    <span className="text-sm text-ink-3">Not graded</span>
-                  ) : (
-                    <span>
-                      <span className="font-medium text-ink">{s.grade}</span>
-                      <span className="text-sm text-ink-3"> {s.remark}</span>
-                    </span>
+            {card.subjects.map((s) => {
+              const points = s.total !== null ? bandFor(card.bands, s.total)?.points : null;
+              const teacher = style === "ges" || !s.comment ? null : (s.teacher ?? null);
+              return (
+                <tr key={s.name}>
+                  <th scope="row" className="px-4 py-3 pl-5 text-left align-top font-normal text-ink">
+                    {s.name}
+                    {s.comment && (
+                      <span className="mt-0.5 block max-w-prose text-sm text-ink-2">
+                        {s.comment}
+                        {teacher && (
+                          <span className="text-ink-3">
+                            {" · "}
+                            {teacher}
+                          </span>
+                        )}
+                      </span>
+                    )}
+                  </th>
+                  {card.components.map((c, i) => (
+                    <td
+                      key={c.key}
+                      className="hidden px-3 py-3 text-right align-top text-ink-2 tabular-nums sm:table-cell"
+                    >
+                      {partValue(s.scores[i], c, info.parts)}
+                    </td>
+                  ))}
+                  {info.showTotal && (
+                    <td className="px-3 py-3 text-right align-top font-medium text-ink tabular-nums">
+                      {s.total === null ? "—" : style === "ges" ? s.total : `${s.total}%`}
+                    </td>
                   )}
-                </td>
-                {card.showPositions && (
-                  <td className="hidden px-3 py-3 pr-5 text-right text-ink-2 tabular-nums sm:table-cell">
-                    {s.position !== null ? ordinal(s.position) : "—"}
+                  <td className="px-3 py-3 align-top">
+                    {s.total === null ? (
+                      <span className="text-sm text-ink-3">Not graded</span>
+                    ) : (
+                      <span>
+                        <span className="font-medium text-ink">{s.grade}</span>
+                        {style !== "american" && <span className="text-sm text-ink-3"> {s.remark}</span>}
+                      </span>
+                    )}
                   </td>
-                )}
-              </tr>
-            ))}
+                  {pointsShown && (
+                    <td className="hidden px-3 py-3 text-right align-top text-ink-2 tabular-nums sm:table-cell">
+                      {points !== undefined && points !== null ? formatGpa(points) : "—"}
+                    </td>
+                  )}
+                  {positionsShown && (
+                    <td className="hidden px-3 py-3 pr-5 text-right align-top text-ink-2 tabular-nums sm:table-cell">
+                      {s.position !== null ? ordinal(s.position) : "—"}
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -118,9 +154,9 @@ export function ReportCardView({ card }: { card: ReportCardSnapshot }) {
       <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-3">
         {(
           [
-            ["Attitude", card.remarks.attitude],
-            ["Conduct", card.remarks.conduct],
-            ["Interest", card.remarks.interest],
+            [info.labels.attitude, card.remarks.attitude],
+            [info.labels.conduct, card.remarks.conduct],
+            [info.labels.interest, card.remarks.interest],
           ] as const
         ).map(([term, detail]) => (
           <div key={term}>
@@ -132,12 +168,12 @@ export function ReportCardView({ card }: { card: ReportCardSnapshot }) {
 
       <div className="divide-y divide-line border-y border-line">
         <Remark
-          label="Class teacher's remark"
+          label={info.labels.classTeacher}
           text={card.remarks.classTeacher}
           signature={card.classTeacherName}
         />
         <Remark
-          label="Head teacher's remark"
+          label={info.labels.headTeacher}
           text={card.remarks.headTeacher}
           signature={
             card.approvedBy && card.approvedOn
@@ -150,7 +186,10 @@ export function ReportCardView({ card }: { card: ReportCardSnapshot }) {
       <p className="text-sm text-ink-3">
         <span className="font-medium text-ink-2">Grades: </span>
         {bandRanges(card.bands)
-          .map((b) => `${b.grade} ${b.range}${b.remark ? ` ${b.remark}` : ""}`)
+          .map(
+            (b) =>
+              `${b.grade} ${b.range}${pointsShown && b.points != null ? ` (${formatGpa(b.points)})` : ""}${b.remark ? ` ${b.remark}` : ""}`,
+          )
           .join(" · ")}
       </p>
     </div>

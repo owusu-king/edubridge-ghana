@@ -3,19 +3,36 @@
  *
  * - Offline pages are fetched from the network first and kept, so a page opened (or saved for offline)
  *   while connected opens again offline: class registers (/s/{school}/attendance and
- *   /s/{school}/attendance/{class}), score sheets (/s/{school}/assessment/{class}/subjects/{subject}) and
+ *   /s/{school}/attendance/{class}), lesson registers (/s/{school}/attendance/{class}/lessons/{period}), score sheets (/s/{school}/assessment/{class}/subjects/{subject}) and
  *   student registration (/s/{school}/students/register).
+ * - The parent view (PRT-07, PRT-03): the family home, each child's page and school news, and receipts and
+ *   statements once downloaded, are kept from the network so they open offline (the page shows the time
+ *   they are from). Limited to the most recent copies, and deleted when the sign-in page opens (sign-out,
+ *   or a session that ended), so another person on the phone does not see them after sign-out.
  * - Built assets (/_next/static, content-hashed) are kept once loaded.
- * - Nothing else is cached: no other pages, no API, no documents. The page cache is cleared on sign-out.
+ * - Nothing else is cached: no other pages, no API. The page caches are cleared on sign-out.
  * Marks taken offline are not handled here; the register page keeps them on the device (IndexedDB) and
  * sends them when the connection returns.
  */
 const PAGES = "edubridge-pages-v1";
 const ASSETS = "edubridge-assets-v1";
+const PARENT = "edubridge-parent-v1";
+const PARENT_PAGES = [/^\/p\/?$/, /^\/p\/[^/]+\/[0-9a-f-]{36}\/?$/, /^\/p\/[^/]+\/news\/?$/];
+const PARENT_FILES = [
+  /^\/p\/[^/]+\/receipts\/[0-9a-f-]{36}\/pdf$/,
+  /^\/p\/[^/]+\/[0-9a-f-]{36}\/statement$/,
+  /^\/p\/[^/]+\/family-statement$/,
+];
+/** At most this many parent copies (pages and files) are kept; the oldest go first. */
+const PARENT_MAX = 40;
+const parentPage = (pathname) => PARENT_PAGES.some((pattern) => pattern.test(pathname));
+const parentFile = (url) => !url.search && PARENT_FILES.some((pattern) => pattern.test(url.pathname));
 const OFFLINE_PAGES = [
   /^\/s\/[^/]+\/attendance(?:\/[0-9a-f-]{36})?\/?$/,
+  /^\/s\/[^/]+\/attendance\/[0-9a-f-]{36}\/lessons\/[0-9a-f-]{36}\/?$/,
   /^\/s\/[^/]+\/assessment\/[0-9a-f-]{36}\/subjects\/[0-9a-f-]{36}\/?$/,
   /^\/s\/[^/]+\/students\/register\/?$/,
+  /^\/s\/[^/]+\/fees\/offline-payments\/?$/,
 ];
 const offlinePage = (pathname) => OFFLINE_PAGES.some((pattern) => pattern.test(pathname));
 
@@ -24,7 +41,8 @@ self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
-      for (const key of await caches.keys()) if (![PAGES, ASSETS].includes(key)) await caches.delete(key);
+      for (const key of await caches.keys())
+        if (![PAGES, ASSETS, PARENT].includes(key)) await caches.delete(key);
       await self.clients.claim();
     })(),
   );
@@ -32,13 +50,25 @@ self.addEventListener("activate", (event) => {
 
 const keepable = (response) => response && response.ok && response.type === "basic" && !response.redirected;
 
-async function pageFromNetwork(request) {
+async function trim(cacheName, max) {
+  const cache = await caches.open(cacheName);
+  const keys = await cache.keys();
+  for (const key of keys.slice(0, Math.max(0, keys.length - max))) await cache.delete(key);
+}
+
+async function pageFromNetwork(request, cacheName = PAGES) {
   try {
     const response = await fetch(request);
-    if (keepable(response)) await (await caches.open(PAGES)).put(request, response.clone());
+    if (keepable(response)) {
+      const cache = await caches.open(cacheName);
+      // Re-adding moves the copy to the end, so trimming removes the least recently opened.
+      await cache.delete(request);
+      await cache.put(request, response.clone());
+      if (cacheName === PARENT) await trim(PARENT, PARENT_MAX);
+    }
     return response;
   } catch {
-    const cached = await (await caches.open(PAGES)).match(request);
+    const cached = await (await caches.open(cacheName)).match(request);
     if (cached) return cached;
     return new Response(
       '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Offline</title>' +
@@ -70,6 +100,12 @@ self.addEventListener("fetch", (event) => {
   // Only full page loads of register pages; in-app (RSC) navigations go to the network and, offline, the
   // router falls back to a full page load, which is answered from the cache.
   if (request.mode === "navigate" && offlinePage(url.pathname)) event.respondWith(pageFromNetwork(request));
+  // Opening the parent sign-in page means nobody is signed in on this phone: remove the family's copies.
+  if (request.mode === "navigate" && url.pathname.startsWith("/p/login"))
+    event.waitUntil(caches.delete(PARENT));
+  if (request.mode === "navigate" && parentPage(url.pathname))
+    event.respondWith(pageFromNetwork(request, PARENT));
+  if (parentFile(url)) event.respondWith(pageFromNetwork(request, PARENT));
 });
 
 /** Saves register pages, and the assets they load, so they open offline later. */
@@ -102,4 +138,45 @@ self.addEventListener("message", (event) => {
   if (data.type === "save-pages" && Array.isArray(data.urls))
     event.waitUntil(savePages(data.urls).then(() => event.ports[0]?.postMessage({ saved: true })));
   if (data.type === "clear") event.waitUntil(caches.delete(PAGES));
+  if (data.type === "clear-parent") event.waitUntil(caches.delete(PARENT));
+});
+
+/**
+ * Web push (R3-2). A push says only that a school has something new (no names, amounts or text); tapping it
+ * opens the page in the parent view, where the parent must be signed in. Only parent-view paths are opened.
+ */
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = {};
+  }
+  const title = typeof data.title === "string" && data.title ? data.title.slice(0, 80) : "EduBridge";
+  const body = typeof data.body === "string" ? data.body.slice(0, 160) : "Something new from your school.";
+  const url = typeof data.url === "string" && /^\/p(\/|$)/.test(data.url) ? data.url : "/p";
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
+      tag: url,
+      data: { url },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = new URL(event.notification.data?.url || "/p", self.location.origin);
+  // Only this site's parent view (/p) and school pages (/s, staff notifications) are opened.
+  if (url.origin !== self.location.origin || !/^\/(p|s)(\/|$)/.test(url.pathname)) return;
+  event.waitUntil(
+    (async () => {
+      const open = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      const same = open.find((c) => new URL(c.url).pathname === url.pathname);
+      if (same) return same.focus();
+      return self.clients.openWindow(url.href);
+    })(),
+  );
 });

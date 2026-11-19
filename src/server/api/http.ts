@@ -1,5 +1,6 @@
 import "server-only";
 import { ZodError } from "zod";
+import { clientIpFrom } from "../auth/client-ip";
 import { validateDeviceToken } from "../auth/device-tokens";
 import { validateSessionToken, type SessionUser } from "../auth/sessions";
 import { ForbiddenError } from "../authz/permissions";
@@ -106,10 +107,7 @@ export async function authenticate(
   return null;
 }
 
-/** Client details for sign-in records, from proxy headers (trustworthy only behind a proxy that sets them). */
+/** Client details for sign-in records and rate limits (see `clientIpFrom` for which address is trusted). */
 export function clientOf(request: Request): { ipAddress: string | null; userAgent: string | null } {
-  const forwarded =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? request.headers.get("x-real-ip") ?? "";
-  const ip = /^[0-9a-f.:]{3,45}$/i.test(forwarded) ? forwarded : null;
-  return { ipAddress: ip, userAgent: request.headers.get("user-agent") };
+  return { ipAddress: clientIpFrom(request.headers), userAgent: request.headers.get("user-agent") };
 }

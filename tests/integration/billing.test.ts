@@ -74,7 +74,8 @@ describe("what a plan includes", () => {
     const ama = await withPhone(s, "Ama");
     await billTerm(conn.app, s.bursar, s.termId);
     const off = await setPlan(s, { features: ["assessment"] });
-    expect(off.head.features).toEqual(["assessment"]);
+    // Safeguarding is in every plan whatever the plan lists (D-R4-4).
+    expect(off.head.features).toEqual(["assessment", "safeguarding"]);
 
     expect(allowed(off.head, "attendance.take")).toBe(false);
     expect(allowed(off.head, "assessment.enter")).toBe(true);

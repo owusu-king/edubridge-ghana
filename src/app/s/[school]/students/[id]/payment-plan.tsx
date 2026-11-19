@@ -2,7 +2,7 @@ import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/tab
 import type { PaymentPlan } from "@/server/fees/payment-plans";
 import type { InstalmentStatus } from "@/server/fees/plan-schedule";
 import { formatCalendarDate } from "@/lib/format";
-import { formatCedis } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { cancelPaymentPlanAction } from "./account-actions";
 import { CancelPlanButton } from "./account-controls";
 
@@ -15,11 +15,14 @@ const STATUS: Record<InstalmentStatus, { label: string; className: string }> = {
 
 /** The family's instalment plan and how payments recorded since it was agreed cover it. */
 export function PaymentPlanView({
+  currency,
   slug,
   studentId,
   plan,
   canManage,
 }: {
+  /** The school's currency (ISO 4217). */
+  currency: string;
   slug: string;
   studentId: string;
   plan: PaymentPlan;
@@ -30,16 +33,19 @@ export function PaymentPlanView({
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-medium text-ink">
-          Payment plan: {formatCedis(plan.totalPesewas)} from {formatCalendarDate(plan.startsOn)}
+          Payment plan: {formatMoney(plan.totalPesewas, currency)} from {formatCalendarDate(plan.startsOn)}
         </h3>
         {canManage && (
           <CancelPlanButton action={cancelPaymentPlanAction.bind(null, slug, studentId, plan.id)} />
         )}
       </div>
       <p className="text-sm text-ink-2">
-        {formatCedis(p.paidPesewas)} paid towards it, {formatCedis(p.remainingPesewas)} to go
+        {formatMoney(p.paidPesewas, currency)} paid towards it, {formatMoney(p.remainingPesewas, currency)} to
+        go
         {p.overduePesewas > 0 && (
-          <span className="font-medium text-critical">, {formatCedis(p.overduePesewas)} overdue</span>
+          <span className="font-medium text-critical">
+            , {formatMoney(p.overduePesewas, currency)} overdue
+          </span>
         )}
         .
       </p>
@@ -58,8 +64,10 @@ export function PaymentPlanView({
             {p.instalments.map((i) => (
               <TR key={i.sequence}>
                 <TD className="whitespace-nowrap">{formatCalendarDate(i.dueOn)}</TD>
-                <TD className="text-right tabular-nums">{formatCedis(i.amountPesewas)}</TD>
-                <TD className="hidden text-right tabular-nums sm:table-cell">{formatCedis(i.paidPesewas)}</TD>
+                <TD className="text-right tabular-nums">{formatMoney(i.amountPesewas, currency)}</TD>
+                <TD className="hidden text-right tabular-nums sm:table-cell">
+                  {formatMoney(i.paidPesewas, currency)}
+                </TD>
                 <TD className={STATUS[i.status].className}>{STATUS[i.status].label}</TD>
               </TR>
             ))}

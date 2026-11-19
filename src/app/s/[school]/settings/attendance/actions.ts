@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { saveAbsenceAlertSettings } from "@/server/attendance/alerts";
+import { saveLessonAttendance } from "@/server/tenancy/preferences";
 import { db } from "@/server/db/client";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
@@ -24,4 +25,19 @@ export async function saveAlertSettingsAction(
   }
   revalidatePath(schoolPath(slug, "settings/attendance"));
   return { status: "success", message: "Absence SMS settings saved." };
+}
+
+export async function saveLessonAttendanceAction(
+  slug: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const { ctx } = await requireTenant(slug);
+  try {
+    await saveLessonAttendance(db(), ctx, { lessonAttendance: formData.get("lessonAttendance") });
+  } catch (error) {
+    return toFormError(error, formData);
+  }
+  revalidatePath(schoolPath(slug), "layout");
+  return { status: "success", message: "Saved." };
 }

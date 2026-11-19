@@ -11,6 +11,7 @@ import { DomainError } from "../errors";
 import { linkGuardianInTx, type AddGuardianInput } from "../students/guardian-links";
 import type { TenantContext } from "../tenancy/service";
 import { parseCsv } from "@/lib/csv";
+import { countryProfile } from "@/lib/countries";
 import { normalizePhone } from "@/lib/phone";
 
 /**
@@ -228,11 +229,13 @@ const RELATIONSHIP_ALIASES: Record<string, AddGuardianInput["relationship"]> = {
   sibling: "sibling",
 };
 
-/** Phone numbers saved as numbers in Excel lose their leading 0 (e.g. 241234567); restore it. */
-function parseImportPhone(value: string): string | null {
+/** Phone numbers saved as numbers in Excel lose their leading 0 (e.g. 241234567); restore it, in the school's country. */
+function parseImportPhone(value: string, country: string): string | null {
   const v = value.replace(/\.0$/, "").trim();
-  if (/^[25]\d{8}$/.test(v)) return normalizePhone(`0${v}`);
-  return normalizePhone(v);
+  // Restoring the lost 0 only where national numbers start with one.
+  if (countryProfile(country).trunkZero && countryProfile(country).mobile.test(v))
+    return normalizePhone(`0${v}`, country);
+  return normalizePhone(v, country);
 }
 
 export interface RowProblem {
@@ -376,7 +379,7 @@ async function checkRows(
     const guardianPhoneText = get("guardianPhone");
     let guardian: AddGuardianInput | null = null;
     if (guardianName || guardianPhoneText) {
-      const phone = guardianPhoneText ? parseImportPhone(guardianPhoneText) : null;
+      const phone = guardianPhoneText ? parseImportPhone(guardianPhoneText, ctx.tenant.countryCode) : null;
       if (guardianPhoneText && !phone)
         problem(
           "Guardian phone",

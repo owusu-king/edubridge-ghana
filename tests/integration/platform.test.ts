@@ -138,7 +138,7 @@ describe("operating schools", () => {
       maxCampuses: 3,
       maxStudents: 800,
       maxSmsPerMonth: null,
-      features: ["attendance", "assessment", "parent_view", "fee_reminders", "mobile_money"],
+      features: ["attendance", "assessment", "parent_view", "fee_reminders", "mobile_money", "admissions"],
     });
 
     await expect(

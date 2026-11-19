@@ -1,9 +1,9 @@
 "use client";
 
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useFormAction } from "@/components/ui/use-form-action";
 import type { FormState } from "@/web/forms";
+import { FormMessage } from "@/components/ui/toast";
 
 export function MfaPolicyForm({
   action,
@@ -18,9 +18,7 @@ export function MfaPolicyForm({
   const current = state.values ? (state.values.roles?.split(",") ?? []) : selected;
   return (
     <form onSubmit={onSubmit} className="space-y-5">
-      {state.status !== "idle" && state.message && (
-        <Alert tone={state.status === "success" ? "positive" : "critical"}>{state.message}</Alert>
-      )}
+      {state.status !== "idle" && state.message && <FormMessage state={state} />}
       <fieldset className="space-y-2">
         <legend className="mb-1.5 text-sm font-medium text-ink">Require two-step verification for</legend>
         {options.map((option) => (

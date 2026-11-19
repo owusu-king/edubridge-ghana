@@ -1,10 +1,11 @@
 import "server-only";
+import type { StudentStatus } from "@/lib/students";
 import { and, asc, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { isIsoDate } from "@/lib/attendance";
 import { daysBetween } from "@/lib/dashboard";
 import { todayIn } from "@/lib/format";
-import { parseCedis, sumPesewas } from "@/lib/money";
+import { parseMoney, sumPesewas } from "@/lib/money";
 import { recordAudit } from "../audit/record";
 import { queuePaymentReceipt } from "../messages/receipts";
 import { assertAllowed } from "../authz/permissions";
@@ -44,33 +45,41 @@ const scope = (ctx: TenantContext) => ({
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Enter a date.");
 const blankToUndefined = (v: unknown) => (typeof v === "string" && v.trim() === "" ? undefined : v);
 
-const recordSchema = z
-  .object({
-    studentId: z.string().uuid(),
-    amount: z.string().transform((text, ctx) => {
-      const pesewas = parseCedis(text);
-      if (pesewas === null || pesewas === 0) {
-        ctx.addIssue({ code: "custom", message: "Enter the amount received, like 450 or 450.50." });
-        return z.NEVER;
-      }
-      return pesewas;
-    }),
-    method: z.enum(PAYMENT_METHODS, { message: "Choose how the money was paid." }),
-    reference: z.preprocess(
-      blankToUndefined,
-      z.string().trim().max(60, "Use 60 characters or fewer.").optional(),
-    ),
-    payerName: z.preprocess(
-      blankToUndefined,
-      z.string().trim().max(120, "Use 120 characters or fewer.").optional(),
-    ),
-    paidOn: isoDate,
-    idempotencyKey: z.string().uuid(),
-  })
-  .refine((v) => v.method === "cash" || v.reference, {
-    message: "Enter the transaction, slip or cheque number.",
-    path: ["reference"],
-  });
+const recordSchema = (currency: string) =>
+  z
+    .object({
+      studentId: z.string().uuid(),
+      amount: z.string().transform((text, ctx) => {
+        const pesewas = parseMoney(text, currency);
+        if (pesewas === null || pesewas === 0) {
+          ctx.addIssue({ code: "custom", message: "Enter the amount received, like 450 or 450.50." });
+          return z.NEVER;
+        }
+        return pesewas;
+      }),
+      method: z.enum(PAYMENT_METHODS, { message: "Choose how the money was paid." }),
+      reference: z.preprocess(
+        blankToUndefined,
+        z.string().trim().max(60, "Use 60 characters or fewer.").optional(),
+      ),
+      payerName: z.preprocess(
+        blankToUndefined,
+        z.string().trim().max(120, "Use 120 characters or fewer.").optional(),
+      ),
+      paidOn: isoDate,
+      idempotencyKey: z.string().uuid(),
+      /** Set after the person has seen that the reference was used before and confirmed it is another payment. */
+      confirmDuplicate: z.boolean().optional(),
+      /** The provisional receipt given while offline (sync protocol only). */
+      provisionalReference: z
+        .string()
+        .regex(/^P-[0-9A-F]{8}-\d{4,6}$/, "Not a provisional receipt number.")
+        .optional(),
+    })
+    .refine((v) => v.method === "cash" || v.reference, {
+      message: "Enter the transaction, slip or cheque number.",
+      path: ["reference"],
+    });
 
 export interface RecordedPayment {
   paymentId: string;
@@ -125,6 +134,8 @@ export interface NewPayment {
   idempotencyKey: string;
   /** Null when the system recorded it (e.g. a Mobile Money confirmation processed by the worker). */
   recordedByUserId: string | null;
+  /** The provisional receipt given while offline, when the payment was taken without a connection. */
+  provisionalReference?: string | null;
 }
 
 /**
@@ -153,6 +164,7 @@ export async function insertPayment(
       paidOn: p.paidOn,
       idempotencyKey: p.idempotencyKey,
       recordedByUserId: p.recordedByUserId,
+      provisionalReference: p.provisionalReference ?? null,
     })
     .returning({ id: payments.id });
   await tx.insert(ledgerEntries).values({
@@ -172,11 +184,52 @@ export async function insertPayment(
     action: "payment.recorded",
     entityType: "payment",
     entityId: payment!.id,
-    metadata: { receipt: receiptNumber, amountPesewas: p.amountPesewas, method: p.method },
+    metadata: {
+      receipt: receiptNumber,
+      amountPesewas: p.amountPesewas,
+      method: p.method,
+      ...(p.provisionalReference ? { provisional: p.provisionalReference } : {}),
+    },
   });
   // The family's SMS receipt, if the school sends them (same transaction: only if the payment is saved).
   await queuePaymentReceipt(tx, { ...p, receiptNumber });
   return { paymentId: payment!.id, receiptNumber };
+}
+
+/**
+ * FIN-07: a bank slip, transfer or cheque number already on a payment (not voided) is usually the same
+ * money entered twice. The person is told where it was used and must confirm it is a different payment.
+ */
+export async function assertReferenceUnused(
+  tx: Transaction,
+  tenantId: string,
+  method: PaymentMethod,
+  reference: string,
+): Promise<void> {
+  const [used] = await tx
+    .select({
+      receiptNumber: payments.receiptNumber,
+      paidOn: payments.paidOn,
+      first: students.firstName,
+      last: students.lastName,
+    })
+    .from(payments)
+    .innerJoin(students, eq(students.id, payments.studentId))
+    .where(
+      and(
+        eq(payments.tenantId, tenantId),
+        eq(payments.method, method),
+        sql`lower(trim(${payments.reference})) = ${reference.trim().toLowerCase()}`,
+        sql`not exists (select 1 from ${paymentVoids} v where v.payment_id = ${payments.id})`,
+      ),
+    )
+    .limit(1);
+  if (used)
+    throw new DomainError(
+      "duplicate_reference",
+      `Reference ${reference.trim()} is already on receipt ${used.receiptNumber} (${used.first} ${used.last}, ${used.paidOn}). If this is a different payment, confirm it and save again.`,
+      "reference",
+    );
 }
 
 /**
@@ -189,7 +242,7 @@ export async function recordPayment(
   input: unknown,
 ): Promise<RecordedPayment> {
   assertAllowed(ctx, "payments.record");
-  const data = recordSchema.parse(input);
+  const data = recordSchema(ctx.tenant.currencyCode).parse(input);
   const today = todayIn(ctx.tenant.timezone);
   if (data.paidOn > today)
     throw new DomainError("future_date", "The payment date cannot be in the future.", "paidOn");
@@ -201,6 +254,8 @@ export async function recordPayment(
     return await withTenant(database, scope(ctx), async (tx) => {
       const student = await loadFinanceStudent(tx, ctx, data.studentId);
       if (!student) throw new DomainError("student_not_found", "Student not found.");
+      if (data.reference && !data.confirmDuplicate)
+        await assertReferenceUnused(tx, ctx.tenant.id, data.method, data.reference);
       const recorded = await insertPayment(tx, {
         tenantId: ctx.tenant.id,
         studentId: student.id,
@@ -211,6 +266,7 @@ export async function recordPayment(
         paidOn: data.paidOn,
         idempotencyKey: data.idempotencyKey,
         recordedByUserId: ctx.userId,
+        provisionalReference: data.provisionalReference ?? null,
       });
       return { ...recorded, replayed: false };
     });
@@ -537,7 +593,7 @@ export interface AccountRow {
   name: string;
   admissionNumber: string;
   className: string | null;
-  status: "active" | "withdrawn" | "graduated";
+  status: StudentStatus;
   balancePesewas: number;
 }
 
@@ -646,5 +702,47 @@ export async function listAccounts(
       owedPesewas: Number(totals?.owed ?? 0),
       creditPesewas: Number(totals?.credit ?? 0),
     };
+  });
+}
+
+export interface RosterStudent {
+  id: string;
+  name: string;
+  admissionNumber: string;
+  className: string | null;
+  balancePesewas: number;
+}
+
+/**
+ * Active students with their class this term and balance, for taking payments without a connection (the
+ * page keeps this list; names and balances only). Campus scope applies.
+ */
+export async function listPaymentRoster(database: Database, ctx: TenantContext): Promise<RosterStudent[]> {
+  assertAllowed(ctx, "payments.record");
+  return withTenant(database, scope(ctx), async (tx) => {
+    const rows = await tx.execute<{
+      id: string;
+      name: string;
+      admission_number: string;
+      class_name: string | null;
+      balance: string;
+    }>(sql`
+      select s.id, s.first_name || ' ' || s.last_name as name, s.admission_number, c.name as class_name,
+        coalesce((select sum(l.amount_pesewas) from ledger_entries l where l.student_id = s.id), 0)::text as balance
+      from students s
+      left join enrolments e on e.student_id = s.id
+        and e.term_id = (select id from terms where tenant_id = ${ctx.tenant.id} and is_current)
+      left join classes c on c.id = e.class_id
+      where s.tenant_id = ${ctx.tenant.id} and s.status = 'active'
+        and ${campusScopeFilter(ctx, sql.raw("s.id") as never) ?? sql`true`}
+      order by s.last_name, s.first_name
+      limit 5000`);
+    return rows.rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      admissionNumber: r.admission_number,
+      className: r.class_name,
+      balancePesewas: Number(r.balance),
+    }));
   });
 }

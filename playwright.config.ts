@@ -9,6 +9,9 @@ const PORT = Number(process.env.E2E_PORT ?? 3200);
 export default defineConfig({
   testDir: "tests/e2e",
   fullyParallel: true,
+  // One production server and the shared seeded school: on many-core machines Playwright's default (half
+  // the cores) overloads the server and specs time out at random. Override with E2E_WORKERS.
+  workers: Number(process.env.E2E_WORKERS ?? 4),
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? "github" : "list",
@@ -34,6 +37,8 @@ export default defineConfig({
       // Mobile Money uses the test-mode mock: no prompt is sent and no money moves. It posts its
       // callbacks to this server after 4 seconds (time enough for a test to check a prompt by hand).
       MOBILE_MONEY_PROVIDER: "mock",
+      // EduBridge invoices paid online in test mode: no money moves.
+      EDUBRIDGE_PAYMENTS_PROVIDER: "mock",
       MOBILE_MONEY_MOCK_CALLBACK_DELAY_MS: "4000",
       APP_URL: `http://localhost:${PORT}`,
       DEV_MAILBOX_FILE: ".dev-mailbox.jsonl",

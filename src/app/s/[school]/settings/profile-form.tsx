@@ -1,10 +1,10 @@
 "use client";
 
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
 import { useFormAction } from "@/components/ui/use-form-action";
 import type { FormState } from "@/web/forms";
+import { FormMessage } from "@/components/ui/toast";
 
 interface Props {
   action: (prev: FormState, formData: FormData) => Promise<FormState>;
@@ -16,9 +16,7 @@ export function ProfileForm({ action, defaults, timezones }: Props) {
   const { state, pending, onSubmit } = useFormAction(action);
   return (
     <form onSubmit={onSubmit} className="space-y-5" noValidate>
-      {state.status !== "idle" && state.message && (
-        <Alert tone={state.status === "success" ? "positive" : "critical"}>{state.message}</Alert>
-      )}
+      {state.status !== "idle" && state.message && <FormMessage state={state} />}
       <Field label="School name" error={state.fieldErrors?.name}>
         {(props) => (
           <Input

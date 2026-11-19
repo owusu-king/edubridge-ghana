@@ -5,10 +5,11 @@ import { z } from "zod";
 import type { Database } from "../db/client";
 import { withTenant } from "../db/context";
 import { mobileMoneyCallbacks, mobileMoneyRequests, tenants } from "../db/schema";
-import { ProviderError } from "./provider";
+import { providerNamed } from "./config";
+import { ProviderError, type MobileMoneyProvider } from "./provider";
 import {
   OPEN_STATUSES,
-  providerFor,
+  providersIn,
   settleRequest,
   type Actor,
   type MobileMoneyDeps,
@@ -55,7 +56,8 @@ export async function receiveMobileMoneyCallback(
   input: { providerName: string; tenantId: string | null; headers: Headers; rawBody: string },
   deps: MobileMoneyDeps = {},
 ): Promise<CallbackReceipt> {
-  const provider = providerFor(deps);
+  // The provider named in the callback URL, if this deployment has it (whichever school uses it now).
+  const provider = deps.provider !== undefined ? deps.provider : providerNamed(input.providerName);
   if (!provider || provider.name !== input.providerName) return { kind: "unknown_provider" };
   if (input.tenantId !== null && !isUuid(input.tenantId)) return { kind: "unknown_school" };
   const ref = provider.verifyCallback({ headers: input.headers, rawBody: input.rawBody });
@@ -107,15 +109,33 @@ const systemActor = (school: SchoolRef): Actor => ({
 });
 const systemScope = (school: SchoolRef) => ({ tenantId: school.id, userId: "" });
 
-/** Processes a school's stored callbacks, oldest first. */
+const add = (total: MobileMoneyWork, work: MobileMoneyWork) => {
+  total.callbacks += work.callbacks;
+  total.checked += work.checked;
+  total.recorded += work.recorded;
+  total.errors += work.errors;
+  return total;
+};
+
+/** Processes a school's stored callbacks, oldest first, for every provider this deployment has. */
 export async function processMobileMoneyCallbacks(
   database: Database,
   school: SchoolRef,
   deps: MobileMoneyDeps = {},
 ): Promise<MobileMoneyWork> {
+  const total = none();
+  for (const provider of providersIn(deps))
+    add(total, await processCallbacksWith(database, school, provider, deps));
+  return total;
+}
+
+async function processCallbacksWith(
+  database: Database,
+  school: SchoolRef,
+  provider: MobileMoneyProvider,
+  deps: MobileMoneyDeps,
+): Promise<MobileMoneyWork> {
   const work = none();
-  const provider = providerFor(deps);
-  if (!provider) return work;
   const now = deps.now ?? new Date();
   const queued = await withTenant(database, systemScope(school), (tx) =>
     tx
@@ -184,15 +204,27 @@ export async function processMobileMoneyCallbacks(
   return work;
 }
 
-/** Asks the provider about a school's prompts that are still waiting and due a check. */
+/**
+ * Asks providers about a school's prompts that are still waiting and due a check, each prompt with the
+ * provider that sent it.
+ */
 export async function pollOpenRequests(
   database: Database,
   school: SchoolRef,
   deps: MobileMoneyDeps = {},
 ): Promise<MobileMoneyWork> {
+  const total = none();
+  for (const provider of providersIn(deps)) add(total, await pollWith(database, school, provider, deps));
+  return total;
+}
+
+async function pollWith(
+  database: Database,
+  school: SchoolRef,
+  provider: MobileMoneyProvider,
+  deps: MobileMoneyDeps,
+): Promise<MobileMoneyWork> {
   const work = none();
-  const provider = providerFor(deps);
-  if (!provider) return work;
   const now = deps.now ?? new Date();
   const at = (msAgo: number) => new Date(now.getTime() - msAgo);
   const due: MobileMoneyRequest[] = await withTenant(database, systemScope(school), (tx) =>
@@ -250,21 +282,14 @@ export async function runMobileMoneyWork(
   deps: MobileMoneyDeps = {},
 ): Promise<MobileMoneyWork> {
   const total = none();
-  if (!providerFor(deps)) return total;
+  if (providersIn(deps).length === 0) return total;
   const schools = await database
     .select({ id: tenants.id, timezone: tenants.timezone })
     .from(tenants)
     .where(eq(tenants.status, "active"));
   for (const school of schools) {
-    for (const work of [
-      await processMobileMoneyCallbacks(database, school, deps),
-      await pollOpenRequests(database, school, deps),
-    ]) {
-      total.callbacks += work.callbacks;
-      total.checked += work.checked;
-      total.recorded += work.recorded;
-      total.errors += work.errors;
-    }
+    add(total, await processMobileMoneyCallbacks(database, school, deps));
+    add(total, await pollOpenRequests(database, school, deps));
   }
   return total;
 }

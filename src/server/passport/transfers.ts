@@ -432,8 +432,9 @@ export async function approveTransfer(database: Database, ctx: TenantContext, id
     await tx
       .update(students)
       .set({
-        status: "withdrawn",
+        status: "transferred",
         leftReason: `Transferred to ${destination?.name ?? "another school"}`,
+        statusChangedAt: new Date(),
         updatedAt: new Date(),
       })
       .where(and(eq(students.tenantId, ctx.tenant.id), eq(students.id, t.fromStudentId)));

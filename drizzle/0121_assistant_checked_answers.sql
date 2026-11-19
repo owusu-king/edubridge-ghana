@@ -1,0 +1,1 @@
+ALTER TABLE "assistant_queries" ADD COLUMN "unchecked_figures" jsonb DEFAULT '[]'::jsonb NOT NULL;

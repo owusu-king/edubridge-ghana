@@ -65,3 +65,14 @@ export function campusScopeFilter(ctx: TenantContext, studentId: AnyPgColumn): S
     where ${enrolments.studentId} = ${studentId} and ${inArray(classes.campusId, campusIds)}
   )`;
 }
+
+/**
+ * The same context, limited to one campus (OVR-01, reports): figures then use exactly the scope a member of
+ * that campus has, so the overview and the reports agree. Only ever narrows: a campus outside the person's
+ * own scope, or anything that is not a campus id, leaves the context as it is.
+ */
+export function narrowToCampus(ctx: TenantContext, campusId: string | null | undefined): TenantContext {
+  if (!campusId || !/^[0-9a-f-]{36}$/i.test(campusId)) return ctx;
+  if (ctx.campusIds !== null && !ctx.campusIds.includes(campusId)) return ctx;
+  return { ...ctx, campusIds: [campusId] };
+}

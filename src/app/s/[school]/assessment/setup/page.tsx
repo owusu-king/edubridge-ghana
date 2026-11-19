@@ -7,7 +7,9 @@ import { buttonStyles } from "@/components/ui/button";
 import { FormDialog } from "@/components/ui/form-dialog";
 import { EmptyState, Section } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { STAGE_LABELS } from "@/server/academics/classes";
+import { ChoiceForm } from "@/components/ui/action-forms";
+import { CURRICULUM_TEMPLATES } from "@/lib/curricula";
+import { REPORT_CARD_STYLE_INFO, REPORT_CARD_STYLES } from "@/lib/report-styles";
 import { getAssessmentSetup } from "@/server/assessment/setup";
 import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
@@ -17,7 +19,9 @@ import {
   addSubjectAction,
   resetScaleAction,
   saveScaleAction,
+  saveReportStyleAction,
   saveSchemeAction,
+  saveTemplateAction,
   setupSubjectsAction,
   updateSubjectAction,
 } from "../actions";
@@ -170,6 +174,47 @@ export default async function AssessmentSetupPage({
       </Section>
 
       <Section
+        title="Starting point"
+        description="The template that suggests subjects and default grades. Changing it does not change subjects or grades you have already set."
+      >
+        <ChoiceForm
+          action={saveTemplateAction.bind(null, slug)}
+          name="curriculumTemplate"
+          label="Template"
+          value={setup.template.id}
+          options={CURRICULUM_TEMPLATES.map((t) => ({
+            value: t.id,
+            label: t.name,
+            description: t.description,
+          }))}
+        />
+      </Section>
+
+      <Section
+        title="Report cards"
+        description="How report cards are laid out. Each card keeps the layout it was published in."
+      >
+        <ChoiceForm
+          action={saveReportStyleAction.bind(null, slug)}
+          name="reportCardStyle"
+          label="Layout"
+          value={setup.reportCard.chosen ?? "template"}
+          options={[
+            {
+              value: "template",
+              label: `As the template suggests (${REPORT_CARD_STYLE_INFO[setup.reportCard.templateStyle].label})`,
+              description: "Follows the starting point above if you change it.",
+            },
+            ...REPORT_CARD_STYLES.map((style) => ({
+              value: style,
+              label: REPORT_CARD_STYLE_INFO[style].label,
+              description: REPORT_CARD_STYLE_INFO[style].description,
+            })),
+          ]}
+        />
+      </Section>
+
+      <Section
         title="Grades"
         description="The lowest whole mark for each grade, per stage. Published report cards keep the grades they were published with."
       >
@@ -180,7 +225,7 @@ export default async function AssessmentSetupPage({
             {setup.scales.map((scale) => (
               <div key={scale.stage} className="rounded-lg border border-line bg-surface p-5 shadow-raised">
                 <h3 className="mb-3 text-base font-semibold text-ink">
-                  {STAGE_LABELS[scale.stage]}
+                  {setup.template.stageLabels[scale.stage]}
                   <span className="ml-2 text-sm font-normal text-ink-3">
                     {scale.custom ? "Your school's" : "Default"}
                   </span>
@@ -188,7 +233,7 @@ export default async function AssessmentSetupPage({
                 <ScaleForm
                   action={saveScaleAction.bind(null, slug, scale.stage)}
                   resetAction={resetScaleAction.bind(null, slug, scale.stage)}
-                  stageLabel={STAGE_LABELS[scale.stage]}
+                  stageLabel={setup.template.stageLabels[scale.stage]}
                   bands={scale.bands}
                   custom={scale.custom}
                 />

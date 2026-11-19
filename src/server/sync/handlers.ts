@@ -1,8 +1,12 @@
 import "server-only";
 import { z } from "zod";
 import { saveScores } from "../assessment/scores";
-import { syncRegister } from "../attendance/registers";
+import { syncAnyRegister } from "../attendance/lessons";
 import { createStudent, createStudentSchema, findPossibleDuplicates } from "../students/service";
+import { withTenant } from "../db/context";
+import { DomainError } from "../errors";
+import { recordPayment } from "../fees/payments";
+import { readPreferences } from "../tenancy/preferences";
 import type { OperationHandler, OperationKind } from "./protocol";
 
 /**
@@ -10,13 +14,16 @@ import type { OperationHandler, OperationKind } from "./protocol";
  * idempotency and the outcome format around it.
  */
 
-/** A class register: marks with the version each was made from (as the offline register screen sends). */
+/**
+ * A class register, or a lesson register when the payload names a period: marks with the version each was
+ * made from (as the offline register screen sends).
+ */
 const attendanceRegister: OperationHandler = async (database, ctx, payload, op) => {
   const input =
     payload && typeof payload === "object"
       ? { source: "offline", recordedAt: op.recordedAt, ...(payload as Record<string, unknown>) }
       : payload;
-  const result = await syncRegister(database, ctx, input);
+  const result = await syncAnyRegister(database, ctx, input);
   return {
     status: result.conflicts.length ? "conflict" : "applied",
     result: result as unknown as Record<string, unknown>,
@@ -62,7 +69,49 @@ const studentRegister: OperationHandler = async (database, ctx, payload) => {
   return { status: "applied", result: created };
 };
 
+const paymentPayload = z.object({
+  studentId: z.string().uuid(),
+  amount: z.string().max(20),
+  method: z.string(),
+  reference: z.string().max(60).optional(),
+  payerName: z.string().max(120).optional(),
+  paidOn: z.string(),
+  provisionalReference: z.string(),
+  /** Set after the person has seen the reference was used before and confirmed it is another payment. */
+  confirmDuplicate: z.boolean().optional(),
+});
+
+/**
+ * A payment taken without a connection, with a provisional receipt (only where the Proprietor allows it).
+ * The operation id is the payment's idempotency key, so it is recorded once, with the school's next official
+ * receipt number, through the same code as a payment taken online: closed periods, permissions and the
+ * duplicate-reference check all apply. A reference used before comes back for the person to confirm.
+ */
+const paymentRecord: OperationHandler = async (database, ctx, payload, op) => {
+  const p = paymentPayload.parse(payload);
+  const prefs = await withTenant(database, { tenantId: ctx.tenant.id, userId: ctx.userId }, (tx) =>
+    readPreferences(tx, ctx.tenant.id),
+  );
+  if (!prefs.offlineReceiptsEnabled)
+    throw new DomainError(
+      "offline_receipts_off",
+      "The Proprietor has not allowed payments to be taken offline.",
+    );
+  try {
+    const recorded = await recordPayment(database, ctx, { ...p, idempotencyKey: op.id });
+    return {
+      status: "applied",
+      result: { receiptNumber: recorded.receiptNumber, paymentId: recorded.paymentId },
+    };
+  } catch (error) {
+    if (error instanceof DomainError && error.code === "duplicate_reference")
+      return { status: "conflict", result: { duplicateReference: error.message } };
+    throw error;
+  }
+};
+
 export const SYNC_HANDLERS: Record<OperationKind, OperationHandler> = {
+  "payment.record": paymentRecord,
   "attendance.register": attendanceRegister,
   "assessment.scores": assessmentScores,
   "student.register": studentRegister,

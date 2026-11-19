@@ -1,17 +1,17 @@
 "use client";
 
 import { useActionState } from "react";
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import type { FormState } from "@/web/forms";
 import { changePasswordAction, signOutOthersAction, updateProfileAction } from "./actions";
+import { FormMessage } from "@/components/ui/toast";
 
 const idle = { status: "idle" } as const;
 
 function Message({ state }: { state: FormState<unknown> }) {
   if (state.status === "idle" || !state.message) return null;
-  return <Alert tone={state.status === "success" ? "positive" : "critical"}>{state.message}</Alert>;
+  return <FormMessage state={state} />;
 }
 
 export function ProfileForm({ name }: { name: string }) {

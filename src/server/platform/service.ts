@@ -1,4 +1,5 @@
 import "server-only";
+import { COUNTRY_CODES, COUNTRY_PROFILES, type CountryCode } from "@/lib/countries";
 import { asc, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "../audit/record";
@@ -7,6 +8,7 @@ import { setTenantContext, withTenant, withUser } from "../db/context";
 import { campuses, invitations, platformAdmins, tenantEntitlements, tenants } from "../db/schema";
 import { DomainError, PG_UNIQUE_VIOLATION, pgErrorCode } from "../errors";
 import { issueInvitation, type IssuedInvitation } from "../invitations/service";
+import { presetForNewSchool } from "../billing/preset-values";
 import { isValidSlug } from "../tenancy/slug";
 import { SUPPORTED_TIMEZONES } from "../tenancy/service";
 import { DEFAULT_PLAN_FEATURES, FEATURES } from "../../lib/plan";
@@ -17,8 +19,12 @@ import { DEFAULT_PLAN_FEATURES, FEATURES } from "../../lib/plan";
  * from anyone else (see drizzle/0003_platform_campuses_rls.sql). Every action is audited in the school's log.
  */
 
-export const SUPPORTED_COUNTRIES = ["GH", "NG", "KE", "RW", "ZA"] as const;
-export const SUPPORTED_CURRENCIES = ["GHS", "USD", "NGN", "KES", "RWF", "ZAR", "GBP", "EUR"] as const;
+/** The countries with a profile (src/lib/countries.ts): currency, phone numbering, holidays, networks. */
+export const SUPPORTED_COUNTRIES = COUNTRY_CODES as [CountryCode, ...CountryCode[]];
+/** Every profile's currency, plus those international schools bill in. */
+export const SUPPORTED_CURRENCIES = [
+  ...new Set([...Object.values(COUNTRY_PROFILES).map((p) => p.currency), "USD", "GBP", "EUR"]),
+] as [string, ...string[]];
 
 export class NotPlatformAdminError extends Error {
   constructor() {
@@ -78,6 +84,11 @@ export const createSchoolSchema = z
   })
   .and(entitlementsSchema);
 
+/** A new school's plan comes from a preset (SUB-01) or is set by hand (the plan fields). */
+const presetChoice = z.object({
+  presetId: z.preprocess((v) => (v === "" || v === undefined ? null : v), z.string().uuid().nullable()),
+});
+
 export interface CreatedSchool {
   tenantId: string;
   slug: string;
@@ -92,7 +103,11 @@ export async function createSchool(
   input: unknown,
 ): Promise<CreatedSchool> {
   await assertPlatformAdmin(database, actorUserId);
-  const data = createSchoolSchema.parse(input);
+  const { presetId } = presetChoice.parse(input ?? {});
+  // With a preset, its name and limits replace the plan fields (which may be left empty).
+  const data = createSchoolSchema.parse(
+    presetId ? { ...(input as object), planName: "Preset", maxCampuses: 1, maxStudents: null } : input,
+  );
   try {
     return await withUser(database, actorUserId, async (tx) => {
       const result = await tx.execute<{ id: string }>(
@@ -100,14 +115,19 @@ export async function createSchool(
       );
       const tenantId = result.rows[0]!.id;
       await setTenantContext(tx, { tenantId, userId: actorUserId });
-      await tx.insert(tenantEntitlements).values({
-        tenantId,
-        planName: data.planName,
-        maxCampuses: data.maxCampuses,
-        maxStudents: data.maxStudents,
-        maxSmsPerMonth: data.maxSmsPerMonth ?? null,
-        features: data.features ?? [...DEFAULT_PLAN_FEATURES],
-      });
+      const fromPreset = presetId ? await presetForNewSchool(tx, presetId, data.currencyCode) : null;
+      await tx.insert(tenantEntitlements).values(
+        fromPreset
+          ? { tenantId, ...fromPreset }
+          : {
+              tenantId,
+              planName: data.planName,
+              maxCampuses: data.maxCampuses,
+              maxStudents: data.maxStudents,
+              maxSmsPerMonth: data.maxSmsPerMonth ?? null,
+              features: data.features ?? [...DEFAULT_PLAN_FEATURES],
+            },
+      );
       await tx.insert(campuses).values({ tenantId, name: "Main campus" });
       await recordAudit(tx, {
         tenantId,
@@ -117,7 +137,8 @@ export async function createSchool(
         entityId: tenantId,
         metadata: {
           slug: data.slug,
-          plan: data.planName,
+          plan: fromPreset?.planName ?? data.planName,
+          presetId,
           maxCampuses: data.maxCampuses,
           maxStudents: data.maxStudents,
         },

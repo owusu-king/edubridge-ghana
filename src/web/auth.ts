@@ -1,5 +1,4 @@
 import "server-only";
-import { isIP } from "node:net";
 import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
@@ -10,11 +9,14 @@ import {
   type SessionUser,
   type ValidatedSession,
 } from "@/server/auth/sessions";
+import { moduleForSchoolPath } from "@/lib/modules";
+import { clientIpFrom } from "@/server/auth/client-ip";
 import { hasMfa } from "@/server/auth/mfa";
 import { db } from "@/server/db/client";
 import { isPlatformAdmin } from "@/server/platform/service";
 import { recordSupportView } from "@/server/support/access";
-import { resolveTenantContext, type TenantContext } from "@/server/tenancy/service";
+import { listUserSchools, resolveTenantContext, type TenantContext } from "@/server/tenancy/service";
+import { LAST_SCHOOL_COOKIE, rememberedSchool } from "./last-school";
 import { SESSION_COOKIE, sessionCookieOptions } from "./session-cookie";
 
 /**
@@ -63,11 +65,19 @@ export const requireTenant = cache(
     const user = await requireUser();
     const ctx = await resolveTenantContext(db(), slug, user.id);
     if (!ctx) notFound();
+    const h = await headers();
+    // ENT-03: a module's own pages, their forms and downloads are "not found" unless the module is active for
+    // the school, whatever the member's role. The path comes from the proxy (always overwritten), never the
+    // client; pages keep their own permission checks as a second layer.
+    const path = h.get("x-edubridge-path");
+    const routeModule = path ? moduleForSchoolPath(path, slug) : null;
+    // A read-only module (ENT-08) keeps its pages for viewing; its services refuse changes.
+    const routeState = routeModule ? ctx.modules[routeModule]?.state : null;
+    if (routeModule && routeState !== "active" && routeState !== "read_only") notFound();
     // The school's policy may require two-step verification for this member's roles.
     if (ctx.mfaRequired && !(await hasMfa(db(), user.id))) redirect("/account/security?required=school");
     // EduBridge support: every page opened and every form sent is recorded for the Proprietor (PLT-02).
     if (ctx.support) {
-      const h = await headers();
       await recordSupportView(
         db(),
         ctx,
@@ -79,21 +89,41 @@ export const requireTenant = cache(
   },
 );
 
+/**
+ * Which part of the product frames a person's account pages: the school they last opened (or else their
+ * first school), or the platform area for a platform administrator with no school. Only schools the person
+ * is a member of are used, and never while that school's two-step rule is still unmet: null then, so the
+ * account pages show just the setup they need, without a way into the school before it is done (and
+ * without the redirect loop requireTenant would cause here).
+ */
+export async function resolveAccountArea(
+  user: SessionUser,
+): Promise<{ kind: "school"; ctx: TenantContext } | { kind: "platform" } | null> {
+  const remembered = rememberedSchool((await cookies()).get(LAST_SCHOOL_COOKIE)?.value);
+  const [schools, platformAdmin, mfa] = await Promise.all([
+    listUserSchools(db(), user.id),
+    isPlatformAdmin(db(), user.id),
+    hasMfa(db(), user.id),
+  ]);
+  const slug = schools.find((s) => s.slug === remembered)?.slug ?? schools[0]?.slug;
+  if (slug) {
+    const ctx = await resolveTenantContext(db(), slug, user.id);
+    if (ctx && !ctx.support) return ctx.mfaRequired && !mfa ? null : { kind: "school", ctx };
+  }
+  if (platformAdmin && (process.env.PLATFORM_MFA_REQUIRED === "false" || mfa)) return { kind: "platform" };
+  return null;
+}
+
 export async function signOutCurrentSession(): Promise<void> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (token) await revokeSessionToken(db(), token);
   await clearSessionCookie();
 }
 
-/**
- * Client IP and user agent. X-Forwarded-For is only trustworthy behind a reverse proxy that
- * overwrites it, which production must have.
- * Invalid values are discarded (the column type is inet).
- */
+/** Client IP (see `clientIpFrom` for which address is trusted) and user agent. */
 export async function getClientInfo(): Promise<{ ipAddress: string | null; userAgent: string | null }> {
   const h = await headers();
-  const forwarded = h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? h.get("x-real-ip") ?? "";
-  return { ipAddress: isIP(forwarded) ? forwarded : null, userAgent: h.get("user-agent") };
+  return { ipAddress: clientIpFrom(h), userAgent: h.get("user-agent") };
 }
 
 /** The signed-in platform administrator. Everyone else gets a 404, so the area is not disclosed. */

@@ -9,12 +9,14 @@ import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { listGuardians, RELATIONSHIP_LABELS } from "@/server/students/guardians";
 import { listStudentMessages } from "@/server/messages/history";
-import { listPriorRecords } from "@/server/passport/records";
+import { listPriorRecords, releaseBalance } from "@/server/passport/records";
+import { listStudentDocuments } from "@/server/students/profile";
 import { getStudentAccount } from "@/server/fees/ledger";
 import { listConcessions } from "@/server/fees/concessions";
+import { listRefunds } from "@/server/fees/refunds";
 import { getPaymentPlan } from "@/server/fees/payment-plans";
 import { hasOpeningBalance, suggestedAsOf } from "@/server/fees/opening-balances";
-import { listFeeItems } from "@/server/fees/structure";
+import { listFeeItems, listStudentFeeOptions } from "@/server/fees/structure";
 import { listMobileMoneyRequests, mobileMoneySetup } from "@/server/mobile-money/requests";
 import { getReminderState } from "@/server/fees/reminders";
 import { feeReminderMessage, feeReminderSms, whatsappLink } from "@/lib/fee-messages";
@@ -22,17 +24,20 @@ import { balanceLinkUrl } from "@/server/notifications/templates";
 import { getStudent, listClassOptions } from "@/server/students/service";
 import { formatCalendarDate, formatDateTime, todayIn } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
+import { moneyFormatter } from "@/lib/money";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 import { assignClassAction, setStudentStatusAction, updateStudentAction } from "../actions";
 import { ChangeClassDialog, EditStudentDialog, StatusDialog } from "../student-forms";
 import {
   addGuardianAction,
+  inviteGuardianAction,
   makePrimaryAction,
   setParentAccessAction,
   unlinkGuardianAction,
   updateGuardianAction,
 } from "./guardian-actions";
+import { ActionButton } from "@/components/ui/action-forms";
 import {
   AddGuardianDialog,
   EditGuardianDialog,
@@ -42,13 +47,22 @@ import {
 } from "./guardian-controls";
 import { FeeAccount } from "./fee-account";
 
+import { FinanceExtras } from "./finance-extras";
+import { ProfileExtras } from "./profile-extras";
+import { saveGuardianFlagsAction } from "./profile-actions";
+import { GuardianFlagsDialog } from "./profile-controls";
+import { GUARDIAN_FLAG_LABELS } from "@/lib/guardians";
 import { LearnerRecords } from "./learner-records";
+
+import type { StudentStatus } from "@/lib/students";
 
 export const metadata: Metadata = { title: "Student" };
 
-const STATUS = {
+const STATUS: Record<StudentStatus, React.ReactNode> = {
   active: <StatusText tone="positive">Active</StatusText>,
+  suspended: <StatusText tone="caution">Suspended</StatusText>,
   withdrawn: <StatusText tone="neutral">Withdrawn</StatusText>,
+  transferred: <StatusText tone="neutral">Transferred</StatusText>,
   graduated: <StatusText tone="neutral">Graduated</StatusText>,
 };
 
@@ -56,13 +70,17 @@ const MESSAGE_KINDS = {
   fee_reminder: "Fee reminder",
   payment_receipt: "Payment receipt",
   absence_alert: "Absence alert",
+  fees_billed: "Fees billed",
+  portal_invitation: "Parent view invitation",
 } as const;
 
 export default async function StudentPage({ params }: { params: Promise<{ school: string; id: string }> }) {
   const { school, id } = await params;
   const { ctx } = await requireTenant(school);
+  const showMoney = moneyFormatter(ctx.tenant.currencyCode);
   if (!allowed(ctx, "students.view")) notFound();
   const canSeeFees = allowed(ctx, "fees.view");
+  const releaseOwed = allowed(ctx, "transfers.manage") ? await releaseBalance(db(), ctx, id) : null;
   const [student, guardianLinks, account] = await Promise.all([
     getStudent(db(), ctx, id),
     listGuardians(db(), ctx, id),
@@ -88,7 +106,11 @@ export default async function StudentPage({ params }: { params: Promise<{ school
       ? await suggestedAsOf(db(), ctx)
       : undefined;
   const messages = allowed(ctx, "students.view_all") ? await listStudentMessages(db(), ctx, id) : null;
+  const [feeOptions, studentRefunds] = account
+    ? await Promise.all([listStudentFeeOptions(db(), ctx, id), listRefunds(db(), ctx, { studentId: id })])
+    : [[], []];
   const prior = allowed(ctx, "students.view_all") ? await listPriorRecords(db(), ctx, id) : [];
+  const documents = allowed(ctx, "students.view_all") ? await listStudentDocuments(db(), ctx, id) : [];
   const links = guardianLinks ?? [];
   const slug = ctx.tenant.slug;
   const canManage = allowed(ctx, "students.manage");
@@ -113,6 +135,12 @@ export default async function StudentPage({ params }: { params: Promise<{ school
             <span className="inline-flex flex-wrap items-center gap-3">
               <span className="font-mono text-sm">{student.admissionNumber}</span>
               {STATUS[student.status]}
+              {student.preferredName && (
+                <span className="text-sm text-ink-2">Known as {student.preferredName}</span>
+              )}
+              {student.statusReason && student.status !== "active" && (
+                <span className="text-sm text-ink-3">{student.statusReason}</span>
+              )}
             </span>
           }
           actions={
@@ -123,12 +151,7 @@ export default async function StudentPage({ params }: { params: Promise<{ school
                   defaults={student}
                 />
                 <StatusDialog
-                  action={setStudentStatusAction.bind(
-                    null,
-                    slug,
-                    student.id,
-                    student.status === "active" ? "withdrawn" : "active",
-                  )}
+                  action={setStudentStatusAction.bind(null, slug, student.id)}
                   status={student.status}
                   name={student.fullName}
                 />
@@ -183,6 +206,7 @@ export default async function StudentPage({ params }: { params: Promise<{ school
           </Section>
           {account && (
             <FeeAccount
+              currency={ctx.tenant.currencyCode}
               slug={slug}
               account={account}
               canManage={allowed(ctx, "fees.manage")}
@@ -195,6 +219,9 @@ export default async function StudentPage({ params }: { params: Promise<{ school
               plan={plan}
               outreach={{
                 statementHref: schoolPath(slug, `students/${student.id}/statement`),
+                familyStatementHref: links.some((g) => g.otherStudents.length > 0)
+                  ? schoolPath(slug, `students/${student.id}/family-statement`)
+                  : null,
                 canRemind: allowed(ctx, "fees.remind"),
                 reminder:
                   account.balancePesewas > 0 && reminderState?.contact?.phone
@@ -229,6 +256,19 @@ export default async function StudentPage({ params }: { params: Promise<{ school
                   .flatMap((g) => (g.phone ? [{ name: g.fullName, phone: formatPhone(g.phone) }] : [])),
                 timeZone: ctx.tenant.timezone,
               }}
+            />
+          )}
+          {account && (
+            <FinanceExtras
+              currency={ctx.tenant.currencyCode}
+              slug={slug}
+              studentId={student.id}
+              balancePesewas={account.balancePesewas}
+              options={feeOptions}
+              refunds={studentRefunds}
+              canManage={allowed(ctx, "fees.manage")}
+              canRefund={allowed(ctx, "fees.refund")}
+              pendingDiscounts={concessions.filter((c) => c.status === "pending").length}
             />
           )}
         </div>
@@ -279,7 +319,15 @@ export default async function StudentPage({ params }: { params: Promise<{ school
                       {g.isPrimary && <Badge tone="accent">Primary contact</Badge>}
                       {g.portalBlockedAt && <Badge tone="critical">Blocked from parent view</Badge>}
                     </p>
-                    <p className="text-sm text-ink-3">{RELATIONSHIP_LABELS[g.relationship]}</p>
+                    <p className="text-sm text-ink-3">
+                      {[
+                        RELATIONSHIP_LABELS[g.relationship],
+                        ...GUARDIAN_FLAG_LABELS.filter(([k]) => k !== "receivesMessages" && g[k]).map(
+                          ([, l]) => l,
+                        ),
+                        ...(g.receivesMessages ? [] : ["No announcements by SMS"]),
+                      ].join(" · ")}
+                    </p>
                     {g.phone && (
                       <a href={`tel:${g.phone}`} className="block text-sm text-accent hover:underline">
                         {formatPhone(g.phone)}
@@ -317,11 +365,23 @@ export default async function StudentPage({ params }: { params: Promise<{ school
                                 name={g.fullName}
                               />
                             )}
+                            <GuardianFlagsDialog
+                              action={saveGuardianFlagsAction.bind(null, slug, student.id, g.guardianId)}
+                              name={g.fullName}
+                              flags={g}
+                            />
                             <RemoveGuardianButton
                               action={unlinkGuardianAction.bind(null, slug, student.id, g.guardianId)}
                               name={g.fullName}
                             />
                           </>
+                        )}
+                        {canManageParentAccess && g.phone && !g.portalBlockedAt && (
+                          <ActionButton
+                            action={inviteGuardianAction.bind(null, slug, student.id, g.guardianId)}
+                            label={g.portalInvitedAt ? "Invite again" : "Invite to parent view"}
+                            ariaLabel={`Invite ${g.fullName} to the parent view by SMS`}
+                          />
                         )}
                         {canManageParentAccess && g.phone && (
                           <ParentAccessButton
@@ -366,10 +426,21 @@ export default async function StudentPage({ params }: { params: Promise<{ school
               )}
             </Section>
           )}
+          <ProfileExtras
+            slug={slug}
+            studentId={student.id}
+            hasPhoto={student.photo}
+            canManage={canManage}
+            canSeeDocuments={allowed(ctx, "students.view_all")}
+            canSeeMedical={allowed(ctx, "students.medical")}
+            documents={documents}
+            timezone={ctx.tenant.timezone}
+          />
           <LearnerRecords
             prior={prior}
             downloadUrl={allowed(ctx, "transfers.manage") ? `/s/${slug}/students/${id}/record` : null}
             timezone={ctx.tenant.timezone}
+            owed={releaseOwed && releaseOwed > 0 ? showMoney(releaseOwed) : null}
           />
         </div>
       </div>

@@ -3,8 +3,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Users } from "lucide-react";
 import { Button, buttonStyles } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/field";
+import { Select } from "@/components/ui/field";
 import { EmptyState, PageHeader } from "@/components/ui/layout";
+import { PageNav } from "@/components/ui/page-nav";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
@@ -12,8 +13,9 @@ import { listClassOptions, listStudents, PAGE_SIZE } from "@/server/students/ser
 import { formatPhone } from "@/lib/phone";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
-import { addStudentAction } from "./actions";
+import { registerStudentAction } from "./actions";
 import { AddStudentDialog } from "./student-forms";
+import { ExpandingSearch } from "@/components/ui/expanding-search";
 
 export const metadata: Metadata = { title: "Students" };
 
@@ -48,7 +50,6 @@ export default async function StudentsPage({
     });
     return `${schoolPath(slug, "students")}?${qs}` as Route;
   };
-  const classes = classOptions.map((c) => ({ id: c.id, name: c.name }));
 
   return (
     <div className="space-y-6">
@@ -60,41 +61,43 @@ export default async function StudentsPage({
             : "Students in the classes you teach."
         }
         actions={
-          canManage && (
-            <>
-              <Link href={schoolPath(slug, "students/import")} className={buttonStyles("secondary")}>
-                Import
-              </Link>
-              <Link href={schoolPath(slug, "students/register")} className={buttonStyles("secondary")}>
-                Register (works offline)
-              </Link>
-              {allowed(ctx, "transfers.manage") && (
-                <Link href={schoolPath(slug, "students/transfers")} className={buttonStyles("secondary")}>
-                  Transfers
+          <>
+            <ExpandingSearch
+              form="student-filters"
+              defaultValue={search.q}
+              placeholder="Name or admission number"
+              label="Search by name or admission number"
+              buttonLabel="Find students"
+            />
+            {canManage && (
+              <>
+                <Link href={schoolPath(slug, "students/import")} className={buttonStyles("secondary")}>
+                  Import
                 </Link>
-              )}
-              <AddStudentDialog
-                action={addStudentAction.bind(null, slug)}
-                classes={classes}
-                defaultClassId={search.class}
-              />
-            </>
-          )
+                {allowed(ctx, "transfers.manage") && (
+                  <Link href={schoolPath(slug, "students/transfers")} className={buttonStyles("secondary")}>
+                    Transfers
+                  </Link>
+                )}
+                <AddStudentDialog
+                  action={registerStudentAction.bind(null, slug)}
+                  classes={classOptions.map((c) => ({ id: c.id, name: c.name }))}
+                  defaultClassId={classOptions.some((c) => c.id === search.class) ? search.class : undefined}
+                  registerHref={`${schoolPath(slug, "students/register")}${search.class ? `?class=${encodeURIComponent(search.class)}` : ""}`}
+                />
+              </>
+            )}
+          </>
         }
       />
 
-      <form method="get" className="flex flex-col gap-2 sm:flex-row" role="search" aria-label="Find students">
-        <label htmlFor="student-search" className="sr-only">
-          Search by name or admission number
-        </label>
-        <Input
-          id="student-search"
-          name="q"
-          type="search"
-          defaultValue={search.q}
-          placeholder="Name or admission number"
-          className="sm:max-w-xs"
-        />
+      <form
+        id="student-filters"
+        method="get"
+        className="flex flex-col gap-2 sm:flex-row"
+        role="search"
+        aria-label="Find students"
+      >
         <label htmlFor="class-filter" className="sr-only">
           Class
         </label>
@@ -189,25 +192,7 @@ export default async function StudentsPage({
               </TBody>
             </Table>
           </TableFrame>
-          {pages > 1 && (
-            <nav aria-label="Student pages" className="flex items-center justify-between text-sm text-ink-2">
-              <span>
-                Page {result.page} of {pages}
-              </span>
-              <span className="flex gap-2">
-                {result.page > 1 && (
-                  <Link href={pageHref(result.page - 1)} className={buttonStyles("secondary", "sm")}>
-                    Previous
-                  </Link>
-                )}
-                {result.page < pages && (
-                  <Link href={pageHref(result.page + 1)} className={buttonStyles("secondary", "sm")}>
-                    Next
-                  </Link>
-                )}
-              </span>
-            </nav>
-          )}
+          <PageNav label="Student pages" page={result.page} pages={pages} href={pageHref} />
         </>
       )}
     </div>

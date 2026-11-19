@@ -1,6 +1,7 @@
 import type { Metadata, Route } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { OfflineNotice } from "@/components/parents/offline-notice";
 import { Wordmark } from "@/components/ui/wordmark";
 import { getParentSession } from "@/web/parent-auth";
 import { signOutParentAction } from "./actions";
@@ -35,6 +36,7 @@ export default async function ParentLayout({ children }: { children: ReactNode }
           )}
         </div>
       </header>
+      <OfflineNotice renderedAt={new Date().toISOString()} />
       <main className="mx-auto w-full max-w-xl flex-1 px-4 py-6 sm:py-8">{children}</main>
       <footer className="mx-auto w-full max-w-xl px-4 pb-6 text-xs text-ink-3">
         EduBridge · Fees and school information for parents

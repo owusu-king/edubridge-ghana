@@ -36,7 +36,11 @@ export async function setupLevelsAction(slug: string, _prev: FormState, formData
   return run(
     slug,
     formData,
-    (ctx) => setupDefaultLevels(db(), ctx, { stages: formData.getAll("stages").map(String) }),
+    (ctx) =>
+      setupDefaultLevels(db(), ctx, {
+        stages: formData.getAll("stages").map(String),
+        template: formData.get("template") || undefined,
+      }),
     "Levels created.",
   );
 }

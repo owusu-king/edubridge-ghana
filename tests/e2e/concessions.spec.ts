@@ -27,7 +27,12 @@ test.describe("as the accountant", () => {
   test("gives a sibling a discount that billing applies, then ends it", async ({ page }) => {
     const label = `Sibling discount ${randomUUID().slice(0, 4)}`;
     // Seeded: Grace Mensah is guardian of Kwame Mensah and Efua Ofori (who has a pending sibling discount).
+    // Families are paged, so find this one by searching for a child.
     await page.goto(`${SCHOOL.path}/fees/families`);
+    await page.getByRole("button", { name: "Find families" }).click();
+    await page.getByLabel("Search by guardian, phone, child or admission number").fill("Kwame Mensah");
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/fees\/families\?q=Kwame/);
     const family = page.getByRole("table", { name: "Children of Grace Mensah" });
     await expect(family.getByRole("row", { name: /Kwame Mensah/ })).toBeVisible();
     await expect(family.getByRole("row", { name: /Efua Ofori.*Sibling discount/ })).toBeVisible();

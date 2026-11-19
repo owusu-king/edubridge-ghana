@@ -12,13 +12,34 @@ import { METHOD_LABELS } from "@/server/fees/payments";
 import type { InstalmentStatus } from "@/server/fees/plan-schedule";
 import { getParentChild } from "@/server/parents/portal";
 import { listTransferSchools } from "@/server/passport/transfers";
-import { formatCalendarDate, todayIn } from "@/lib/format";
-import { formatCedis } from "@/lib/money";
+import { formatCalendarDate, formatDateTime, formatTime, todayIn } from "@/lib/format";
+import { RIDE_DIRECTION_LABELS, TRIP_DIRECTION_LABELS } from "@/lib/transport";
+import { moneyFormatter } from "@/lib/money";
 import { attendanceRate, attended, STATUS_LABELS } from "@/lib/attendance";
 import { cn } from "@/lib/cn";
 import { requireParent } from "@/web/parent-auth";
+import { StatementRangeForm } from "@/components/fees/statement-range";
+import { CheckPaymentButton, PayOnlineForm } from "@/components/parents/pay-forms";
+import { checkPaymentAction, payOnlineAction } from "../../payment-actions";
+import {
+  listParentPaymentAttempts,
+  parentPaymentSetup,
+  type MobileMoneyRequestStatus,
+} from "@/server/mobile-money/requests";
+import { formatPhone, maskPhone } from "@/lib/phone";
 
 export const metadata: Metadata = { title: "Fees and reports" };
+
+const ATTEMPT: Record<
+  MobileMoneyRequestStatus,
+  { label: string; tone: "positive" | "caution" | "critical" | "neutral" }
+> = {
+  pending: { label: "Waiting for approval", tone: "caution" },
+  expired: { label: "Not approved in time", tone: "neutral" },
+  successful: { label: "Paid", tone: "positive" },
+  failed: { label: "Did not go through", tone: "critical" },
+  needs_review: { label: "Being checked by the school", tone: "caution" },
+};
 
 const INSTALMENT: Record<
   InstalmentStatus,
@@ -43,6 +64,12 @@ export default async function ParentChildPage({
   const { phone } = await requireParent();
   const child = await getParentChild(db(), phone, slug, studentId);
   if (!child) notFound();
+  const showMoney = moneyFormatter(child.school.currencyCode);
+  const [setup, attempts] = await Promise.all([
+    parentPaymentSetup(db(), child.school),
+    listParentPaymentAttempts(db(), phone, slug, studentId),
+  ]);
+  const canPay = setup.enabled && child.summary.balancePesewas > 0 && child.summary.status !== "transferred";
   const { summary, account, plan } = child;
   const base = `/p/${slug}/${studentId}`;
   const entries = [...account.entries].reverse();
@@ -57,7 +84,13 @@ export default async function ParentChildPage({
           <ArrowLeft aria-hidden="true" className="size-4" />
           Your children
         </Link>
-        <h1 className="mt-2 font-display text-2xl font-medium tracking-tight">{summary.name}</h1>
+        <h1 className="mt-2 flex items-center gap-3 font-display text-2xl font-medium tracking-tight">
+          {child.logoUrl && (
+            // eslint-disable-next-line @next/next/no-img-element -- the school's own logo
+            <img src={child.logoUrl} alt="" className="size-10 shrink-0 rounded-md object-contain" />
+          )}
+          {summary.name}
+        </h1>
         <p className="mt-1 text-sm text-ink-3">
           {[child.school.name, summary.className, `Admission no. ${child.admissionNumber}`]
             .filter(Boolean)
@@ -74,9 +107,9 @@ export default async function ParentChildPage({
             <p className="text-sm text-ink-3">
               School fees as of {formatCalendarDate(todayIn(child.school.timezone))}
             </p>
-            <ChildFacts child={summary} />
+            <ChildFacts currency={child.school.currencyCode} child={summary} />
           </div>
-          <BalanceFigure pesewas={summary.balancePesewas} size="lg" />
+          <BalanceFigure currency={child.school.currencyCode} pesewas={summary.balancePesewas} size="lg" />
         </div>
         <a
           href={`${base}/statement`}
@@ -85,7 +118,63 @@ export default async function ParentChildPage({
           <FileDown aria-hidden="true" className="size-4" />
           Download statement (PDF)
         </a>
+        <div className="mt-2 -ml-3.5">
+          <StatementRangeForm href={`${base}/statement`} today={todayIn(child.school.timezone)} />
+        </div>
       </section>
+
+      {(canPay || (attempts?.length ?? 0) > 0) && (
+        <section aria-labelledby="pay" className="space-y-3">
+          <div>
+            <h2 id="pay" className="text-md font-semibold text-ink">
+              Pay by Mobile Money
+            </h2>
+            <p className="mt-0.5 text-sm text-ink-3">
+              Pay all or part of the balance. You approve it on your phone; the receipt appears below.
+            </p>
+          </div>
+          {canPay && (
+            <div className="rounded-lg border border-line bg-surface px-4 py-4">
+              <PayOnlineForm
+                currency={child.school.currencyCode}
+                action={payOnlineAction.bind(null, slug, studentId)}
+                defaultAmount={(child.summary.balancePesewas / 100).toFixed(2)}
+                phone={formatPhone(phone)}
+                testMode={setup.testMode}
+                testHint={setup.testHint}
+                networks={setup.networks}
+              />
+            </div>
+          )}
+          {attempts && attempts.length > 0 && (
+            <ul
+              aria-label="Recent online payments"
+              className="divide-y divide-line rounded-lg border border-line bg-surface"
+            >
+              {attempts.map((a) => (
+                <li key={a.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="flex flex-wrap items-center gap-2 text-base text-ink">
+                      <span className="tabular-nums">{showMoney(a.amountPesewas)}</span>
+                      <StatusText tone={ATTEMPT[a.status].tone}>{ATTEMPT[a.status].label}</StatusText>
+                    </p>
+                    <p className="text-sm text-ink-3">
+                      {formatDateTime(a.createdAt, child.school.timezone)} · {maskPhone(a.msisdn)}
+                      {a.receiptNumber ? ` · ${a.receiptNumber}` : ""}
+                    </p>
+                    {a.status === "failed" && a.statusReason && (
+                      <p className="text-sm text-ink-3">{a.statusReason}</p>
+                    )}
+                  </div>
+                  {(a.status === "pending" || a.status === "expired") && (
+                    <CheckPaymentButton action={checkPaymentAction.bind(null, slug, studentId, a.id)} />
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {plan && (
         <section aria-labelledby="plan" className="space-y-3">
@@ -94,21 +183,106 @@ export default async function ParentChildPage({
               Payment plan
             </h2>
             <p className="mt-0.5 text-sm text-ink-3">
-              {formatCedis(plan.totalPesewas)} in {plan.progress.instalments.length} instalments ·{" "}
-              {formatCedis(plan.progress.remainingPesewas)} left to pay
+              {showMoney(plan.totalPesewas)} in {plan.progress.instalments.length} instalments ·{" "}
+              {showMoney(plan.progress.remainingPesewas)} left to pay
             </p>
           </div>
           <ol className="divide-y divide-line rounded-lg border border-line bg-surface">
             {plan.progress.instalments.map((inst) => (
               <li key={inst.sequence} className="flex items-center justify-between gap-4 px-4 py-3">
                 <div>
-                  <p className="text-base text-ink tabular-nums">{formatCedis(inst.amountPesewas)}</p>
+                  <p className="text-base text-ink tabular-nums">{showMoney(inst.amountPesewas)}</p>
                   <p className="text-sm text-ink-3">By {formatCalendarDate(inst.dueOn)}</p>
                 </div>
                 <StatusText tone={INSTALMENT[inst.status].tone}>{INSTALMENT[inst.status].label}</StatusText>
               </li>
             ))}
           </ol>
+        </section>
+      )}
+
+      {child.transport && (
+        <section aria-labelledby="school-bus" className="space-y-3">
+          <div>
+            <h2 id="school-bus" className="text-md font-semibold text-ink">
+              School bus
+            </h2>
+            <p className="mt-0.5 text-sm text-ink-3">
+              {child.transport.route} · {RIDE_DIRECTION_LABELS[child.transport.ride].toLowerCase()}
+            </p>
+          </div>
+          <div className="rounded-lg border border-line bg-surface px-4 py-4">
+            <p className="text-base text-ink">{child.transport.stop}</p>
+            <p className="mt-1 text-sm text-ink-3">
+              {[
+                child.transport.ride !== "from_school" &&
+                  child.transport.morningTime &&
+                  `Morning about ${child.transport.morningTime}`,
+                child.transport.ride !== "to_school" &&
+                  child.transport.afternoonTime &&
+                  `afternoon about ${child.transport.afternoonTime}`,
+              ]
+                .filter(Boolean)
+                .join(", ") || "Ask the school for the times."}
+            </p>
+            <ul className="mt-3 divide-y divide-line border-t border-line">
+              {child.transport.today.length === 0 ? (
+                <li className="py-2 text-sm text-ink-3">Not on the bus yet today.</li>
+              ) : (
+                child.transport.today.map((t) => (
+                  <li key={t.direction} className="flex justify-between gap-3 py-2 text-sm">
+                    <span className="text-ink">{TRIP_DIRECTION_LABELS[t.direction]}</span>
+                    <span className="text-right text-ink-2">
+                      On the bus {formatTime(t.boardedAt, child.school.timezone)}
+                      {t.leftAt
+                        ? `, ${t.direction === "to_school" ? "at school" : "got off"} ${formatTime(t.leftAt, child.school.timezone)}`
+                        : ""}
+                    </span>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+        </section>
+      )}
+
+      {child.boarding && (
+        <section aria-labelledby="boarding" className="space-y-3">
+          <h2 id="boarding" className="text-md font-semibold text-ink">
+            Boarding
+          </h2>
+          <div className="rounded-lg border border-line bg-surface px-4 py-4">
+            <p className="text-base text-ink">{child.boarding.house}</p>
+            <p className="mt-1 text-sm text-ink-3">
+              {child.boarding.room}, {child.boarding.bed}
+            </p>
+            {child.boarding.exeat && (
+              <p className="mt-3 border-t border-line pt-3 text-sm text-ink-2">
+                Out on exeat since {formatDateTime(child.boarding.exeat.outAt, child.school.timezone)}, due
+                back {formatCalendarDate(child.boarding.exeat.expectedBackOn)}.
+              </p>
+            )}
+          </div>
+        </section>
+      )}
+
+      {child.libraryBooks && child.libraryBooks.length > 0 && (
+        <section aria-labelledby="library-books" className="space-y-3">
+          <h2 id="library-books" className="text-md font-semibold text-ink">
+            Library books
+          </h2>
+          <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
+            {child.libraryBooks.map((b) => (
+              <li key={`${b.title}-${b.dueOn}`} className="flex justify-between gap-3 px-4 py-3 text-sm">
+                <span className="text-ink">{b.title}</span>
+                <span className={b.daysLate > 0 ? "text-critical" : "text-ink-2"}>
+                  {b.daysLate > 0
+                    ? `${b.daysLate} ${b.daysLate === 1 ? "day" : "days"} late`
+                    : `Due ${formatCalendarDate(b.dueOn)}`}
+                </span>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 
@@ -186,7 +360,7 @@ export default async function ParentChildPage({
                 <div className="min-w-0">
                   <p className="flex flex-wrap items-center gap-2 text-base text-ink">
                     <span className={cn("tabular-nums", p.voided && "text-ink-3 line-through")}>
-                      {formatCedis(p.amountPesewas)}
+                      {showMoney(p.amountPesewas)}
                     </span>
                     {p.voided && <Badge tone="critical">Voided</Badge>}
                   </p>
@@ -230,12 +404,12 @@ export default async function ParentChildPage({
                 <div className="shrink-0 text-right tabular-nums">
                   <p className={cn("text-base", e.amountPesewas < 0 ? "text-positive" : "text-ink")}>
                     {e.amountPesewas < 0 ? "−" : ""}
-                    {formatCedis(Math.abs(e.amountPesewas))}
+                    {showMoney(Math.abs(e.amountPesewas))}
                   </p>
                   <p className="text-sm text-ink-3">
                     {e.balancePesewas < 0
-                      ? `${formatCedis(-e.balancePesewas)} in credit`
-                      : `Balance ${formatCedis(e.balancePesewas)}`}
+                      ? `${showMoney(-e.balancePesewas)} in credit`
+                      : `Balance ${showMoney(e.balancePesewas)}`}
                   </p>
                 </div>
               </li>

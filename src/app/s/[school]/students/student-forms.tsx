@@ -1,9 +1,15 @@
 "use client";
 
+import type { Route } from "next";
+import Link from "next/link";
 import { Plus } from "lucide-react";
-import { Field, Input, Select } from "@/components/ui/field";
+import { STATUS_CHANGES, STUDENT_STATUS_LABELS, type StudentStatus } from "@/lib/students";
+import { Field, Input, Select, Textarea } from "@/components/ui/field";
+import { Disclosure } from "@/components/ui/disclosure";
 import { FormDialog } from "@/components/ui/form-dialog";
+import type { ReactNode } from "react";
 import type { FormState } from "@/web/forms";
+import type { RegisterState } from "./actions";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
 export interface ClassOption {
@@ -13,20 +19,27 @@ export interface ClassOption {
 interface StudentDefaults {
   firstName?: string;
   otherNames?: string | null;
+  preferredName?: string | null;
   lastName?: string;
   sex?: string;
   dateOfBirth?: string | null;
   admissionNumber?: string;
 }
 
+/**
+ * A student's own details, two to a row: names, then sex and date of birth, then (for a new student) the
+ * class this term and the admission number. `classSelect` sits beside the admission number when given.
+ */
 function StudentFields({
   state,
   defaults = {},
   autoNumber,
+  classSelect,
 }: {
-  state: FormState;
+  state: FormState<unknown>;
   defaults?: StudentDefaults;
   autoNumber: boolean;
+  classSelect?: ReactNode;
 }) {
   const v = state.values ?? {};
   const e = state.fieldErrors ?? {};
@@ -57,19 +70,29 @@ function StudentFields({
             />
           )}
         </Field>
-      </div>
-      <Field label="Other names" description="Optional." error={e.otherNames}>
-        {(p) => (
-          <Input
-            {...p}
-            name="otherNames"
-            defaultValue={v.otherNames ?? defaults.otherNames ?? ""}
-            maxLength={60}
-            autoComplete="off"
-          />
-        )}
-      </Field>
-      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Other names" optional error={e.otherNames}>
+          {(p) => (
+            <Input
+              {...p}
+              name="otherNames"
+              defaultValue={v.otherNames ?? defaults.otherNames ?? ""}
+              maxLength={60}
+              autoComplete="off"
+            />
+          )}
+        </Field>
+        <Field label="Known as" optional error={e.preferredName}>
+          {(p) => (
+            <Input
+              {...p}
+              name="preferredName"
+              defaultValue={v.preferredName ?? defaults.preferredName ?? ""}
+              placeholder="If different"
+              maxLength={60}
+              autoComplete="off"
+            />
+          )}
+        </Field>
         <Field label="Sex" error={e.sex}>
           {(p) => (
             <Select {...p} name="sex" defaultValue={v.sex ?? defaults.sex ?? ""} required>
@@ -81,7 +104,7 @@ function StudentFields({
             </Select>
           )}
         </Field>
-        <Field label="Date of birth" description="Optional." error={e.dateOfBirth}>
+        <Field label="Date of birth" optional error={e.dateOfBirth}>
           {(p) => (
             <Input
               {...p}
@@ -91,22 +114,25 @@ function StudentFields({
             />
           )}
         </Field>
+        {classSelect}
+        <Field
+          label="Admission number"
+          optional={autoNumber}
+          error={e.admissionNumber}
+          className={classSelect ? undefined : "sm:col-span-2"}
+        >
+          {(p) => (
+            <Input
+              {...p}
+              name="admissionNumber"
+              defaultValue={v.admissionNumber ?? defaults.admissionNumber ?? ""}
+              placeholder={autoNumber ? "Automatic" : undefined}
+              maxLength={30}
+              autoComplete="off"
+            />
+          )}
+        </Field>
       </div>
-      <Field
-        label="Admission number"
-        description={autoNumber ? "Leave empty to number automatically." : undefined}
-        error={e.admissionNumber}
-      >
-        {(p) => (
-          <Input
-            {...p}
-            name="admissionNumber"
-            defaultValue={v.admissionNumber ?? defaults.admissionNumber ?? ""}
-            maxLength={30}
-            autoComplete="off"
-          />
-        )}
-      </Field>
     </>
   );
 }
@@ -118,7 +144,7 @@ function ClassSelect({
   allowNone,
 }: {
   classes: ClassOption[];
-  state: FormState;
+  state: FormState<unknown>;
   defaultValue?: string;
   allowNone: boolean;
 }) {
@@ -156,7 +182,7 @@ export function GuardianFields({
   withRelationship = true,
   withEmail = false,
 }: {
-  state: FormState;
+  state: FormState<unknown>;
   prefix?: string;
   legend?: string;
   defaults?: { fullName?: string; phone?: string | null; email?: string | null };
@@ -230,14 +256,28 @@ export function GuardianFields({
   );
 }
 
+/** The guardian section has something typed in it, or an error to show. */
+function guardianInUse(state: FormState<unknown>): boolean {
+  const typed = ["guardianFullName", "guardianPhone"].some((k) => state.values?.[k]?.trim());
+  return typed || Object.keys(state.fieldErrors ?? {}).some((k) => k.startsWith("guardian"));
+}
+
+/**
+ * Adding one student from the students list: their details, a class and an optional first guardian. A
+ * possible duplicate comes back to be confirmed; registering several children, or offline, has its own page.
+ */
 export function AddStudentDialog({
   action,
   classes,
   defaultClassId,
+  registerHref,
 }: {
-  action: Action;
+  action: (prev: RegisterState, formData: FormData) => Promise<RegisterState>;
   classes: ClassOption[];
+  /** Preselected when the list is showing one class. */
   defaultClassId?: string;
+  /** The registration page that also works offline. */
+  registerHref: string;
 }) {
   return (
     <FormDialog
@@ -248,15 +288,51 @@ export function AddStudentDialog({
         </>
       }
       triggerVariant="primary"
-      title="Add student"
+      title="Add a student"
       submitLabel="Add student"
+      size="lg"
       action={action}
     >
       {(state) => (
         <>
-          <StudentFields state={state} autoNumber />
-          <ClassSelect classes={classes} state={state} defaultValue={defaultClassId} allowNone />
-          <GuardianFields state={state} prefix="guardian" legend="Primary contact (optional)" />
+          {state.data?.duplicates.length ? (
+            <div className="space-y-3 rounded-lg border border-caution/25 bg-caution-soft px-4 py-3">
+              <p className="text-sm text-ink">
+                <strong className="font-semibold">This child may already be on record:</strong>
+              </p>
+              <ul className="space-y-0.5 text-sm text-ink-2">
+                {state.data.duplicates.map((d) => (
+                  <li key={d.id}>
+                    {d.name}, {d.admissionNumber}
+                    {d.dateOfBirth ? `, born ${d.dateOfBirth}` : ""}
+                    {d.status !== "active" ? ` (${STUDENT_STATUS_LABELS[d.status]})` : ""}
+                  </li>
+                ))}
+              </ul>
+              <label className="flex items-start gap-2.5 text-sm text-ink">
+                <input type="checkbox" name="confirmDuplicate" className="mt-0.5 size-4 accent-accent" />
+                This is a different child. Add them anyway.
+              </label>
+            </div>
+          ) : null}
+          <StudentFields
+            state={state}
+            autoNumber
+            classSelect={
+              <ClassSelect classes={classes} state={state} defaultValue={defaultClassId} allowNone />
+            }
+          />
+          {/* Open when the guardian has values or errors coming back, so nothing is hidden. */}
+          <Disclosure title="Add a guardian" open={guardianInUse(state)}>
+            <GuardianFields state={state} prefix="guardian" />
+          </Disclosure>
+          <p className="text-sm text-ink-3">
+            Several children, or a weak connection?{" "}
+            <Link href={registerHref as Route} className="font-medium text-accent hover:underline">
+              Use the registration page
+            </Link>
+            , which works offline.
+          </p>
         </>
       )}
     </FormDialog>
@@ -305,29 +381,43 @@ export function StatusDialog({
   name,
 }: {
   action: Action;
-  status: "active" | "withdrawn" | "graduated";
+  status: StudentStatus;
   name: string;
 }) {
-  if (status !== "active") {
-    return (
-      <FormDialog
-        trigger="Reactivate"
-        title={`Reactivate ${name}?`}
-        description="They return to the active student list. Place them in a class afterwards."
-        submitLabel="Reactivate"
-        action={action}
-      />
-    );
-  }
+  const choices = STATUS_CHANGES[status];
   return (
     <FormDialog
-      trigger="Withdraw"
+      trigger={status === "active" ? "Change status" : "Reactivate or change"}
       triggerVariant="ghost"
-      title={`Withdraw ${name}?`}
-      description="Use this when a student leaves the school. Their records are kept and they leave this term's class."
-      submitLabel="Withdraw student"
-      danger
+      title={`Change the status of ${name}`}
+      description="Suspended students stay in their class. Students who leave (withdrawn, transferred, graduated) leave this term's class; their records are kept."
+      submitLabel="Change status"
       action={action}
-    />
+    >
+      {(state) => (
+        <div className="space-y-5">
+          <Field label="New status" error={state.fieldErrors?.status}>
+            {(p) => (
+              <Select {...p} name="status" defaultValue={state.values?.status ?? choices[0]}>
+                {choices.map((c) => (
+                  <option key={c} value={c}>
+                    {STUDENT_STATUS_LABELS[c]}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <Field
+            label="Reason"
+            description="Required, except when reactivating."
+            error={state.fieldErrors?.reason}
+          >
+            {(p) => (
+              <Textarea {...p} name="reason" rows={2} maxLength={200} defaultValue={state.values?.reason} />
+            )}
+          </Field>
+        </div>
+      )}
+    </FormDialog>
   );
 }

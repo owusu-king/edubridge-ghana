@@ -9,18 +9,21 @@ test("an administrator adds, finds, edits, moves and withdraws a student", async
   await page.getByRole("navigation", { name: "School" }).getByRole("link", { name: "Students" }).click();
   await expect(page.getByText(/active students · Classes for Term 1, 2026\/2027/)).toBeVisible();
 
+  // "Add student" opens a dialog; a missing field is reported and what was typed is kept.
   await page.getByRole("button", { name: "Add student" }).click();
-  const dialog = page.getByRole("dialog", { name: "Add student" });
-  await dialog.getByLabel("First name").fill("Serwaa");
-  await dialog.getByLabel("Surname").fill(surname);
-  await dialog.getByRole("button", { name: "Add student" }).click();
-  await expect(dialog.getByText("Choose female or male.")).toBeVisible();
-  await expect(dialog.getByLabel("First name")).toHaveValue("Serwaa");
-  await dialog.getByLabel("Sex").selectOption("female");
-  await dialog.getByLabel("Date of birth").fill("2017-04-09");
-  await dialog.getByLabel("Class this term").selectOption({ label: "Basic 4B" });
-  await dialog.getByRole("button", { name: "Add student" }).click();
-  await expect(dialog).toBeHidden();
+  const form = page.getByRole("dialog", { name: "Add a student" });
+  await form.getByLabel("First name").fill("Serwaa");
+  await form.getByLabel("Surname").fill(surname);
+  await form.getByRole("button", { name: "Add student" }).click();
+  await expect(form.getByText("Choose female or male.")).toBeVisible();
+  await expect(form.getByLabel("First name")).toHaveValue("Serwaa");
+  await form.getByLabel("Sex").selectOption("female");
+  await form.getByLabel("Date of birth").fill("2017-04-09");
+  await form.getByLabel("Class this term").selectOption({ label: "Basic 4B" });
+  await form.getByRole("button", { name: "Add student" }).click();
+  // Added: the new student's record opens.
+  await expect(page.getByRole("heading", { level: 1, name: `Serwaa ${surname}` })).toBeVisible();
+  await page.getByRole("navigation", { name: "School" }).getByRole("link", { name: "Students" }).click();
 
   // Find by surname.
   await page.getByRole("searchbox", { name: "Search by name or admission number" }).fill(surname);
@@ -42,9 +45,13 @@ test("an administrator adds, finds, edits, moves and withdraws a student", async
     page.getByRole("table", { name: "Class history" }).getByRole("cell", { name: "Basic 4A" }),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "Withdraw" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Withdraw student" }).click();
-  await expect(page.getByText("Withdrawn")).toBeVisible();
+  await page.getByRole("button", { name: "Change status" }).click();
+  const status = page.getByRole("dialog");
+  await status.getByLabel("New status").selectOption({ label: "Withdrawn" });
+  await status.getByLabel("Reason").fill("Family moved away");
+  await status.getByRole("button", { name: "Change status" }).click();
+  await expect(status).toBeHidden();
+  await expect(page.getByText("Withdrawn", { exact: true })).toBeVisible();
   await expect(page.getByText("Not in a class this term")).toBeVisible();
 });
 

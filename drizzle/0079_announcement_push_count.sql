@@ -1,0 +1,1 @@
+ALTER TABLE "announcements" ADD COLUMN "push_count" integer DEFAULT 0 NOT NULL;

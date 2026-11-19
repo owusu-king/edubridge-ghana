@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Field, Input, Select } from "@/components/ui/field";
 import { FormDialog } from "@/components/ui/form-dialog";
 import { cn } from "@/lib/cn";
-import { formatCedis, parseCedis } from "@/lib/money";
+import { currencySymbol, formatMoney, parseMoney } from "@/lib/money";
 import type { FormState } from "@/web/forms";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
@@ -150,11 +150,11 @@ export function CopyStructureDialog({ action, terms }: { action: Action; terms: 
 /** Amounts as typed, keyed by field name. */
 type Amounts = Record<string, string>;
 
-function sumTyped(values: (string | undefined)[]): number | null {
+function sumTyped(values: (string | undefined)[], currency: string): number | null {
   let total = 0;
   for (const value of values) {
     if (!value?.trim()) continue;
-    const pesewas = parseCedis(value);
+    const pesewas = parseMoney(value, currency);
     if (pesewas === null) return null;
     total += pesewas;
   }
@@ -166,6 +166,7 @@ function sumTyped(values: (string | undefined)[]): number | null {
  * classes, a column per class for any class that pays differently.
  */
 export function LevelFeesDialog({
+  currency,
   action,
   levelName,
   termLabel,
@@ -174,6 +175,8 @@ export function LevelFeesDialog({
   initial,
   hasAmounts,
 }: {
+  /** The school's currency (ISO 4217). */
+  currency: string;
   action: Action;
   levelName: string;
   termLabel: string;
@@ -189,22 +192,27 @@ export function LevelFeesDialog({
       triggerSize="sm"
       triggerLabel={`${hasAmounts ? "Edit" : "Set"} fees for ${levelName}`}
       title={`${levelName} fees`}
-      description={`${termLabel}. Amounts in cedis. Leave an item blank if ${levelName} does not pay it.`}
+      description={`${termLabel}. Amounts in ${currencySymbol(currency)}. Leave an item blank if ${levelName} does not pay it.`}
       submitLabel="Save fees"
       size={classes.length > 1 ? "lg" : "md"}
       action={action}
     >
-      {(state) => <AmountGrid state={state} items={items} classes={classes} initial={initial} />}
+      {(state) => (
+        <AmountGrid currency={currency} state={state} items={items} classes={classes} initial={initial} />
+      )}
     </FormDialog>
   );
 }
 
 function AmountGrid({
+  currency,
   state,
   items,
   classes,
   initial,
 }: {
+  /** The school's currency (ISO 4217). */
+  currency: string;
   state: FormState;
   items: Option[];
   classes: Option[];
@@ -227,10 +235,16 @@ function AmountGrid({
       className="h-9 min-w-24 text-right tabular-nums"
     />
   );
-  const levelTotal = sumTyped(items.map((i) => amounts[levelField(i.value)]));
+  const levelTotal = sumTyped(
+    items.map((i) => amounts[levelField(i.value)]),
+    currency,
+  );
   const classTotal = (classId: string) =>
-    sumTyped(items.map((i) => amounts[classField(classId, i.value)]?.trim() || amounts[levelField(i.value)]));
-  const total = (value: number | null) => (value === null ? "Check amounts" : formatCedis(value));
+    sumTyped(
+      items.map((i) => amounts[classField(classId, i.value)]?.trim() || amounts[levelField(i.value)]),
+      currency,
+    );
+  const total = (value: number | null) => (value === null ? "Check amounts" : formatMoney(value, currency));
 
   return (
     <div className="space-y-3">
@@ -315,12 +329,15 @@ export function BillTermDialog({
   students,
   charges,
   discounts,
+  canNotify,
 }: {
   action: Action;
   termLabel: string;
   students: number;
   charges?: string;
   discounts?: string;
+  /** SMS can be sent (not a demo school, SMS not paused). */
+  canNotify: boolean;
 }) {
   const who = `${students} ${students === 1 ? "student" : "students"}`;
   const adds = [charges && `${charges} of charges`, discounts && `${discounts} of discounts`]
@@ -334,6 +351,20 @@ export function BillTermDialog({
       description={`This adds ${adds} to their accounts, from the fee structure and their scholarships. Entries are not edited afterwards; a mistake is corrected with a reversal.`}
       submitLabel={`Bill ${who}`}
       action={action}
-    />
+    >
+      {() =>
+        canNotify ? (
+          <label className="flex items-start gap-3 text-base text-ink">
+            <input type="checkbox" name="notify" defaultChecked className="mt-1 size-4 accent-accent" />
+            <span>
+              Send each family an SMS with their new balance
+              <span className="block text-sm text-ink-3">
+                To the guardian who pays the fees, else the main contact.
+              </span>
+            </span>
+          </label>
+        ) : null
+      }
+    </FormDialog>
   );
 }

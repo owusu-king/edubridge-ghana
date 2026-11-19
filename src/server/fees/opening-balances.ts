@@ -2,7 +2,7 @@ import "server-only";
 import { and, eq, like, sql } from "drizzle-orm";
 import { z } from "zod";
 import { todayIn } from "@/lib/format";
-import { parseCedis, sumPesewas } from "@/lib/money";
+import { parseCedis, parseMoney, sumPesewas } from "@/lib/money";
 import { recordAudit } from "../audit/record";
 import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
@@ -57,7 +57,7 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Enter a date.");
  * Reads a balance as written in school records: "1,200.50" or "GH₵ 1200" is owed; "-300", "(300)",
  * "300 CR" or "CR 300" is a credit (paid in advance). Returns signed pesewas, or null if unreadable.
  */
-export function parseBalance(text: string): number | null {
+export function parseBalance(text: string, currency = "GHS"): number | null {
   let value = text.trim().replace(/\s+/g, " ");
   let credit = false;
   if (/^\(.*\)$/.test(value)) {
@@ -76,7 +76,8 @@ export function parseBalance(text: string): number | null {
     if (m.trim().endsWith("-")) credit = true;
     return "";
   });
-  const pesewas = parseCedis(value.trim());
+  // Other currencies: their own code and symbol are read by parseMoney.
+  const pesewas = currency === "GHS" ? parseCedis(value.trim()) : parseMoney(value.trim(), currency);
   if (pesewas === null) return null;
   return credit ? -pesewas : pesewas;
 }
@@ -194,7 +195,7 @@ async function checkRows(tx: Transaction, ctx: TenantContext, parsed: ParsedFile
       return;
     }
     seen.add(student.id);
-    const amount = parseBalance(amountText);
+    const amount = parseBalance(amountText, ctx.tenant.currencyCode);
     if (amount === null) {
       problems.push({
         row,
@@ -293,17 +294,21 @@ export async function importOpeningBalances(
   });
 }
 
-const openingSchema = z.object({
-  amount: z.string().transform((text, ctx) => {
-    const pesewas = parseBalance(text);
-    if (pesewas === null || pesewas === 0) {
-      ctx.addIssue({ code: "custom", message: "Enter the amount owed, or a negative amount for a credit." });
-      return z.NEVER;
-    }
-    return pesewas;
-  }),
-  asOf: isoDate,
-});
+const openingSchema = (currency: string) =>
+  z.object({
+    amount: z.string().transform((text, ctx) => {
+      const pesewas = parseBalance(text, currency);
+      if (pesewas === null || pesewas === 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Enter the amount owed, or a negative amount for a credit.",
+        });
+        return z.NEVER;
+      }
+      return pesewas;
+    }),
+    asOf: isoDate,
+  });
 
 const OPENING_EXISTS =
   "This student already has an opening balance. Reverse it on the statement first to enter a new one.";
@@ -316,7 +321,7 @@ export async function setOpeningBalance(
   input: unknown,
 ): Promise<void> {
   assertAllowed(ctx, "fees.manage");
-  const { amount, asOf } = openingSchema.parse(input);
+  const { amount, asOf } = openingSchema(ctx.tenant.currencyCode).parse(input);
   if (asOf > todayIn(ctx.tenant.timezone))
     throw new DomainError("future_date", "The date cannot be in the future.", "asOf");
   await withTenant(database, scope(ctx), async (tx) => {
@@ -360,18 +365,19 @@ export async function hasOpeningBalance(
   );
 }
 
-const adjustmentSchema = z.object({
-  direction: z.enum(["charge", "credit"], { message: "Choose charge or credit." }),
-  amount: z.string().transform((text, ctx) => {
-    const pesewas = parseCedis(text);
-    if (pesewas === null || pesewas === 0) {
-      ctx.addIssue({ code: "custom", message: "Enter an amount, like 50 or 50.00." });
-      return z.NEVER;
-    }
-    return pesewas;
-  }),
-  description: z.string().trim().min(3, "Say what this is for.").max(120, "Use 120 characters or fewer."),
-});
+const adjustmentSchema = (currency: string) =>
+  z.object({
+    direction: z.enum(["charge", "credit"], { message: "Choose charge or credit." }),
+    amount: z.string().transform((text, ctx) => {
+      const pesewas = parseMoney(text, currency);
+      if (pesewas === null || pesewas === 0) {
+        ctx.addIssue({ code: "custom", message: "Enter an amount, like 50 or 50.00." });
+        return z.NEVER;
+      }
+      return pesewas;
+    }),
+    description: z.string().trim().min(3, "Say what this is for.").max(120, "Use 120 characters or fewer."),
+  });
 
 /** A one-off charge (lost book, excursion) or credit (refund owed, goodwill) on one student's account. */
 export async function recordAdjustment(
@@ -381,7 +387,7 @@ export async function recordAdjustment(
   input: unknown,
 ): Promise<void> {
   assertAllowed(ctx, "fees.manage");
-  const { direction, amount, description } = adjustmentSchema.parse(input);
+  const { direction, amount, description } = adjustmentSchema(ctx.tenant.currencyCode).parse(input);
   const signed = direction === "charge" ? amount : -amount;
   await withTenant(database, scope(ctx), async (tx) => {
     const student = await loadFinanceStudent(tx, ctx, studentId);

@@ -1,0 +1,2 @@
+ALTER TABLE "mobile_money_requests" DROP CONSTRAINT "mobile_money_requests_currency";--> statement-breakpoint
+ALTER TABLE "mobile_money_requests" ADD CONSTRAINT "mobile_money_requests_currency" CHECK ("mobile_money_requests"."currency" ~ '^[A-Z]{3}$');

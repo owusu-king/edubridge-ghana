@@ -33,7 +33,21 @@ import {
   levels,
   loginAttempts,
   memberships,
+  moduleReleaseAccess,
   platformAdmins,
+  safeguardingLeads,
+  transportRoutes,
+  stockItems,
+  stockMovements,
+  assets,
+  assetEvents,
+  libraryCopies,
+  boardingBeds,
+  boardingHouses,
+  boardingRooms,
+  libraryTitles,
+  transportStops,
+  transportVehicles,
   schoolPreferences,
   studentGuardians,
   students,
@@ -42,7 +56,10 @@ import {
   terms,
   userMfa,
   users,
+  catalogPrices,
+  planPresets,
 } from "../src/server/db/schema";
+import { SUGGESTED_ADD_ONS, SUGGESTED_PLANS, bandsFromCedis } from "../src/lib/pricing";
 import { FEATURES } from "../src/lib/plan";
 import { isEntrypoint, loadLocalEnv } from "./load-env";
 
@@ -105,6 +122,36 @@ async function main() {
       .onConflictDoUpdate({ target: users.email, set: { name: PLATFORM_ADMIN.name, passwordHash } })
       .returning({ id: users.id });
     await db.insert(platformAdmins).values({ userId: platformAdmin!.id }).onConflictDoNothing();
+    // EduBridge's suggested plans and add-on prices (Admin, Plans), as platform staff would add them.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.user_id', ${platformAdmin!.id}, true)`);
+      for (const plan of SUGGESTED_PLANS)
+        await tx
+          .insert(planPresets)
+          .values({
+            name: plan.name,
+            description: plan.description,
+            features: plan.features,
+            maxCampuses: plan.maxCampuses,
+            maxSmsPerMonth: plan.maxSmsPerMonth,
+            billingPeriod: "termly",
+            priceBands: bandsFromCedis(plan.termlyCedis),
+            currencyCode: "GHS",
+            createdByUserId: platformAdmin!.id,
+          })
+          .onConflictDoNothing();
+      const priced = await tx.select({ module: catalogPrices.module }).from(catalogPrices);
+      for (const addOn of SUGGESTED_ADD_ONS)
+        if (!priced.some((p) => p.module === addOn.module))
+          await tx.insert(catalogPrices).values({
+            module: addOn.module,
+            billingPeriod: "termly",
+            currencyCode: "GHS",
+            pricePesewas: Math.round(addOn.termlyCedis * 100),
+            unit: "flat",
+            createdByUserId: platformAdmin!.id,
+          });
+    });
     // Platform administrators must use two-step verification. Dev-only, published secret (see README).
     const sealed = seal(DEV_PLATFORM_TOTP_SECRET);
     await db
@@ -178,6 +225,209 @@ async function main() {
     }
     // Kpone Ridge has a calendar with a current term; Adenta Hall starts empty (shows the setup state).
     const kpone = tenantIds.get("kpone-ridge")!;
+    // Release access (REL-02) to modules in internal testing, so both seeded schools can try them before
+    // pilots do (Adenta Hall's Proprietor needs no two-step code, which the end-to-end tests rely on).
+    for (const slug of ["kpone-ridge", "adenta-hall"]) {
+      const tenantId = tenantIds.get(slug)!;
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`select set_config('app.tenant_id', ${tenantId}, true)`);
+        // Written as the platform administrator, as the policy requires.
+        await tx.execute(sql`select set_config('app.user_id', ${platformAdmin!.id}, true)`);
+        await tx
+          .insert(moduleReleaseAccess)
+          .values(
+            (
+              [
+                "staff_hr",
+                "payroll",
+                "safeguarding",
+                "visitors_pickup",
+                "transport",
+                "inventory_assets",
+                "library",
+                "boarding",
+                "forecasting",
+                "early_warning",
+                "ai_drafting",
+              ] as const
+            ).map((module) => ({
+              tenantId,
+              module,
+              grantedByUserId: platformAdmin!.id,
+            })),
+          )
+          .onConflictDoNothing();
+      });
+    }
+    // Kpone Ridge's head teacher is its designated safeguarding lead (SFG-01b), appointed by the Proprietor.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
+      const [head] = await tx
+        .select({
+          id: memberships.id,
+          ownerId: sql<string>`(select m.user_id from memberships m where m.tenant_id = ${kpone} and 'owner' = any(m.roles) limit 1)`,
+        })
+        .from(memberships)
+        .innerJoin(users, eq(users.id, memberships.userId))
+        .where(and(eq(memberships.tenantId, kpone), eq(users.email, "head@example.test")));
+      if (head)
+        await tx
+          .insert(safeguardingLeads)
+          .values({ tenantId: kpone, membershipId: head.id, grantedByUserId: head.ownerId })
+          .onConflictDoNothing();
+    });
+    // A school bus and one route with its stops (Transport, synthetic). No fee item is chosen, so fees are unchanged.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
+      const [bus] = await tx
+        .insert(transportVehicles)
+        .values({
+          tenantId: kpone,
+          name: "Bus 1",
+          registration: "GT 1234-24",
+          seats: 33,
+          driverName: "Kwesi Appiah",
+          driverPhone: "+233245550177",
+        })
+        .onConflictDoNothing()
+        .returning({ id: transportVehicles.id });
+      if (!bus) return;
+      const [route] = await tx
+        .insert(transportRoutes)
+        .values({ tenantId: kpone, name: "Tema Community 25", vehicleId: bus.id })
+        .onConflictDoNothing()
+        .returning({ id: transportRoutes.id });
+      if (!route) return;
+      await tx.insert(transportStops).values([
+        {
+          tenantId: kpone,
+          routeId: route.id,
+          name: "Community 25 junction",
+          sequence: 1,
+          morningTime: "06:40",
+          afternoonTime: "15:50",
+        },
+        {
+          tenantId: kpone,
+          routeId: route.id,
+          name: "Kpone barrier",
+          sequence: 2,
+          morningTime: "06:55",
+          afternoonTime: "15:35",
+        },
+      ]);
+    });
+    // Stock and one asset (Inventory and assets, synthetic), recorded by the Proprietor.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
+      const [owner] = await tx
+        .select({ id: memberships.userId })
+        .from(memberships)
+        .where(and(eq(memberships.tenantId, kpone), sql`'owner' = any(${memberships.roles})`))
+        .limit(1);
+      if (!owner) return;
+      const items = await tx
+        .insert(stockItems)
+        .values([
+          { tenantId: kpone, name: "A4 paper", category: "Stationery", unit: "ream", reorderLevel: 10 },
+          { tenantId: kpone, name: "White chalk", category: "Stationery", unit: "box", reorderLevel: 5 },
+        ])
+        .onConflictDoNothing()
+        .returning({ id: stockItems.id, name: stockItems.name });
+      for (const item of items)
+        await tx.insert(stockMovements).values({
+          tenantId: kpone,
+          itemId: item.id,
+          kind: "received",
+          quantity: item.name === "A4 paper" ? 24 : 4,
+          recordedByUserId: owner.id,
+        });
+      if (!items.length) return;
+      await tx
+        .insert(tenantCounters)
+        .values({ tenantId: kpone, key: "asset_tag", value: 1 })
+        .onConflictDoNothing();
+      const [asset] = await tx
+        .insert(assets)
+        .values({
+          tenantId: kpone,
+          tag: "A0001",
+          name: "Epson classroom projector",
+          category: "ICT",
+          location: "ICT lab",
+          condition: "good",
+          createdByUserId: owner.id,
+        })
+        .onConflictDoNothing()
+        .returning({ id: assets.id });
+      if (asset)
+        await tx.insert(assetEvents).values({
+          tenantId: kpone,
+          assetId: asset.id,
+          kind: "added",
+          detail: "at ICT lab, good",
+          byUserId: owner.id,
+        });
+    });
+    // Two library books with copies B0001 to B0003 (Library), recorded by the Proprietor.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
+      const [owner] = await tx
+        .select({ id: memberships.userId })
+        .from(memberships)
+        .where(and(eq(memberships.tenantId, kpone), sql`'owner' = any(${memberships.roles})`))
+        .limit(1);
+      if (!owner) return;
+      const books = await tx
+        .insert(libraryTitles)
+        .values([
+          {
+            tenantId: kpone,
+            title: "Things Fall Apart",
+            author: "Chinua Achebe",
+            isbn: "9780385474542",
+            category: "Fiction",
+          },
+          {
+            tenantId: kpone,
+            title: "The Beautyful Ones Are Not Yet Born",
+            author: "Ayi Kwei Armah",
+            isbn: "9780435905255",
+            category: "Fiction",
+          },
+        ])
+        .onConflictDoNothing()
+        .returning({ id: libraryTitles.id, title: libraryTitles.title });
+      if (books.length < 2) return;
+      await tx
+        .insert(tenantCounters)
+        .values({ tenantId: kpone, key: "library_copy", value: 3 })
+        .onConflictDoNothing();
+      const achebe = books.find((b) => b.title === "Things Fall Apart")!.id;
+      const armah = books.find((b) => b.title !== "Things Fall Apart")!.id;
+      await tx.insert(libraryCopies).values([
+        { tenantId: kpone, titleId: achebe, number: "B0001", shelf: "Fiction A", createdByUserId: owner.id },
+        { tenantId: kpone, titleId: achebe, number: "B0002", shelf: "Fiction A", createdByUserId: owner.id },
+        { tenantId: kpone, titleId: armah, number: "B0003", shelf: "Fiction A", createdByUserId: owner.id },
+      ]);
+    });
+    // A mixed boarding house with one room of four beds (Boarding, synthetic).
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
+      const [house] = await tx
+        .insert(boardingHouses)
+        .values({ tenantId: kpone, name: "Aggrey House", kind: "mixed" })
+        .onConflictDoNothing()
+        .returning({ id: boardingHouses.id });
+      if (!house) return;
+      const [room] = await tx
+        .insert(boardingRooms)
+        .values({ tenantId: kpone, houseId: house.id, name: "Dormitory A" })
+        .returning({ id: boardingRooms.id });
+      await tx
+        .insert(boardingBeds)
+        .values([1, 2, 3, 4].map((n) => ({ tenantId: kpone, roomId: room!.id, label: `Bed ${n}` })));
+    });
     // How families reach the office (synthetic numbers), shown in the parent view.
     await db.transaction(async (tx) => {
       await tx.execute(sql`select set_config('app.tenant_id', ${kpone}, true)`);
@@ -364,6 +614,8 @@ async function main() {
             guardianId: guardian!.id,
             relationship,
             isPrimary: true,
+            // Each parent may collect their child (Visitors and pickup, VIS-02a).
+            canPickUp: true,
           })
           .onConflictDoNothing();
       }

@@ -5,8 +5,8 @@ import { allowed, ROLE_LABELS } from "@/server/authz/permissions";
 import { requireTenant } from "@/web/auth";
 import { db } from "@/server/db/client";
 import { getSchoolPreferences } from "@/server/tenancy/preferences";
-import { VoidPolicyForm } from "../preference-forms";
-import { saveMfaPolicyAction, saveVoidPolicyAction } from "./actions";
+import { SwitchesForm, VoidPolicyForm } from "../preference-forms";
+import { saveMfaPolicyAction, saveOfflineReceiptsAction, saveVoidPolicyAction } from "./actions";
 import { MfaPolicyForm } from "./policy-form";
 
 export const metadata: Metadata = { title: "Settings · Security" };
@@ -39,6 +39,22 @@ export default async function SecuritySettingsPage({ params }: { params: Promise
         <VoidPolicyForm
           action={saveVoidPolicyAction.bind(null, ctx.tenant.slug)}
           accountantsCanVoid={preferences.accountantsCanVoid}
+        />
+      </Section>
+      <Section
+        title="Payments without a connection"
+        description="Lets Accountants take payments when the internet is down. The payer gets a provisional receipt on the spot; the official receipt, with the school's next receipt number, is issued as soon as the device reconnects."
+      >
+        <SwitchesForm
+          action={saveOfflineReceiptsAction.bind(null, ctx.tenant.slug)}
+          switches={[
+            {
+              name: "offlineReceiptsEnabled",
+              label: "Allow provisional receipts offline",
+              note: "Off by default. Provisional receipts are marked as such; amounts reach the ledger only when they are sent, and each is audited.",
+              checked: preferences.offlineReceiptsEnabled,
+            },
+          ]}
         />
       </Section>
     </div>

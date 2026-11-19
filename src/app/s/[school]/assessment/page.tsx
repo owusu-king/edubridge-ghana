@@ -1,4 +1,5 @@
 import type { Metadata, Route } from "next";
+import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ClipboardList } from "lucide-react";
 import { StatusText } from "@/components/ui/badge";
@@ -24,6 +25,8 @@ export default async function AssessmentPage({
 }) {
   const [{ school }, search] = await Promise.all([params, searchParams]);
   const { ctx } = await requireTenant(school);
+  // The layout refuses too; pages render alongside it, so check here before reading.
+  if (!allowed(ctx, "assessment.enter")) notFound();
   const slug = ctx.tenant.slug;
   const { terms, term } = await chooseTerm(ctx, search.term);
   if (!term) {
@@ -55,7 +58,7 @@ export default async function AssessmentPage({
           description={
             allowed(ctx, "academics.manage")
               ? "Add classes under Classes, then come back to enter scores."
-              : "You enter scores for the classes you are class teacher of. Ask the head teacher to assign you a class."
+              : "You enter scores for the classes you are class teacher of, and for the subjects you teach in other classes. Ask the head teacher to assign you."
           }
         />
       ) : (
@@ -73,48 +76,70 @@ export default async function AssessmentPage({
               </tr>
             </THead>
             <TBody>
-              {classes.map(({ cls, students, subjects, completeSheets, published }) => (
-                <TR key={cls.id}>
-                  <TD>
-                    <Link
-                      href={`${schoolPath(slug, `assessment/${cls.id}`)}${termQuery(term.id)}` as Route}
-                      className="font-medium text-ink hover:text-accent hover:underline"
-                    >
-                      {cls.name}
-                    </Link>
-                    <span className="block text-sm text-ink-3">
-                      {cls.classTeacherName ?? "No class teacher"}
-                    </span>
-                  </TD>
-                  <TD numeric className="hidden sm:table-cell">
-                    {students}
-                  </TD>
-                  <TD>
-                    {subjects === 0 ? (
-                      <span className="text-ink-3">No subjects</span>
-                    ) : (
-                      <StatusText
-                        tone={
-                          completeSheets === subjects ? "positive" : completeSheets ? "caution" : "neutral"
-                        }
-                      >
-                        {completeSheets} of {subjects} subjects
-                      </StatusText>
-                    )}
-                  </TD>
-                  <TD>
-                    {students === 0 ? (
-                      <span className="text-ink-3">No students</span>
-                    ) : (
-                      <StatusText
-                        tone={published === students ? "positive" : published ? "caution" : "neutral"}
-                      >
-                        {published === students ? "All published" : `${published} of ${students} published`}
-                      </StatusText>
-                    )}
-                  </TD>
-                </TR>
-              ))}
+              {classes.map(
+                ({ cls, students, subjects, completeSheets, published, wholeClass, mySubjects }) => (
+                  <TR key={cls.id}>
+                    <TD>
+                      {wholeClass ? (
+                        <Link
+                          href={`${schoolPath(slug, `assessment/${cls.id}`)}${termQuery(term.id)}` as Route}
+                          className="font-medium text-ink hover:text-accent hover:underline"
+                        >
+                          {cls.name}
+                        </Link>
+                      ) : (
+                        <span className="font-medium text-ink">{cls.name}</span>
+                      )}
+                      <span className="block text-sm text-ink-3">
+                        {wholeClass
+                          ? (cls.classTeacherName ?? "No class teacher")
+                          : mySubjects.map((sub, i) => (
+                              <span key={sub.id}>
+                                {i > 0 && ", "}
+                                <Link
+                                  href={
+                                    `${schoolPath(slug, `assessment/${cls.id}/subjects/${sub.id}`)}${termQuery(term.id)}` as Route
+                                  }
+                                  className="text-accent hover:underline"
+                                >
+                                  {sub.name}
+                                </Link>
+                              </span>
+                            ))}
+                      </span>
+                    </TD>
+                    <TD numeric className="hidden sm:table-cell">
+                      {students}
+                    </TD>
+                    <TD>
+                      {subjects === 0 ? (
+                        <span className="text-ink-3">No subjects</span>
+                      ) : (
+                        <StatusText
+                          tone={
+                            completeSheets === subjects ? "positive" : completeSheets ? "caution" : "neutral"
+                          }
+                        >
+                          {completeSheets} of {subjects} subjects
+                        </StatusText>
+                      )}
+                    </TD>
+                    <TD>
+                      {!wholeClass ? (
+                        <span className="text-ink-3">Kept by the class teacher</span>
+                      ) : students === 0 ? (
+                        <span className="text-ink-3">No students</span>
+                      ) : (
+                        <StatusText
+                          tone={published === students ? "positive" : published ? "caution" : "neutral"}
+                        >
+                          {published === students ? "All published" : `${published} of ${students} published`}
+                        </StatusText>
+                      )}
+                    </TD>
+                  </TR>
+                ),
+              )}
             </TBody>
           </Table>
         </TableFrame>

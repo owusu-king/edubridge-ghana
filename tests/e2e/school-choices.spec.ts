@@ -10,11 +10,15 @@ test("the Proprietor decides who voids receipts and how overview figures are wor
   await expect(page.getByRole("heading", { name: "Voiding receipts" })).toBeVisible();
   await expect(page.getByRole("radio", { name: /^Only the Proprietor/ })).toBeChecked();
   await page.getByRole("radio", { name: /^Only the Proprietor/ }).check();
-  await page.getByRole("button", { name: "Save" }).last().click();
+  await page
+    .getByRole("radio", { name: /^Only the Proprietor/ })
+    .locator("xpath=ancestor::form")
+    .getByRole("button", { name: "Save" })
+    .click();
   await expect(page.getByText("Saved. It applies from each person's next page.")).toBeVisible();
 
   await page.goto("/s/adenta-hall/settings");
-  await expect(page.getByRole("heading", { name: "Overview figures" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Command Center figures" })).toBeVisible();
   await expect(page.getByRole("radio", { name: /^Collected ÷ \(owed when the term began/ })).toBeChecked();
   await expect(page.getByLabel("Follow up attendance below (%)")).toHaveValue("80");
 });

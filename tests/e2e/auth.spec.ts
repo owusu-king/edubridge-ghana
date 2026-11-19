@@ -30,7 +30,7 @@ test("ignores off-site redirect targets after sign in", async ({ page }) => {
 
 test("signs out and invalidates the session", async ({ page }) => {
   await signIn(page, "admin@example.test");
-  await page.getByRole("button", { name: /^Account:/ }).click();
+  await page.getByRole("button", { name: /^Profile:/ }).click();
   await page.getByRole("menuitem", { name: "Sign out" }).click();
   await expect(page).toHaveURL("/login");
   await page.goto(`${SCHOOL.path}`);

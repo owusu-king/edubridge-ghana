@@ -1,38 +1,22 @@
-/**
- * What a school's plan includes. EduBridge staff choose per school (no packages are built in), and the
- * server checks every feature on each request (TEN-05).
- */
+import { MODULES, PLAN_MODULE_IDS, isPlanModule, type PlanModuleId } from "./modules";
 
-export const FEATURES = [
-  "attendance",
-  "assessment",
-  "parent_view",
-  "fee_reminders",
-  "mobile_money",
-  "assistant",
-] as const;
-export type Feature = (typeof FEATURES)[number];
+/**
+ * What a school's plan includes. The modules themselves are defined in the module registry
+ * (`src/lib/modules.ts`); "feature" is the older name for a module a plan may include, kept so plans,
+ * add-ons and permission checks share one list (TEN-05, ADR 0003).
+ */
+export const FEATURES = PLAN_MODULE_IDS;
+export type Feature = PlanModuleId;
 
 /** What a new plan includes unless EduBridge staff choose otherwise: everything but paid add-ons. */
-export const DEFAULT_PLAN_FEATURES: readonly Feature[] = FEATURES.filter((f) => f !== "assistant");
+export const DEFAULT_PLAN_FEATURES: readonly Feature[] = FEATURES.filter((f) => MODULES[f].defaultInNewPlans);
 
-export const FEATURE_LABELS: Record<Feature, { name: string; description: string }> = {
-  attendance: { name: "Attendance", description: "Daily class registers, including without a connection." },
-  assessment: {
-    name: "Assessment and report cards",
-    description: "Score sheets, report cards and printing.",
-  },
-  parent_view: { name: "Parent view", description: "Families sign in by SMS code to see fees and reports." },
-  fee_reminders: { name: "SMS fee reminders", description: "Reminders to families who owe, by SMS." },
-  mobile_money: { name: "Mobile Money", description: "Payment prompts to a payer's phone." },
-  assistant: {
-    name: "School assistant (AI)",
-    description: "Questions about the school answered from its own records, for leaders and the accountant.",
-  },
-};
+export const FEATURE_LABELS: Record<Feature, { name: string; description: string }> = Object.fromEntries(
+  FEATURES.map((f) => [f, { name: MODULES[f].name, description: MODULES[f].description }]),
+) as Record<Feature, { name: string; description: string }>;
 
 export function isFeature(value: string): value is Feature {
-  return (FEATURES as readonly string[]).includes(value);
+  return isPlanModule(value);
 }
 
 export const SUBSCRIPTION_STATUSES = ["trial", "active", "past_due", "grace"] as const;
@@ -43,6 +27,17 @@ export const SUBSCRIPTION_STATUS_LABELS: Record<SubscriptionStatus, string> = {
   active: "Active",
   past_due: "Payment overdue",
   grace: "Grace period",
+};
+
+/** A school's request to change its plan (SUB-02, D-R3-4): platform staff approve or decline it. */
+export const PLAN_REQUEST_STATUSES = ["pending", "approved", "declined", "withdrawn"] as const;
+export type PlanRequestStatus = (typeof PLAN_REQUEST_STATUSES)[number];
+
+export const PLAN_REQUEST_STATUS_LABELS: Record<PlanRequestStatus, string> = {
+  pending: "Waiting for EduBridge",
+  approved: "Approved",
+  declined: "Declined",
+  withdrawn: "Withdrawn",
 };
 
 export const BILLING_PERIODS = ["termly", "annual", "monthly"] as const;

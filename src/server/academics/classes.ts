@@ -5,32 +5,19 @@ import { recordAudit } from "../audit/record";
 import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
-import { campuses, classes, levels, memberships, users } from "../db/schema";
+import { campuses, classes, levels, memberships, schoolPreferences, users } from "../db/schema";
 import { DomainError, PG_UNIQUE_VIOLATION, pgErrorCode } from "../errors";
 import { canAccessCampus, type TenantContext } from "../tenancy/service";
+import { curriculumTemplate, STAGES, TEMPLATE_IDS, type Stage } from "../../lib/curricula";
+import { readTemplate } from "./templates";
 
-export const STAGES = ["creche", "nursery", "kindergarten", "primary", "jhs"] as const;
-export type Stage = (typeof STAGES)[number];
+export { STAGES, type Stage } from "../../lib/curricula";
 
-export const STAGE_LABELS: Record<Stage, string> = {
-  creche: "Creche",
-  nursery: "Nursery",
-  kindergarten: "Kindergarten",
-  primary: "Primary",
-  jhs: "Junior High School",
-};
+/** Ghana's stage names; a school's own come from its template (`readTemplate(...).stageLabels`). */
+export const STAGE_LABELS: Record<Stage, string> = curriculumTemplate("ghana_ges", "GH").stageLabels;
 
-/**
- * Default Ghanaian basic-school levels. Assumption to verify: GES naming of KG 1–2, Basic 1–6 (formerly
- * Primary/Class 1–6) and JHS 1–3. Schools can rename, add and archive levels.
- */
-export const DEFAULT_LEVELS: Record<Stage, string[]> = {
-  creche: ["Creche"],
-  nursery: ["Nursery 1", "Nursery 2"],
-  kindergarten: ["KG 1", "KG 2"],
-  primary: ["Basic 1", "Basic 2", "Basic 3", "Basic 4", "Basic 5", "Basic 6"],
-  jhs: ["JHS 1", "JHS 2", "JHS 3"],
-};
+/** Ghana's starter levels (GES); a school's come from its template. Schools can rename, add and archive. */
+export const DEFAULT_LEVELS: Record<Stage, string[]> = curriculumTemplate("ghana_ges", "GH").levels;
 
 const STAFF_ROLES = ["owner", "headteacher", "admin", "bursar", "teacher"];
 
@@ -128,8 +115,12 @@ export async function setupDefaultLevels(
   input: unknown,
 ): Promise<number> {
   assertAllowed(ctx, "academics.manage");
-  const { stages } = z
-    .object({ stages: z.array(z.enum(STAGES)).min(1, "Choose at least one stage.") })
+  const { stages, template: chosen } = z
+    .object({
+      stages: z.array(z.enum(STAGES)).min(1, "Choose at least one stage."),
+      /** The starter template; saved as the school's, so subjects and grading follow it too. */
+      template: z.enum(TEMPLATE_IDS).optional(),
+    })
     .parse(input);
   return withTenant(database, scope(ctx), async (tx) => {
     const [existing] = await tx
@@ -138,8 +129,17 @@ export async function setupDefaultLevels(
       .where(eq(levels.tenantId, ctx.tenant.id));
     if ((existing?.n ?? 0) > 0)
       throw new DomainError("levels_exist", "Levels are already set up. Add or rename levels instead.");
+    if (chosen)
+      await tx
+        .insert(schoolPreferences)
+        .values({ tenantId: ctx.tenant.id, curriculumTemplate: chosen, updatedByUserId: ctx.userId })
+        .onConflictDoUpdate({
+          target: schoolPreferences.tenantId,
+          set: { curriculumTemplate: chosen, updatedAt: new Date(), updatedByUserId: ctx.userId },
+        });
+    const template = await readTemplate(tx, ctx.tenant.id);
     const rows = STAGES.filter((s) => stages.includes(s)).flatMap((stage) =>
-      DEFAULT_LEVELS[stage].map((name) => ({ stage, name })),
+      template.levels[stage].map((name) => ({ stage, name })),
     );
     await tx.insert(levels).values(
       rows.map((r, i) => ({
@@ -154,7 +154,7 @@ export async function setupDefaultLevels(
       actorUserId: ctx.userId,
       action: "levels.set_up",
       entityType: "level",
-      metadata: { stages, count: rows.length },
+      metadata: { stages, count: rows.length, template: template.id },
     });
     return rows.length;
   });

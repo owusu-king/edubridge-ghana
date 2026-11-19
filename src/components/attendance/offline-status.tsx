@@ -63,7 +63,8 @@ export function OfflineStatus({
     };
   }, [refresh, flush, savePages]);
 
-  const href = (classId: string, date: string) => `${basePath}/${classId}?date=${date}`;
+  const href = (classId: string, date: string, periodId?: string) =>
+    `${basePath}/${classId}${periodId ? `/lessons/${periodId}` : ""}?date=${date}`;
   return (
     <div className="space-y-3">
       {!online && (
@@ -79,7 +80,7 @@ export function OfflineStatus({
           {queued.map((q, i) => (
             <span key={q.key}>
               {i > 0 && ", "}
-              <a className="font-medium underline" href={href(q.classId, q.date)}>
+              <a className="font-medium underline" href={href(q.classId, q.date, q.periodId)}>
                 {q.className}, {formatCalendarDate(q.date)}
               </a>
             </span>
@@ -93,7 +94,7 @@ export function OfflineStatus({
           {conflicts.map((c, i) => (
             <span key={c.key}>
               {i > 0 && ", "}
-              <a className="font-medium underline" href={href(c.classId, c.date)}>
+              <a className="font-medium underline" href={href(c.classId, c.date, c.periodId)}>
                 {c.className}, {formatCalendarDate(c.date)}
               </a>
             </span>

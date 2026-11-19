@@ -97,90 +97,109 @@ export interface TermPoint {
   collectionRate: number | null;
 }
 
+/** One term's figures (enrolment, attendance, results, money), each only where the person's role covers it. */
+async function termPoint(tx: Transaction, ctx: TenantContext, t: TermRow): Promise<TermPoint> {
+  const academics = seesAcademics(ctx);
+  const finance = seesFinance(ctx);
+  const [enrol] = (
+    await tx.execute<{ enrolled: number; new_students: number }>(sql`
+      select count(*)::int as enrolled,
+        count(*) filter (where not exists (
+          select 1 from enrolments p join terms pt on pt.id = p.term_id
+          where p.student_id = e.student_id and pt.starts_on < ${t.starts_on}))::int as new_students
+      from enrolments e join classes c on c.id = e.class_id
+      where e.tenant_id = ${ctx.tenant.id} and e.term_id = ${t.id} and ${campusOf(ctx, "c")}`)
+  ).rows;
+  let attendanceRate: number | null = null;
+  let latenessRate: number | null = null;
+  let averageScore: number | null = null;
+  let publishedCards = 0;
+  if (academics) {
+    const [a] = (
+      await tx.execute<{ marks: number; attended: number; late: number }>(sql`
+        select count(*)::int as marks,
+          count(*) filter (where m.status in ('present', 'late'))::int as attended,
+          count(*) filter (where m.status = 'late')::int as late
+        from attendance_marks m join attendance_registers r on r.id = m.register_id
+        join classes c on c.id = r.class_id
+        where m.tenant_id = ${ctx.tenant.id} and r.term_id = ${t.id} and ${campusOf(ctx, "c")}`)
+    ).rows;
+    attendanceRate = rate(a?.attended ?? 0, a?.marks ?? 0);
+    latenessRate = rate(a?.late ?? 0, a?.marks ?? 0);
+    const [s] = (
+      await tx.execute<{ cards: number; average: string | null }>(sql`
+        select count(*)::int as cards, round(avg((rc.snapshot -> 'overall' ->> 'average')::numeric), 1)::text as average
+        from report_cards rc
+        join enrolments e on e.student_id = rc.student_id and e.term_id = rc.term_id
+        join classes c on c.id = e.class_id
+        where rc.tenant_id = ${ctx.tenant.id} and rc.term_id = ${t.id} and rc.status = 'published'
+          and ${campusOf(ctx, "c")}`)
+    ).rows;
+    publishedCards = s?.cards ?? 0;
+    averageScore = s?.average === null || s?.average === undefined ? null : Number(s.average);
+  }
+  let billed: number | null = null;
+  let collected: number | null = null;
+  if (finance) {
+    const [b] = (
+      await tx.execute<{ billed: string }>(sql`
+        select coalesce(sum(l.amount_pesewas), 0)::text as billed from ledger_entries l
+        where l.tenant_id = ${ctx.tenant.id} and l.term_id = ${t.id} and l.kind in ('charge', 'discount')
+          and not exists (select 1 from ledger_entries r where r.reverses_entry_id = l.id)
+          and ${studentCampus(ctx, "l.student_id")}`)
+    ).rows;
+    const [p] = (
+      await tx.execute<{ collected: string }>(sql`
+        select coalesce(sum(p.amount_pesewas), 0)::text as collected from payments p
+        where p.tenant_id = ${ctx.tenant.id} and p.paid_on between ${t.starts_on} and ${t.ends_on}
+          and not exists (select 1 from payment_voids v where v.payment_id = p.id)
+          and ${studentCampus(ctx, "p.student_id")}`)
+    ).rows;
+    billed = Number(b?.billed ?? 0);
+    collected = Number(p?.collected ?? 0);
+  }
+  return {
+    termId: t.id,
+    label: label(t),
+    startsOn: t.starts_on,
+    endsOn: t.ends_on,
+    current: t.is_current,
+    enrolled: enrol?.enrolled ?? 0,
+    newStudents: enrol?.new_students ?? 0,
+    attendanceRate,
+    latenessRate,
+    averageScore,
+    publishedCards,
+    billedPesewas: billed,
+    collectedPesewas: collected,
+    collectionRate: billed !== null && collected !== null ? rate(collected, billed) : null,
+  };
+}
+
 /** The school term by term (the last `limit` terms that have started), for trends. */
 export async function getTermTrends(database: Database, ctx: TenantContext, limit = 6): Promise<TermPoint[]> {
   assertAllowed(ctx, "insights.view");
-  const academics = seesAcademics(ctx);
-  const finance = seesFinance(ctx);
   return withTenant(database, scope(ctx), async (tx) => {
-    const terms = await recentTerms(tx, ctx, limit);
     const result: TermPoint[] = [];
-    for (const t of terms) {
-      const [enrol] = (
-        await tx.execute<{ enrolled: number; new_students: number }>(sql`
-          select count(*)::int as enrolled,
-            count(*) filter (where not exists (
-              select 1 from enrolments p join terms pt on pt.id = p.term_id
-              where p.student_id = e.student_id and pt.starts_on < ${t.starts_on}))::int as new_students
-          from enrolments e join classes c on c.id = e.class_id
-          where e.tenant_id = ${ctx.tenant.id} and e.term_id = ${t.id} and ${campusOf(ctx, "c")}`)
-      ).rows;
-      let attendanceRate: number | null = null;
-      let latenessRate: number | null = null;
-      let averageScore: number | null = null;
-      let publishedCards = 0;
-      if (academics) {
-        const [a] = (
-          await tx.execute<{ marks: number; attended: number; late: number }>(sql`
-            select count(*)::int as marks,
-              count(*) filter (where m.status in ('present', 'late'))::int as attended,
-              count(*) filter (where m.status = 'late')::int as late
-            from attendance_marks m join attendance_registers r on r.id = m.register_id
-            join classes c on c.id = r.class_id
-            where m.tenant_id = ${ctx.tenant.id} and r.term_id = ${t.id} and ${campusOf(ctx, "c")}`)
-        ).rows;
-        attendanceRate = rate(a?.attended ?? 0, a?.marks ?? 0);
-        latenessRate = rate(a?.late ?? 0, a?.marks ?? 0);
-        const [s] = (
-          await tx.execute<{ cards: number; average: string | null }>(sql`
-            select count(*)::int as cards, round(avg((rc.snapshot -> 'overall' ->> 'average')::numeric), 1)::text as average
-            from report_cards rc
-            join enrolments e on e.student_id = rc.student_id and e.term_id = rc.term_id
-            join classes c on c.id = e.class_id
-            where rc.tenant_id = ${ctx.tenant.id} and rc.term_id = ${t.id} and rc.status = 'published'
-              and ${campusOf(ctx, "c")}`)
-        ).rows;
-        publishedCards = s?.cards ?? 0;
-        averageScore = s?.average === null || s?.average === undefined ? null : Number(s.average);
-      }
-      let billed: number | null = null;
-      let collected: number | null = null;
-      if (finance) {
-        const [b] = (
-          await tx.execute<{ billed: string }>(sql`
-            select coalesce(sum(l.amount_pesewas), 0)::text as billed from ledger_entries l
-            where l.tenant_id = ${ctx.tenant.id} and l.term_id = ${t.id} and l.kind in ('charge', 'discount')
-              and not exists (select 1 from ledger_entries r where r.reverses_entry_id = l.id)
-              and ${studentCampus(ctx, "l.student_id")}`)
-        ).rows;
-        const [p] = (
-          await tx.execute<{ collected: string }>(sql`
-            select coalesce(sum(p.amount_pesewas), 0)::text as collected from payments p
-            where p.tenant_id = ${ctx.tenant.id} and p.paid_on between ${t.starts_on} and ${t.ends_on}
-              and not exists (select 1 from payment_voids v where v.payment_id = p.id)
-              and ${studentCampus(ctx, "p.student_id")}`)
-        ).rows;
-        billed = Number(b?.billed ?? 0);
-        collected = Number(p?.collected ?? 0);
-      }
-      result.push({
-        termId: t.id,
-        label: label(t),
-        startsOn: t.starts_on,
-        endsOn: t.ends_on,
-        current: t.is_current,
-        enrolled: enrol?.enrolled ?? 0,
-        newStudents: enrol?.new_students ?? 0,
-        attendanceRate,
-        latenessRate,
-        averageScore,
-        publishedCards,
-        billedPesewas: billed,
-        collectedPesewas: collected,
-        collectionRate: billed !== null && collected !== null ? rate(collected, billed) : null,
-      });
-    }
+    for (const t of await recentTerms(tx, ctx, limit)) result.push(await termPoint(tx, ctx, t));
     return result;
+  });
+}
+
+/** The same figures for any one term (the Command Center's chosen term, per campus), or null. */
+export async function getTermPoint(
+  database: Database,
+  ctx: TenantContext,
+  termId: string,
+): Promise<TermPoint | null> {
+  assertAllowed(ctx, "insights.view");
+  return withTenant(database, scope(ctx), async (tx) => {
+    const rows = await tx.execute<TermRow>(sql`
+      select t.id, t.name, y.name as year, t.starts_on::text, t.ends_on::text, t.is_current
+      from terms t join academic_years y on y.id = t.academic_year_id
+      where t.tenant_id = ${ctx.tenant.id} and t.id = ${termId}`);
+    const t = rows.rows[0];
+    return t ? termPoint(tx, ctx, t) : null;
   });
 }
 

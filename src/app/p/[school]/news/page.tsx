@@ -8,6 +8,9 @@ import { db } from "@/server/db/client";
 import { openParentSchoolNews } from "@/server/messages/announcements";
 import { formatDateTime } from "@/lib/format";
 import { requireParent } from "@/web/parent-auth";
+import { AnnouncementSmsToggle } from "@/components/parents/pay-forms";
+import { getAnnouncementSms } from "@/server/parents/preferences";
+import { setAnnouncementSmsAction } from "../../actions";
 
 export const metadata: Metadata = { title: "School news" };
 
@@ -20,6 +23,7 @@ export default async function ParentSchoolNewsPage({ params }: { params: Promise
   const { phone } = await requireParent();
   const page = await openParentSchoolNews(db(), phone, slug);
   if (!page) notFound();
+  const smsOn = await getAnnouncementSms(db(), phone, slug);
 
   return (
     <div className="space-y-8">
@@ -49,6 +53,19 @@ export default async function ParentSchoolNewsPage({ params }: { params: Promise
             </li>
           ))}
         </ul>
+      )}
+
+      {smsOn !== null && (
+        <section aria-labelledby="sms" className="space-y-2">
+          <h2 id="sms" className="text-md font-semibold text-ink">
+            Announcements by SMS
+          </h2>
+          <AnnouncementSmsToggle
+            on={smsOn}
+            turnOn={setAnnouncementSmsAction.bind(null, slug, true)}
+            turnOff={setAnnouncementSmsAction.bind(null, slug, false)}
+          />
+        </section>
       )}
 
       {page.contacts && <SchoolContacts contacts={page.contacts} schoolName={page.name} />}

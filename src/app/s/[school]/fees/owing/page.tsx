@@ -4,6 +4,7 @@ import { HandCoins } from "lucide-react";
 import { Button, buttonStyles } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/field";
 import { DescriptionList, EmptyState } from "@/components/ui/layout";
+import { PageNav } from "@/components/ui/page-nav";
 import { allowed, can } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { listOwing, OWING_PAGE_SIZE } from "@/server/fees/owing";
@@ -11,7 +12,7 @@ import { listClassOptions } from "@/server/students/service";
 import { feeReminderMessage, whatsappLink } from "@/lib/fee-messages";
 import { balanceLinkUrl } from "@/server/notifications/templates";
 import { todayIn } from "@/lib/format";
-import { formatCedis, parseCedis } from "@/lib/money";
+import { currencySymbol, moneyFormatter, parseMoney } from "@/lib/money";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 import { sendRemindersAction } from "./actions";
@@ -30,11 +31,12 @@ export default async function OwingPage({
 }) {
   const [{ school }, search] = await Promise.all([params, searchParams]);
   const { ctx } = await requireTenant(school);
+  const showMoney = moneyFormatter(ctx.tenant.currencyCode);
   const slug = ctx.tenant.slug;
   const classId = search.class && /^[0-9a-f-]{36}$/.test(search.class) ? search.class : undefined;
   // An amount that cannot be read is ignored (and shown back as typed) rather than failing the page.
   const min = search.min?.slice(0, 20) ?? "";
-  const minAmount = min && parseCedis(min) !== null ? min : undefined;
+  const minAmount = min && parseMoney(min, ctx.tenant.currencyCode) !== null ? min : undefined;
   const overdueOnly = search.overdue === "1";
   const page = Math.max(1, Math.min(10_000, Number.parseInt(search.page ?? "1", 10) || 1));
   const [result, classOptions] = await Promise.all([
@@ -60,7 +62,7 @@ export default async function OwingPage({
       <DescriptionList
         items={[
           { term: filtered ? "Students matching" : "Students owing", detail: String(result.total) },
-          { term: filtered ? "Owed by them" : "Total owed", detail: formatCedis(result.owedPesewas) },
+          { term: filtered ? "Owed by them" : "Total owed", detail: showMoney(result.owedPesewas) },
           {
             term: "No phone to remind",
             detail: result.withoutPhone ? String(result.withoutPhone) : "None",
@@ -86,14 +88,14 @@ export default async function OwingPage({
           ))}
         </Select>
         <label htmlFor="owing-min" className="sr-only">
-          Owing at least (GH₵)
+          Owing at least ({currencySymbol(ctx.tenant.currencyCode)})
         </label>
         <Input
           id="owing-min"
           name="min"
           inputMode="decimal"
           defaultValue={min}
-          placeholder="Owing at least (GH₵)"
+          placeholder={`Owing at least (${currencySymbol(ctx.tenant.currencyCode)})`}
           className="tabular-nums sm:max-w-[12rem]"
         />
         <label className="flex items-center gap-2 px-1 text-base text-ink">
@@ -129,6 +131,7 @@ export default async function OwingPage({
       ) : (
         <>
           <OwingTable
+            currency={ctx.tenant.currencyCode}
             canRemind={canRemind}
             canShare={can(ctx.roles, "fees.remind")}
             today={today}
@@ -162,25 +165,7 @@ export default async function OwingPage({
                 : null,
             }))}
           />
-          {pages > 1 && (
-            <nav aria-label="Owing pages" className="flex items-center justify-between text-sm text-ink-2">
-              <span>
-                Page {result.page} of {pages}
-              </span>
-              <span className="flex gap-2">
-                {result.page > 1 && (
-                  <Link href={pageHref(result.page - 1)} className={buttonStyles("secondary", "sm")}>
-                    Previous
-                  </Link>
-                )}
-                {result.page < pages && (
-                  <Link href={pageHref(result.page + 1)} className={buttonStyles("secondary", "sm")}>
-                    Next
-                  </Link>
-                )}
-              </span>
-            </nav>
-          )}
+          <PageNav label="Owing pages" page={result.page} pages={pages} href={pageHref} />
         </>
       )}
     </div>

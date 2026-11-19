@@ -9,7 +9,7 @@ import { cn } from "@/lib/cn";
 export function SubNav({ label, items }: { label: string; items: { label: string; href: Route }[] }) {
   const pathname = usePathname();
   return (
-    <nav aria-label={label} className="-mb-px flex gap-6 overflow-x-auto border-b border-line">
+    <nav aria-label={label} className="flex gap-0.5 overflow-x-auto border-b border-line pb-1">
       {items.map((item) => {
         const active = pathname === item.href;
         return (
@@ -18,8 +18,8 @@ export function SubNav({ label, items }: { label: string; items: { label: string
             href={item.href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "border-b-2 pb-2.5 text-base whitespace-nowrap transition-colors",
-              active ? "border-ink font-medium text-ink" : "border-transparent text-ink-2 hover:text-ink",
+              "inline-flex h-8 shrink-0 items-center rounded-md px-2.5 text-base whitespace-nowrap transition-colors",
+              active ? "bg-subtle font-medium text-ink" : "text-ink-2 hover:bg-subtle/60 hover:text-ink",
             )}
           >
             {item.label}

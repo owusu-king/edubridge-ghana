@@ -36,6 +36,15 @@ export interface BillingDifference {
   structurePesewas: number;
 }
 
+/**
+ * One fee item whose amount is set per student elsewhere (transport fares, TRN-02b): it replaces the structure's
+ * lines for that item. Students without an amount are not charged it.
+ */
+export interface PerStudentItem {
+  feeItemId: string;
+  amounts: ReadonlyMap<string, number>;
+}
+
 export interface BillingPlan {
   toCreate: PlannedCharge[];
   differences: BillingDifference[];
@@ -53,6 +62,9 @@ export function planBilling(
   lines: readonly StructureLine[],
   itemOrder: readonly string[],
   existing: readonly ExistingCharge[],
+  /** Optional items a student does not take: not charged to them (FIN-02). */
+  takes: (studentId: string, feeItemId: string) => boolean = () => true,
+  perStudent: PerStudentItem | null = null,
 ): BillingPlan {
   const prefix = `term:${termId}:item:`;
   // Per student and item: the net billed so far and how many charges have been made.
@@ -70,7 +82,18 @@ export function planBilling(
   const differences: BillingDifference[] = [];
   let billedStudents = 0;
   for (const student of enrolled) {
-    const fees = resolveFees(lines, student.levelId, student.classId, itemOrder);
+    const fees = resolveFees(lines, student.levelId, student.classId, itemOrder).filter(
+      (f) => f.feeItemId !== perStudent?.feeItemId && takes(student.studentId, f.feeItemId),
+    );
+    const own = perStudent?.amounts.get(student.studentId);
+    if (perStudent && own && own > 0) {
+      fees.push({ feeItemId: perStudent.feeItemId, amountPesewas: own });
+      const rank = (id: string) => {
+        const i = itemOrder.indexOf(id);
+        return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+      };
+      fees.sort((a, b) => rank(a.feeItemId) - rank(b.feeItemId));
+    }
     const already = billed.get(student.studentId) ?? new Map<string, { net: number; count: number }>();
     let missing = 0;
     for (const fee of fees) {

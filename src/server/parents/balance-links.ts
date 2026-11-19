@@ -36,6 +36,7 @@ export async function createBalanceLink(
 export interface BalanceView {
   schoolName: string;
   timeZone: string;
+  currency: string;
   /** Today in the school's time zone: the balance is live, not the figure when the link was sent. */
   asOf: string;
   expiresAt: Date;
@@ -58,7 +59,7 @@ export async function readBalanceLink(
       .where(and(eq(balanceLinks.tokenHash, tokenHash), gt(balanceLinks.expiresAt, now)));
     if (!link) return null;
     const [school] = await tx
-      .select({ name: tenants.name, timezone: tenants.timezone })
+      .select({ name: tenants.name, timezone: tenants.timezone, currencyCode: tenants.currencyCode })
       .from(tenants)
       .where(and(eq(tenants.id, link.tenantId), eq(tenants.status, "active"), eq(tenants.isDemo, false)));
     if (!school) return null;
@@ -89,6 +90,7 @@ export async function readBalanceLink(
     return {
       schoolName: school.name,
       timeZone: school.timezone,
+      currency: school.currencyCode,
       asOf,
       expiresAt: link.expiresAt,
       child: await readChildSummary(tx, link.tenantId, student, asOf),

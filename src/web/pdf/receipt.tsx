@@ -3,7 +3,9 @@ import { Document, Page, renderToBuffer, StyleSheet, Text, View } from "@react-p
 import type { Receipt } from "@/server/fees/payments";
 import { METHOD_LABELS } from "@/server/fees/payments";
 import { formatCalendarDate, formatDateTime } from "@/lib/format";
-import { formatCedis } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
+import type { DocumentLogo } from "@/server/tenancy/branding";
+import { SchoolHeading } from "./school-heading";
 import { base, COLORS, registerFonts } from "./theme";
 
 const s = StyleSheet.create({
@@ -43,26 +45,32 @@ function Row({ term, children, note }: { term: string; children: string; note?: 
   );
 }
 
-function balanceWords(pesewas: number): string {
-  if (pesewas > 0) return `${formatCedis(pesewas)} owed`;
-  if (pesewas < 0) return `${formatCedis(-pesewas)} in credit`;
+function balanceWords(pesewas: number, currency: string): string {
+  if (pesewas > 0) return `${formatMoney(pesewas, currency)} owed`;
+  if (pesewas < 0) return `${formatMoney(-pesewas, currency)} in credit`;
   return "Nothing owed";
 }
 
 export function ReceiptDocument({
   receipt,
   schoolName,
+  logo,
+  currency = "GHS",
   timeZone,
 }: {
   receipt: Receipt;
   schoolName: string;
+  /** The school's logo, when it has a PNG or JPEG one. */
+  logo?: DocumentLogo | null;
+  /** The school's currency (ISO 4217). */
+  currency?: string;
   timeZone: string;
 }) {
   return (
     <Document title={`Receipt ${receipt.receiptNumber}`} author={schoolName} creator="EduBridge">
       <Page size="A5" style={[base.page, s.page]}>
         <View style={s.header}>
-          <Text style={base.school}>{schoolName}</Text>
+          <SchoolHeading name={schoolName} logo={logo} />
           <Text style={[base.label, { marginTop: 3 }]}>
             Payment receipt {receipt.receiptNumber}
             {receipt.voided ? "  ·  VOID" : ""}
@@ -79,7 +87,7 @@ export function ReceiptDocument({
           <Text
             style={[s.amount, receipt.voided ? { textDecoration: "line-through", color: COLORS.ink3 } : {}]}
           >
-            {formatCedis(receipt.amountPesewas)}
+            {formatMoney(receipt.amountPesewas, currency)}
           </Text>
         </View>
         <View style={s.rows}>
@@ -94,7 +102,7 @@ export function ReceiptDocument({
           <Row term="Paid by" note={receipt.reference}>
             {METHOD_LABELS[receipt.method]}
           </Row>
-          <Row term="Balance after this payment">{balanceWords(receipt.balanceAfterPesewas)}</Row>
+          <Row term="Balance after this payment">{balanceWords(receipt.balanceAfterPesewas, currency)}</Row>
           <Row term="Received by">{receipt.recordedBy ?? "Recorded automatically"}</Row>
         </View>
         <View style={[base.footer, { left: 40, right: 40 }]} fixed>

@@ -45,22 +45,30 @@ export interface Suggestion {
   added: boolean;
 }
 
-/** Ghana's public holidays for a year, to review and add. */
+/** The country's public holidays for a year, to review and add. */
 export function SuggestHolidaysDialog({
   action,
   yearName,
   suggestions,
+  countryName,
+  ghana,
 }: {
   action: Action;
   yearName: string;
   suggestions: Suggestion[];
+  countryName: string;
+  ghana: boolean;
 }) {
   return (
     <FormDialog
       trigger={`Public holidays ${yearName}`}
       triggerVariant="ghost"
-      title={`Ghana's public holidays, ${yearName}`}
-      description="Tick the days your school will be closed. Eid al-Fitr, Shaqq Day and Eid al-Adha are announced each year: add them yourself once the dates are known. Check against the Ministry of the Interior's list, which can move a holiday that falls on a weekend."
+      title={`Public holidays in ${countryName}, ${yearName}`}
+      description={
+        ghana
+          ? "Tick the days your school will be closed. Eid al-Fitr, Shaqq Day and Eid al-Adha are announced each year: add them yourself once the dates are known. Check against the Ministry of the Interior's list, which can move a holiday that falls on a weekend."
+          : "Tick the days your school will be closed. Holidays that follow the moon (such as Eid) are announced each year: add them yourself once the dates are known, and check this list against the official one, which can move a holiday that falls on a weekend."
+      }
       submitLabel="Add ticked holidays"
       action={action}
     >

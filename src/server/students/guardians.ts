@@ -7,7 +7,10 @@ import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import { classes, enrolments, guardians, studentGuardians, students, terms } from "../db/schema";
 import { DomainError, PG_UNIQUE_VIOLATION, pgErrorCode } from "../errors";
+import { recordSmsUsage, smsAllowance } from "../billing/usage";
+import { enqueue } from "../notifications/outbox";
 import type { TenantContext } from "../tenancy/service";
+import { localizePhoneField } from "../../lib/phone";
 import { fullName, getStudent } from "./service";
 import {
   addGuardianSchema,
@@ -27,8 +30,14 @@ export interface GuardianLink {
   email: string | null;
   relationship: Relationship;
   isPrimary: boolean;
+  isFeePayer: boolean;
+  isEmergencyContact: boolean;
+  canPickUp: boolean;
+  receivesMessages: boolean;
   /** When the school stopped this guardian using the parent view; null when they may use it. */
   portalBlockedAt: Date | null;
+  /** When the school last invited them to the parent view (PAR-01). */
+  portalInvitedAt: Date | null;
   /** Other students (siblings) linked to the same guardian. */
   otherStudents: { id: string; name: string; className: string | null }[];
 }
@@ -56,7 +65,12 @@ export async function listGuardians(
         email: guardians.email,
         relationship: studentGuardians.relationship,
         isPrimary: studentGuardians.isPrimary,
+        isFeePayer: studentGuardians.isFeePayer,
+        isEmergencyContact: studentGuardians.isEmergencyContact,
+        canPickUp: studentGuardians.canPickUp,
+        receivesMessages: studentGuardians.receivesMessages,
         portalBlockedAt: guardians.portalBlockedAt,
+        portalInvitedAt: guardians.portalInvitedAt,
       })
       .from(studentGuardians)
       .innerJoin(guardians, eq(guardians.id, studentGuardians.guardianId))
@@ -119,7 +133,8 @@ export async function addGuardian(
   input: unknown,
 ): Promise<{ guardianId: string; linkedExisting: boolean }> {
   assertAllowed(ctx, "students.manage");
-  const data = addGuardianSchema.parse(input);
+  // Numbers typed in the school's national form (0712 345 678 in Kenya) are read in its country.
+  const data = addGuardianSchema.parse(localizePhoneField(input, ctx.tenant.countryCode));
   return withTenant(database, scope(ctx), async (tx) => {
     const student = await loadStudentForUpdate(tx, ctx, studentId);
     return linkGuardianInTx(tx, ctx, student.id, data);
@@ -134,7 +149,7 @@ export async function updateGuardian(
   input: unknown,
 ): Promise<void> {
   assertAllowed(ctx, "students.manage");
-  const data = contactSchema.parse(input);
+  const data = contactSchema.parse(localizePhoneField(input, ctx.tenant.countryCode));
   await withTenant(database, scope(ctx), async (tx) => {
     if (!z.string().uuid().safeParse(guardianId).success)
       throw new DomainError("guardian_not_found", "Guardian not found.");
@@ -286,6 +301,76 @@ export async function setParentAccess(
       action: input.blocked ? "guardian.parent_access_blocked" : "guardian.parent_access_allowed",
       entityType: "guardian",
       entityId: guardian.id,
+    });
+  });
+}
+
+/** At most one invitation a day per guardian, so a double tap or a forgotten repeat costs no extra SMS. */
+const INVITE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Invites a guardian to the parent view by SMS (PAR-01). There is no link to accept: the parent signs in
+ * with a one-time code sent to the number on file, so only that phone can use it, and a school can block
+ * the guardian at any time. Not for demo schools, blocked guardians or guardians without a phone.
+ */
+export async function inviteGuardian(
+  database: Database,
+  ctx: TenantContext,
+  studentId: string,
+  guardianId: string,
+  now = new Date(),
+): Promise<void> {
+  assertAllowed(ctx, "parents.access.manage");
+  if (!z.string().uuid().safeParse(guardianId).success || !z.string().uuid().safeParse(studentId).success)
+    throw new DomainError("guardian_not_found", "Guardian not found.");
+  if (ctx.tenant.isDemo)
+    throw new DomainError("demo_school", "Demo schools do not send SMS: their numbers are made up.");
+  if (ctx.billing.state === "limited")
+    throw new DomainError("sms_paused", "SMS to families are paused while an EduBridge invoice is overdue.");
+  const student = await getStudent(database, ctx, studentId);
+  if (!student) throw new DomainError("student_not_found", "Student not found.");
+  await withTenant(database, scope(ctx), async (tx) => {
+    const [guardian] = await tx
+      .select({
+        id: guardians.id,
+        phone: guardians.phone,
+        blocked: guardians.portalBlockedAt,
+        invitedAt: guardians.portalInvitedAt,
+      })
+      .from(guardians)
+      .innerJoin(studentGuardians, eq(studentGuardians.guardianId, guardians.id))
+      .where(
+        and(
+          eq(guardians.tenantId, ctx.tenant.id),
+          eq(guardians.id, guardianId),
+          eq(studentGuardians.studentId, student.id),
+        ),
+      )
+      .for("update", { of: guardians });
+    if (!guardian) throw new DomainError("guardian_not_found", "Guardian not found.");
+    if (!guardian.phone) throw new DomainError("no_phone", "Add a phone number for this guardian first.");
+    if (guardian.blocked)
+      throw new DomainError("parent_blocked", "This guardian is blocked from the parent view.");
+    if (guardian.invitedAt && now.getTime() - guardian.invitedAt.getTime() < INVITE_INTERVAL_MS)
+      throw new DomainError("invited_recently", "An invitation was sent in the last 24 hours.");
+    const left = await smsAllowance(tx, ctx.tenant.id, ctx.tenant.timezone);
+    if (left !== null && left <= 0)
+      throw new DomainError("sms_limit", "Your plan has no SMS left this month.");
+    const outboxId = await enqueue(tx, {
+      channel: "sms",
+      recipient: guardian.phone,
+      template: "portal_invitation",
+      payload: { schoolName: ctx.tenant.name, studentFirstName: student.firstName },
+    });
+    await recordSmsUsage(tx, ctx.tenant.id, "portal_invitation", outboxId, student.id);
+    await tx.update(guardians).set({ portalInvitedAt: now }).where(eq(guardians.id, guardian.id));
+    await recordAudit(tx, {
+      tenantId: ctx.tenant.id,
+      actorUserId: ctx.userId,
+      action: "guardian.parent_view_invited",
+      entityType: "guardian",
+      entityId: guardian.id,
+      metadata: { studentId: student.id },
     });
   });
 }

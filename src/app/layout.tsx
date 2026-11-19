@@ -1,7 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Sans, Source_Serif_4 } from "next/font/google";
+import { cookies } from "next/headers";
 import { connection } from "next/server";
 import type { ReactNode } from "react";
+import { Toaster } from "@/components/ui/toast";
+import { explicitTheme, THEME_COOKIE } from "@/lib/theme";
 import "./globals.css";
 
 const sans = IBM_Plex_Sans({
@@ -26,18 +29,33 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export const viewport: Viewport = {
-  themeColor: "#f7f6f3",
-  width: "device-width",
-  initialScale: 1,
-};
+// The canvas token in each theme (globals.css).
+const CANVAS = { light: "#f7f6f3", dark: "#111113" } as const;
+
+export async function generateViewport(): Promise<Viewport> {
+  const theme = explicitTheme((await cookies()).get(THEME_COOKIE)?.value);
+  return {
+    themeColor: theme
+      ? CANVAS[theme]
+      : [
+          { media: "(prefers-color-scheme: light)", color: CANVAS.light },
+          { media: "(prefers-color-scheme: dark)", color: CANVAS.dark },
+        ],
+    width: "device-width",
+    initialScale: 1,
+  };
+}
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   // Render every page per request so Next.js can apply the CSP nonce to its scripts.
   await connection();
+  const theme = explicitTheme((await cookies()).get(THEME_COOKIE)?.value);
   return (
-    <html lang="en-GH" className={`${sans.variable} ${display.variable}`}>
-      <body>{children}</body>
+    <html lang="en-GH" className={`${sans.variable} ${display.variable}`} data-theme={theme ?? undefined}>
+      <body>
+        {children}
+        <Toaster />
+      </body>
     </html>
   );
 }

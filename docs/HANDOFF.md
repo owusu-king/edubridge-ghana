@@ -1,4 +1,32 @@
-# EduBridge — status and handoff (2026-10-31)
+# EduBridge — status and handoff (2026-10-31, status updated 2026-11-18)
+
+> **2026-11-18:** the founder released every module: all are at stage `general` (`src/lib/modules.ts`), so the
+> stages named below are history. A school has a module when its plan, an add-on, a trial or a promotion includes
+> it. Plans are priced per term by school size and invoiced automatically each period (roadmap, "Plans and billing"). The demo school (`npm run demo:school`) now
+> has data in every module, including a complete last term.
+
+> **Status on 2026-11-17:** R0 to R3 are built (see the [roadmap](11-DEVELOPMENT-ROADMAP.md) and the
+> [traceability matrix](RTM.md)). Pilot readiness work is recorded in the roadmap. R4 is approved
+> ([ADR 0003](adr/0003-modules-plans-entitlements.md)): R4-0, the modular commercial foundation, is built (module
+> registry `src/lib/modules.ts`, resolver `src/server/entitlements`), and R4-1 Staff and HR is built at stage
+> `internal_testing` (`src/server/staff`), and R4-2 Payroll records at the same stage (`src/server/payroll`); R4-3 Safeguarding is built at the same stage (`src/server/safeguarding`, lead-only access enforced by the
+> database); R4-4 Visitors and pickup, R4-5 Transport, R4-6 Inventory and assets, R4-7 Library and R4-8 Boarding
+> are built at the same stage (`src/server/visitors`, `src/server/transport`, `src/server/inventory`,
+> `src/server/library`, `src/server/boarding`; transport fares and boarding fees go through the term's billing, library
+> fines through the ledger). Every R4 module is built; what comes next is the founder's: releasing modules to pilots,
+> and R5, approved in [ADR 0004](adr/0004-intelligence.md) on 2026-11-17; R5-1 is built: the school overview is now the Command Center
+> (board summary, enrolment movement, operations; `src/server/dashboard/board-summary.ts`); R5-2 collection forecasting and
+> finance checks is built at stage `internal_testing` (`src/server/forecasting`, Fees > Forecast and Checks), and R5-3
+> early warning likewise (`src/server/early-warning`, Academics > Early warning). R5-4
+> started with a provider-agnostic AI gateway at zero cost (`src/server/ai`, D-R5-10; AI off until platform staff
+> choose a free or local provider), then checked answers, more tools and an evaluation set (`npm run ai:eval`); R5-5 AI drafting is built at stage
+> `internal_testing` (`src/server/drafting`). Every R5 phase is built; AI stays off until platform staff choose a provider.
+> Full E2E runs go against a throwaway database (`edubridge_pilot_e2e`, recreated each run), never the dev
+> database: specs leave records behind, and some read balances and counts. Every new module
+> starts at stage `in_development` in the registry and must declare its permissions in `PERMISSION_MODULES` and its
+> own pages in the registry's `routes`. Since 2026-11-04 the founder manages git: build in one pass, leave changes uncommitted,
+> and do not open PRs. The sections "Where things stand" and "What is next" below are the 2026-10-31 picture,
+> kept for history; the working notes after them still apply.
 
 Written for the next engineer or coding agent. Read `CLAUDE.md` first (project rules), then this file,
 then `docs/11-DEVELOPMENT-ROADMAP.md` (phases, decisions, assumptions) and `docs/03-DATABASE-DESIGN.md`
@@ -99,5 +127,21 @@ Keep PRs small, one slice each, with tests; summarise each with a 5-minute "how 
 ## Known gaps
 
 - Windows and Docker Desktop steps follow standard tooling but were not run on a Windows machine.
-- One phone sign-in E2E run failed once and did not recur in four later full runs; cause not identified.
+- The phone sign-in E2E test sometimes ran past 30 seconds or filled the sign-in form before it loaded on a busy
+  machine; since 2026-11-17 it has 60 seconds and waits for the sign-in page.
 - Statements show discounts after all of a term's charges, not under each charge.
+- In development the console can show "This library called use() to suspend in a previous render but did not
+  call use() when it finished". It comes from Next.js's own router (`layout-router.js`, Next 16.4.6, the
+  latest), not from EduBridge code, and React's production build does not contain the warning.
+
+## Form control names (fixed 2026-11-18)
+
+A form exposes each control as a property named after it, and those win over the form's own properties. The
+sibling discount form had a select named `firstChild`, so `form.firstChild` returned the select and React,
+which walks the server HTML with `firstChild` while hydrating, lost its place: Fees, Families failed to
+hydrate (React #418) on the first load in a new tab. The field is now `paysInFull`, and
+`tests/unit/form-field-names.test.ts` refuses control names that shadow DOM properties. Controls named
+`method`, `name` and `title` still exist; they only shadow what `useFormStatus` would report, which nothing
+uses. Separately, `Select` now remounts when its `defaultValue` changes: React applies a select's default only
+on mount and resets the form to it after a successful action, so a saved choice showed the old one until a
+reload.

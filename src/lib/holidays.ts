@@ -1,4 +1,5 @@
 import { addDays } from "./attendance";
+import { countryProfile, isCountryCode } from "./countries";
 
 /**
  * Suggested Ghanaian public holidays, from the Public Holidays and Commemorative Days Act (Act 601) as
@@ -61,6 +62,25 @@ export function ghanaPublicHolidays(from: string, to: string): SuggestedHoliday[
       { name: "Easter Monday", date: addDays(easter, 1) },
     );
     found.push({ name: "Farmers' Day", date: farmersDay(year) });
+  }
+  return found.filter((h) => h.date >= from && h.date <= to).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * Suggested public holidays for a school's country (Africa-wide readiness), between two dates. Ghana
+ * has its own rules above (Farmers' Day); other countries use their profile's fixed dates and Easter
+ * holidays. Movable religious holidays are announced each year and added by the school.
+ */
+export function suggestedHolidays(country: string, from: string, to: string): SuggestedHoliday[] {
+  if (country === "GH") return ghanaPublicHolidays(from, to);
+  if (!isCountryCode(country)) return [];
+  const profile = countryProfile(country);
+  const found: SuggestedHoliday[] = [];
+  for (let year = Number(from.slice(0, 4)); year <= Number(to.slice(0, 4)); year++) {
+    for (const [md, name] of profile.fixedHolidays) found.push({ name, date: `${year}-${md}` });
+    const easter = easterSunday(year);
+    if (profile.easter.goodFriday) found.push({ name: "Good Friday", date: addDays(easter, -2) });
+    if (profile.easter.easterMonday) found.push({ name: "Easter Monday", date: addDays(easter, 1) });
   }
   return found.filter((h) => h.date >= from && h.date <= to).sort((a, b) => a.date.localeCompare(b.date));
 }

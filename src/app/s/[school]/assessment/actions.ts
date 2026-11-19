@@ -16,6 +16,9 @@ import {
   updateSubject,
 } from "@/server/assessment/setup";
 import { db } from "@/server/db/client";
+import { resolveDraft } from "@/server/drafting/service";
+import { saveCurriculumTemplate, saveReportCardStyle } from "@/server/tenancy/preferences";
+import { saveSubjectComments } from "@/server/assessment/comments";
 import type { TenantContext } from "@/server/tenancy/service";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
@@ -108,8 +111,9 @@ export async function saveScaleAction(slug: string, stage: Stage, _prev: FormSta
   const mins = strings(formData, "min");
   const grades = strings(formData, "grade");
   const remarks = strings(formData, "remark");
+  const points = strings(formData, "points");
   const bands = grades
-    .map((grade, i) => ({ grade, min: mins[i] ?? "", remark: remarks[i] ?? "" }))
+    .map((grade, i) => ({ grade, min: mins[i] ?? "", remark: remarks[i] ?? "", points: points[i] ?? "" }))
     .filter((b) => b.grade.trim() || b.min.trim() || b.remark.trim());
   return run(slug, formData, (ctx) => saveGradingScale(db(), ctx, stage, { bands }), "Grades saved.");
 }
@@ -172,8 +176,8 @@ export async function saveRemarksAction(
   return run(
     slug,
     formData,
-    (ctx) =>
-      saveReportRemarks(db(), ctx, termId, classId, studentId, {
+    async (ctx) => {
+      await saveReportRemarks(db(), ctx, termId, classId, studentId, {
         attitude: text("attitude"),
         conduct: text("conduct"),
         interest: text("interest"),
@@ -181,7 +185,10 @@ export async function saveRemarksAction(
         ...(formData.has("headTeacherRemark") ? { headTeacherRemark: text("headTeacherRemark") } : {}),
         daysPresent: text("daysPresent"),
         daysOpen: text("daysOpen"),
-      }),
+      });
+      // A suggested remark the teacher picked: used as suggested, or changed (R5-5, DRF-04).
+      await resolveDraft(db(), ctx, text("remarkDraftId"), text("classTeacherRemark"));
+    },
     "Report card saved.",
   );
 }
@@ -238,4 +245,59 @@ export async function printAction(
   }
   printAfterResponse(ctx.tenant.id, batchId);
   redirect(schoolPath(slug, "assessment/prints") as Route);
+}
+
+/** The school's starting template for subjects and grading defaults. */
+export async function saveReportStyleAction(slug: string, _prev: FormState, formData: FormData) {
+  return run(
+    slug,
+    formData,
+    (ctx) => saveReportCardStyle(db(), ctx, { reportCardStyle: formData.get("reportCardStyle") ?? "" }),
+    "Saved. Report cards published from now on use this layout.",
+  );
+}
+
+export async function saveTemplateAction(slug: string, _prev: FormState, formData: FormData) {
+  return run(
+    slug,
+    formData,
+    (ctx) => saveCurriculumTemplate(db(), ctx, { curriculumTemplate: formData.get("curriculumTemplate") }),
+    "Saved. Stages without your own grades now use this template's.",
+  );
+}
+
+export async function saveCommentsAction(
+  slug: string,
+  termId: string,
+  classId: string,
+  subjectId: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const comments: { studentId: string; original: string; value: string }[] = [];
+  for (const [name, value] of formData.entries()) {
+    if (!name.startsWith("c:") || typeof value !== "string") continue;
+    const studentId = name.slice(2);
+    const original = String(formData.get(`o:${studentId}`) ?? "");
+    if (value.trim() !== original.trim()) comments.push({ studentId, original, value });
+  }
+  if (comments.length === 0) return { status: "success", message: "No changes to save." };
+  const { ctx } = await requireTenant(slug);
+  try {
+    const result = await saveSubjectComments(db(), ctx, termId, classId, subjectId, { comments });
+    revalidatePath(schoolPath(slug, "assessment"), "layout");
+    const parts = [`${result.saved} ${result.saved === 1 ? "comment" : "comments"} saved.`];
+    if (result.conflicts.length)
+      parts.push(
+        `Not saved, because someone else changed them since you opened this page: ${result.conflicts.join(", ")}. Their comments are shown now.`,
+      );
+    if (result.locked.length)
+      parts.push(`Not saved, because the report card is published: ${result.locked.join(", ")}.`);
+    return {
+      status: result.conflicts.length || result.locked.length ? "error" : "success",
+      message: parts.join(" "),
+    };
+  } catch (error) {
+    return toFormError(error);
+  }
 }

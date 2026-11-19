@@ -7,6 +7,7 @@ import { Field, Input } from "@/components/ui/field";
 import { formatPhone, maskPhone } from "@/lib/phone";
 import type { FormState } from "@/web/forms";
 import { confirmPhoneAction, removePhoneAction, startPhoneAction } from "./actions";
+import { SuccessToast } from "@/components/ui/toast";
 
 type Started = { verificationId: string; phone: string };
 
@@ -23,7 +24,7 @@ export function PhoneSection({ phone }: { phone: string | null }) {
   }
   return (
     <div className="space-y-5">
-      {remove.status === "success" && <Alert tone="positive">{remove.message}</Alert>}
+      <SuccessToast state={remove} />
       {phone && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line px-4 py-3">
           <span className="text-base text-ink">

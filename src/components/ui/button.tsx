@@ -6,23 +6,20 @@ export type ButtonSize = "sm" | "md";
 
 const base =
   "inline-flex items-center justify-center gap-2 rounded-lg font-medium whitespace-nowrap select-none " +
-  "transition-[background-color,border-color,color,box-shadow,transform] duration-150 active:translate-y-px " +
+  "transition-[background-color,border-color,color,outline-color,scale] active:scale-[0.98] " +
   "disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0";
 
 /*
- * Primary uses the brand navy; a soft inner highlight and shadow give it depth without a gradient.
- * Secondary is a quiet outlined button. Ghost is a text action in the accent colour that gains a tint
- * on hover, so it still reads as clickable.
+ * Primary is a flat fill in the accent; depth comes from colour, not shadow. Secondary is a hairline
+ * outline on the surface, the same height as primary so rows of buttons align. Ghost is a plain text action
+ * in the accent colour with a faint tint on hover, so it still reads as clickable.
  */
 const variants: Record<ButtonVariant, string> = {
-  primary:
-    "bg-accent text-white hover:bg-accent-hover " +
-    "shadow-[inset_0_1px_0_rgb(255_255_255/0.14),0_1px_2px_rgb(27_26_23/0.18)]",
-  secondary: "bg-surface text-ink border border-line-strong hover:border-ink-3 hover:bg-subtle shadow-raised",
-  ghost: "text-accent hover:bg-accent-soft hover:text-accent-hover",
-  danger:
-    "bg-critical text-white hover:bg-critical/90 " +
-    "shadow-[inset_0_1px_0_rgb(255_255_255/0.14),0_1px_2px_rgb(27_26_23/0.18)]",
+  primary: "bg-accent text-white hover:bg-accent-hover",
+  secondary:
+    "bg-surface text-ink border border-line-strong hover:border-ink-3/60 hover:bg-subtle dark:bg-subtle/60",
+  ghost: "text-accent hover:bg-accent-soft/70 hover:text-accent-hover",
+  danger: "bg-critical text-white hover:bg-critical/90",
 };
 
 const sizes: Record<ButtonSize, string> = {

@@ -9,17 +9,32 @@ import {
 import { cn } from "@/lib/cn";
 
 const control =
-  "block w-full rounded-md border border-line-strong bg-surface px-3 text-md text-ink shadow-raised " +
-  "placeholder:text-ink-3 transition-colors hover:border-ink-3 " +
-  "focus-visible:border-accent focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-accent/25 " +
+  "block w-full rounded-md border border-line-strong bg-surface px-3 text-md text-ink dark:bg-subtle/60 " +
+  "placeholder:text-ink-3 transition-[color,background-color,border-color,box-shadow] hover:border-ink-3/60 " +
+  // Focus: one crisp 2px edge in the accent (the border plus a matching inner line), not a second outline.
+  "focus-visible:border-accent focus-visible:shadow-[inset_0_0_0_1px_var(--color-accent)] focus-visible:outline-hidden " +
   "disabled:cursor-not-allowed disabled:bg-subtle disabled:text-ink-3 " +
-  "aria-invalid:border-critical sm:text-base";
+  "aria-invalid:border-critical aria-invalid:focus-visible:border-critical " +
+  "aria-invalid:focus-visible:shadow-[inset_0_0_0_1px_var(--color-critical)] sm:text-base";
+
+/*
+ * A file picker in the same frame as other inputs. The browser draws its own "Choose file" button inside;
+ * it fills the left of the field as a quiet segment, and the file name sits centred beside it.
+ */
+const fileControl =
+  "block h-10 w-full cursor-pointer overflow-hidden rounded-md border border-line-strong bg-surface pr-3 " +
+  "text-sm leading-[2.375rem] text-ink-3 transition-[border-color,box-shadow] hover:border-ink-3/60 dark:bg-subtle/60 " +
+  "file:mr-3 file:h-full file:cursor-pointer file:border-0 file:border-r file:border-solid file:border-line " +
+  "file:bg-subtle file:px-4 file:text-sm file:font-medium file:text-ink file:transition-colors hover:file:bg-line " +
+  "focus-visible:border-accent focus-visible:shadow-[inset_0_0_0_1px_var(--color-accent)] focus-visible:outline-hidden " +
+  "disabled:cursor-not-allowed disabled:opacity-60 aria-invalid:border-critical";
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function Input(
   { className, ...props },
   ref,
 ) {
-  return <input ref={ref} className={cn(control, "h-10", className)} {...props} />;
+  const styles = props.type === "file" ? fileControl : cn(control, "h-10");
+  return <input ref={ref} className={cn(styles, className)} {...props} />;
 });
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(
@@ -36,11 +51,14 @@ export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSel
 ) {
   return (
     <select
+      // React applies a select's defaultValue only when it mounts, and resets a form to that after a server
+      // action succeeds, so a saved choice would show the old one until a reload. A new default remounts it.
+      key={props.defaultValue === undefined ? undefined : String(props.defaultValue)}
       ref={ref}
       className={cn(control, "h-10 appearance-none bg-no-repeat pr-9", className)}
       style={{
         backgroundImage:
-          "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%236b6860' stroke-width='1.5'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E\")",
+          "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238a877f' stroke-width='1.5'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E\")",
         backgroundPosition: "right 0.625rem center",
         backgroundSize: "1rem",
       }}
@@ -57,11 +75,13 @@ interface FieldProps {
   children: (props: { id: string; "aria-describedby"?: string; "aria-invalid"?: true }) => ReactNode;
   description?: string;
   error?: string;
+  /** Marks the field as optional beside its label, instead of a line of help text below it. */
+  optional?: boolean;
   className?: string;
 }
 
 /** Label, control, help text and error, wired together for assistive technology. */
-export function Field({ label, description, error, className, children }: FieldProps) {
+export function Field({ label, description, error, optional = false, className, children }: FieldProps) {
   const id = useId();
   const descriptionId = description ? `${id}-description` : undefined;
   const errorId = error ? `${id}-error` : undefined;
@@ -70,6 +90,7 @@ export function Field({ label, description, error, className, children }: FieldP
     <div className={cn("space-y-1.5", className)}>
       <label htmlFor={id} className="block text-sm font-medium text-ink">
         {label}
+        {optional && <span className="font-normal text-ink-3"> (optional)</span>}
       </label>
       {children({ id, "aria-describedby": describedBy, "aria-invalid": error ? true : undefined })}
       {description && !error && (

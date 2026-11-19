@@ -1,8 +1,9 @@
 import "server-only";
+import { PROVIDER_CHOICES } from "../mobile-money/config";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { todayIn } from "../../lib/format";
-import { parseCedis, sumPesewas } from "../../lib/money";
+import { formatCalendarDate, todayIn } from "../../lib/format";
+import { formatMoney, parseMoney, sumPesewas } from "../../lib/money";
 import {
   BILLING_PERIODS,
   FEATURES,
@@ -16,6 +17,8 @@ import {
   type SubscriptionStatus,
 } from "../../lib/plan";
 import { recordAudit } from "../audit/record";
+import type { PriceBand } from "../../lib/pricing";
+import { topUpMessages } from "./auto-invoices";
 import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
@@ -29,9 +32,12 @@ import {
   tenants,
 } from "../db/schema";
 import { DomainError } from "../errors";
+import { enqueue } from "../notifications/outbox";
 import { assertPlatformAdmin } from "../platform/service";
 import type { TenantContext } from "../tenancy/service";
-import { smsPriceFor } from "./state";
+import { proprietorEmails } from "./contacts";
+import { readInvoiceDetails } from "./settings";
+import { smsPriceFor, whatsappPriceFor } from "./state";
 import { smsUsedThisMonth } from "./usage";
 
 /**
@@ -41,9 +47,10 @@ import { smsUsedThisMonth } from "./usage";
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Enter a date.");
 const optionalDate = z.preprocess((v) => (v === "" || v === null ? undefined : v), isoDate.optional());
-const cedis = (message: string, allowZero = false) =>
+/** An amount in the school's currency (EduBridge invoices a school in its own currency). */
+const cedis = (message: string, allowZero = false, currency = "GHS") =>
   z.string().transform((text, ctx) => {
-    const pesewas = parseCedis(text);
+    const pesewas = parseMoney(text, currency);
     if (pesewas === null || (!allowZero && pesewas === 0)) {
       ctx.addIssue({ code: "custom", message });
       return z.NEVER;
@@ -51,39 +58,67 @@ const cedis = (message: string, allowZero = false) =>
     return pesewas;
   });
 
+/** The school's currency, for reading amounts typed by platform staff. */
+async function currencyOf(database: Database, actorUserId: string, tenantId: string): Promise<string> {
+  const [tenant] = await withTenant(database, { tenantId, userId: actorUserId }, (tx) =>
+    tx.select({ currencyCode: tenants.currencyCode }).from(tenants).where(eq(tenants.id, tenantId)),
+  );
+  return tenant?.currencyCode ?? "GHS";
+}
+
 // ——— Subscription ———
 
-const subscriptionSchema = z.object({
-  status: z.enum(SUBSCRIPTION_STATUSES, { message: "Choose a status." }),
-  billingPeriod: z.enum(BILLING_PERIODS, { message: "Choose how often the school pays." }),
-  trialEndsOn: optionalDate,
-  paidUntil: optionalDate,
-  price: z.preprocess(
-    (v) => (v === "" || v === null ? undefined : v),
-    cedis("Enter the price, like 1500 or 1500.00.", true).optional(),
-  ),
-  /** The school's Paystack subaccount code, where its Mobile Money payments settle. */
-  settlementAccount: z.preprocess(
-    (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-    z
-      .string()
-      .trim()
-      .regex(/^[A-Za-z0-9_]{4,40}$/, "Enter the subaccount code from Paystack, like ACCT_abc123.")
-      .nullable()
-      .optional(),
-  ),
-  /** This school's price per SMS; empty uses the platform's price. */
-  smsPrice: z.preprocess(
-    (v) => (v === "" || v === null ? undefined : v),
-    cedis("Enter a price per SMS, like 0.05.", true)
-      .refine((p) => p <= 100_000, "Enter a price per SMS, like 0.05.")
-      .optional(),
-  ),
-  notes: z.preprocess(
-    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
-    z.string().trim().max(500, "Use 500 characters or fewer.").optional(),
-  ),
-});
+const subscriptionSchema = (currency: string) =>
+  z.object({
+    status: z.enum(SUBSCRIPTION_STATUSES, { message: "Choose a status." }),
+    billingPeriod: z.enum(BILLING_PERIODS, { message: "Choose how often the school pays." }),
+    trialEndsOn: optionalDate,
+    paidUntil: optionalDate,
+    price: z.preprocess(
+      (v) => (v === "" || v === null ? undefined : v),
+      cedis("Enter the price, like 1500 or 1500.00.", true, currency).optional(),
+    ),
+    /** The school's Paystack subaccount code, where its Mobile Money payments settle. */
+    settlementAccount: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      z
+        .string()
+        .trim()
+        .regex(/^[A-Za-z0-9_]{4,40}$/, "Enter the subaccount code from Paystack, like ACCT_abc123.")
+        .nullable()
+        .optional(),
+    ),
+    /** The school's Mobile Money provider (PAY-06); empty: the deployment's default. */
+    mobileMoneyProvider: z.preprocess(
+      (v) => (v === "" ? null : v),
+      z.enum(PROVIDER_CHOICES, { message: "Choose a provider." }).nullable().optional(),
+    ),
+    /** This school's price per SMS; empty uses the platform's price. */
+    smsPrice: z.preprocess(
+      (v) => (v === "" || v === null ? undefined : v),
+      cedis("Enter a price per SMS, like 0.05.", true, currency)
+        .refine((p) => p <= 100_000, "Enter a price per SMS, like 0.05.")
+        .optional(),
+    ),
+    notes: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+      z.string().trim().max(500, "Use 500 characters or fewer.").optional(),
+    ),
+    /** A discount on the plan and add-ons, as a percentage (empty: none), with a name and an end date. */
+    discountPercent: z.preprocess(
+      (v) => (v === "" || v === null || v === undefined ? undefined : Number(v)),
+      z
+        .number({ message: "Enter a percentage, like 20." })
+        .min(0.01, "Use more than 0.")
+        .max(100, "Use 100 or less.")
+        .optional(),
+    ),
+    discountLabel: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+      z.string().trim().max(60, "Use 60 characters or fewer.").optional(),
+    ),
+    discountUntil: optionalDate,
+  });
 
 export async function updateSubscription(
   database: Database,
@@ -92,7 +127,7 @@ export async function updateSubscription(
   input: unknown,
 ): Promise<void> {
   await assertPlatformAdmin(database, actorUserId);
-  const data = subscriptionSchema.parse(input);
+  const data = subscriptionSchema(await currencyOf(database, actorUserId, tenantId)).parse(input);
   const values = {
     subscriptionStatus: data.status,
     billingPeriod: data.billingPeriod,
@@ -101,17 +136,26 @@ export async function updateSubscription(
     pricePesewas: data.price ?? null,
     smsPricePesewas: data.smsPrice ?? null,
     ...(data.settlementAccount !== undefined ? { settlementAccount: data.settlementAccount } : {}),
+    ...(data.mobileMoneyProvider !== undefined ? { mobileMoneyProvider: data.mobileMoneyProvider } : {}),
     billingNotes: data.notes ?? null,
+    discountBp: data.discountPercent === undefined ? null : Math.round(data.discountPercent * 100),
+    discountLabel: data.discountPercent === undefined ? null : (data.discountLabel ?? "Discount"),
+    discountUntil: data.discountPercent === undefined ? null : (data.discountUntil ?? null),
   };
   await withTenant(database, { tenantId, userId: actorUserId }, async (tx) => {
     const [before] = await tx
       .select()
       .from(tenantEntitlements)
       .where(eq(tenantEntitlements.tenantId, tenantId));
+    // A status set by hand is no longer the automatic rules' own (SUB-05); other edits leave that as it was.
+    const statusAuto = before?.subscriptionStatus === values.subscriptionStatus ? before.statusAuto : false;
     await tx
       .insert(tenantEntitlements)
-      .values({ tenantId, ...values })
-      .onConflictDoUpdate({ target: tenantEntitlements.tenantId, set: { ...values, updatedAt: new Date() } });
+      .values({ tenantId, ...values, statusAuto })
+      .onConflictDoUpdate({
+        target: tenantEntitlements.tenantId,
+        set: { ...values, statusAuto, updatedAt: new Date() },
+      });
     const shown = (row: typeof values) => ({
       status: row.subscriptionStatus,
       billingPeriod: row.billingPeriod,
@@ -119,7 +163,11 @@ export async function updateSubscription(
       paidUntil: row.paidUntil,
       pricePesewas: row.pricePesewas,
       smsPricePesewas: row.smsPricePesewas,
+      discountBp: row.discountBp,
+      discountLabel: row.discountLabel,
+      discountUntil: row.discountUntil,
       settlementAccount: "settlementAccount" in row ? row.settlementAccount : undefined,
+      mobileMoneyProvider: "mobileMoneyProvider" in row ? row.mobileMoneyProvider : undefined,
     });
     await recordAudit(tx, {
       tenantId,
@@ -134,6 +182,10 @@ export async function updateSubscription(
 
 // ——— SMS usage ———
 
+/**
+ * SMS a school paid for in a month, in segments (a message longer than one SMS counts as each part; see
+ * src/lib/sms.ts). Messages that failed after every retry are listed but not charged.
+ */
 export interface MonthUsage {
   month: string;
   /** Fee reminders queued (not failed). */
@@ -144,9 +196,13 @@ export interface MonthUsage {
   codes: number;
   /** Codes for numbers several schools have (each school pays an equal share). */
   sharedCodes: number;
+  /** Payment receipts, announcements, invitations, fees-billed SMS, application codes, consent forms and event reminders (not failed). */
+  familyMessages: number;
   /** Messages the provider could not deliver after every retry (not billed). */
   undelivered: number;
-  /** reminders + absence alerts + codes + this school's share of shared codes (may be fractional). */
+  /** Family messages that went by WhatsApp instead of SMS (WAB-01), one each, charged at the WhatsApp price. */
+  whatsapp: number;
+  /** Everything above except shared codes, plus this school's share of shared codes (may be fractional). */
   billable: number;
 }
 
@@ -166,9 +222,11 @@ async function readUsage(
       kind: smsUsage.kind,
       shared: sql<boolean>`${smsUsage.sharedWith} > 1`,
       failed: sql<boolean>`${notificationOutbox.status} = 'failed'`,
-      n: sql<number>`count(*)::int`,
+      whatsapp: sql<boolean>`${notificationOutbox.sentVia} = 'whatsapp'`,
+      messages: sql<number>`count(*)::int`,
+      n: sql<number>`sum(${smsUsage.segments})::int`,
       /** This school's share: a code sent to a number n schools have counts 1/n here. */
-      share: sql<number>`sum(1.0 / ${smsUsage.sharedWith})::float`,
+      share: sql<number>`sum(${smsUsage.segments}::float / ${smsUsage.sharedWith})::float`,
     })
     .from(smsUsage)
     .innerJoin(notificationOutbox, eq(notificationOutbox.id, smsUsage.outboxId))
@@ -178,26 +236,43 @@ async function readUsage(
         sql`to_char(${smsUsage.createdAt} at time zone ${timeZone}, 'YYYY-MM') >= ${list[list.length - 1]}`,
       ),
     )
-    .groupBy(sql`1`, smsUsage.kind, sql`3`, sql`4`);
+    .groupBy(sql`1`, smsUsage.kind, sql`3`, sql`4`, sql`5`);
   return list.map((month) => {
-    const of = rows.filter((r) => r.month === month);
+    const all = rows.filter((r) => r.month === month);
+    // WhatsApp messages are not SMS: counted on their own, one per message.
+    const of = all.filter((r) => !r.whatsapp);
+    const whatsapp = all.filter((r) => r.whatsapp && !r.failed).reduce((sum, r) => sum + r.messages, 0);
     const count = (test: (r: (typeof rows)[number]) => boolean) =>
       of.filter(test).reduce((sum, r) => sum + r.n, 0);
     const reminders = count((r) => !r.failed && r.kind === "fee_reminder");
     const codes = count((r) => !r.failed && r.kind === "parent_code" && !r.shared);
     const absenceAlerts = count((r) => !r.failed && r.kind === "absence_alert");
+    const familyMessages = count((r) => !r.failed && FAMILY_KINDS.includes(r.kind));
     return {
       month,
       reminders,
       absenceAlerts,
       codes,
       sharedCodes: count((r) => !r.failed && r.kind === "parent_code" && r.shared),
+      familyMessages,
       undelivered: count((r) => r.failed),
+      whatsapp,
       // Shared codes are split equally between the schools with the number (founder decision, 2026-11-06).
-      billable: roundShare(reminders + absenceAlerts + codes + shareOf(of)),
+      billable: roundShare(reminders + absenceAlerts + codes + familyMessages + shareOf(of)),
     };
   });
 }
+
+/** Kinds added after the first billing records (phases O and X); charged like reminders. */
+const FAMILY_KINDS: readonly string[] = [
+  "payment_receipt",
+  "announcement",
+  "portal_invitation",
+  "fees_billed",
+  "application_code",
+  "consent_request",
+  "event_reminder",
+];
 
 /** Shared sign-in codes' share for one month, e.g. 3 codes shared by 2 schools = 1.5. */
 function shareOf(rows: readonly { failed: boolean; kind: string; shared: boolean; share: number }[]): number {
@@ -267,27 +342,29 @@ async function readInvoices(
   }));
 }
 
-const lineSchema = z.object({
-  description: z.string().trim().min(2, "Describe the line.").max(120, "Use 120 characters or fewer."),
-  quantity: z.coerce
-    .number()
-    .int("Use a whole number.")
-    .min(1, "Use 1 or more.")
-    .max(1_000_000, "Too large."),
-  unitPrice: cedis("Enter the price, like 15 or 0.05."),
-});
-
-const invoiceSchema = z
-  .object({
-    periodStartsOn: isoDate,
-    periodEndsOn: isoDate,
-    dueOn: isoDate,
-    lines: z.array(lineSchema).min(1, "Add at least one line.").max(10, "Use 10 lines or fewer."),
-  })
-  .refine((v) => v.periodEndsOn >= v.periodStartsOn, {
-    message: "The period must end on or after its first day.",
-    path: ["periodEndsOn"],
+const lineSchema = (currency: string) =>
+  z.object({
+    description: z.string().trim().min(2, "Describe the line.").max(120, "Use 120 characters or fewer."),
+    quantity: z.coerce
+      .number()
+      .int("Use a whole number.")
+      .min(1, "Use 1 or more.")
+      .max(1_000_000, "Too large."),
+    unitPrice: cedis("Enter the price, like 15 or 0.05.", false, currency),
   });
+
+const invoiceSchema = (currency: string) =>
+  z
+    .object({
+      periodStartsOn: isoDate,
+      periodEndsOn: isoDate,
+      dueOn: isoDate,
+      lines: z.array(lineSchema(currency)).min(1, "Add at least one line.").max(10, "Use 10 lines or fewer."),
+    })
+    .refine((v) => v.periodEndsOn >= v.periodStartsOn, {
+      message: "The period must end on or after its first day.",
+      path: ["periodEndsOn"],
+    });
 
 /** Lines from a form: rows left completely blank are ignored. */
 export function invoiceLinesFrom(
@@ -312,7 +389,7 @@ export async function issueSubscriptionInvoice(
   input: unknown,
 ): Promise<{ id: string; invoiceNumber: string }> {
   await assertPlatformAdmin(database, actorUserId);
-  const data = invoiceSchema.parse(input);
+  const data = invoiceSchema(await currencyOf(database, actorUserId, tenantId)).parse(input);
   const lines: InvoiceLine[] = data.lines.map((l) => {
     const amount = l.quantity * l.unitPrice;
     if (!Number.isSafeInteger(amount) || amount > 1_000_000_000)
@@ -351,13 +428,38 @@ export async function issueSubscriptionInvoice(
         createdByUserId: actorUserId,
       })
       .returning({ id: subscriptionInvoices.id });
+    // The Proprietors are told by email, with a link to the invoice after sign-in (demo schools: never).
+    const [school] = await tx
+      .select({ name: tenants.name, slug: tenants.slug, isDemo: tenants.isDemo })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId));
+    const emailed = school && !school.isDemo ? await proprietorEmails(tx, tenantId) : [];
+    for (const email of emailed)
+      await enqueue(tx, {
+        channel: "email",
+        recipient: email,
+        template: "subscription_invoice",
+        payload: {
+          schoolName: school!.name,
+          schoolSlug: school!.slug,
+          invoiceNumber,
+          total: formatMoney(totalPesewas, tenant.currencyCode),
+          dueOn: formatCalendarDate(data.dueOn),
+        },
+        idempotencyKey: `invoice:${row!.id}`,
+      });
     await recordAudit(tx, {
       tenantId,
       actorUserId,
       action: "subscription_invoice.issued",
       entityType: "subscription_invoice",
       entityId: row!.id,
-      metadata: { invoiceNumber, totalPesewas, period: [data.periodStartsOn, data.periodEndsOn] },
+      metadata: {
+        invoiceNumber,
+        totalPesewas,
+        period: [data.periodStartsOn, data.periodEndsOn],
+        emailedTo: emailed.length,
+      },
     });
     return { id: row!.id, invoiceNumber };
   });
@@ -387,7 +489,15 @@ export async function markSubscriptionInvoicePaid(
       .update(subscriptionInvoices)
       .set({ paidOn: data.paidOn, paymentReference: data.reference, paymentRecordedByUserId: actorUserId })
       .where(eq(subscriptionInvoices.id, invoice.id));
-    return { paidOn: data.paidOn, reference: data.reference };
+    // Paid: the school is paid up to the end of the invoice's period, as when it pays online.
+    await tx
+      .update(tenantEntitlements)
+      .set({
+        paidUntil: sql`greatest(coalesce(${tenantEntitlements.paidUntil}, ${invoice.periodEndsOn}::date), ${invoice.periodEndsOn}::date)`,
+        updatedAt: new Date(),
+      })
+      .where(eq(tenantEntitlements.tenantId, tenantId));
+    return { paidOn: data.paidOn, reference: data.reference, paidUntilAtLeast: invoice.periodEndsOn };
   });
 }
 
@@ -456,6 +566,70 @@ async function settle(
   });
 }
 
+// ——— Invoice documents (SUB-03) ———
+
+export interface InvoiceDocument {
+  invoice: SubscriptionInvoice;
+  schoolName: string;
+  countryCode: string;
+  /** EduBridge's details and how to pay, from the platform settings. */
+  issuer: string | null;
+  paymentInstructions: string | null;
+}
+
+async function readInvoiceDocument(
+  tx: Transaction,
+  tenantId: string,
+  invoiceId: string,
+): Promise<InvoiceDocument | null> {
+  if (!z.string().uuid().safeParse(invoiceId).success) return null;
+  const [school] = await tx
+    .select({ name: tenants.name, countryCode: tenants.countryCode, timezone: tenants.timezone })
+    .from(tenants)
+    .where(eq(tenants.id, tenantId));
+  if (!school) return null;
+  const invoice = (await readInvoices(tx, tenantId, todayIn(school.timezone))).find(
+    (i) => i.id === invoiceId,
+  );
+  if (!invoice) return null;
+  const details = await readInvoiceDetails(tx);
+  return {
+    invoice,
+    schoolName: school.name,
+    countryCode: school.countryCode,
+    issuer: details.issuer,
+    paymentInstructions: details.paymentInstructions,
+  };
+}
+
+/** One of the school's invoices, for its PDF (Proprietor and Administrator). */
+export async function getInvoiceDocument(
+  database: Database,
+  ctx: TenantContext,
+  invoiceId: string,
+): Promise<InvoiceDocument | null> {
+  assertAllowed(ctx, "plan.view");
+  return withTenant(
+    database,
+    { tenantId: ctx.tenant.id, userId: ctx.userId, supportGrantId: ctx.support?.grantId },
+    (tx) => readInvoiceDocument(tx, ctx.tenant.id, invoiceId),
+  );
+}
+
+/** The same for platform staff, from the school's admin page. */
+export async function getInvoiceDocumentForPlatform(
+  database: Database,
+  actorUserId: string,
+  tenantId: string,
+  invoiceId: string,
+): Promise<InvoiceDocument | null> {
+  await assertPlatformAdmin(database, actorUserId);
+  if (!z.string().uuid().safeParse(tenantId).success) return null;
+  return withTenant(database, { tenantId, userId: actorUserId }, (tx) =>
+    readInvoiceDocument(tx, tenantId, invoiceId),
+  );
+}
+
 // ——— Views ———
 
 export interface PlanView {
@@ -471,15 +645,29 @@ export interface PlanView {
   pricePesewas: number | null;
   /** Where the school's Mobile Money payments settle (a Paystack subaccount code). */
   settlementAccount: string | null;
+  /** The school's Mobile Money provider; null: the deployment's default. */
+  mobileMoneyProvider: string | null;
+  /** The preset the plan was last set from (SUB-01). */
+  presetId: string | null;
   /** This school's own SMS price (null: it uses the platform's). */
   ownSmsPricePesewas: number | null;
   /** The SMS price that applies: its own, else the platform's; null when neither is set. */
   smsPricePesewas: number | null;
+  /** The price per WhatsApp message (the platform's, for schools billed in cedis); null when not set. */
+  whatsappPricePesewas: number | null;
   notes: string | null;
   activeCampuses: number;
   activeStudents: number;
   smsThisMonth: number;
+  /** Extra SMS added for this month (top-ups). */
+  smsTopUpThisMonth: number;
   currencyCode: string;
+  /** Price per term by size, copied from the plan; null when priced by agreement. */
+  priceBands: PriceBand[] | null;
+  /** The discount, in basis points, its name and last day; null when none. */
+  discountBp: number | null;
+  discountLabel: string | null;
+  discountUntil: string | null;
 }
 
 async function readPlan(tx: Transaction, tenantId: string, timeZone: string): Promise<PlanView> {
@@ -505,11 +693,19 @@ async function readPlan(tx: Transaction, tenantId: string, timeZone: string): Pr
     pricePesewas: plan?.pricePesewas ?? null,
     ownSmsPricePesewas: plan?.smsPricePesewas ?? null,
     settlementAccount: plan?.settlementAccount ?? null,
+    mobileMoneyProvider: plan?.mobileMoneyProvider ?? null,
+    presetId: plan?.planPresetId ?? null,
     smsPricePesewas: await smsPriceFor(tx, tenantId),
+    whatsappPricePesewas: await whatsappPriceFor(tx, tenantId),
     notes: plan?.billingNotes ?? null,
     activeCampuses: campusCount?.n ?? 0,
     activeStudents: await activeStudents(tx, tenantId),
     smsThisMonth: await smsUsedThisMonth(tx, tenantId, timeZone),
+    smsTopUpThisMonth: await topUpMessages(tx, tenantId, todayIn(timeZone).slice(0, 7)),
+    priceBands: plan?.priceBands ?? null,
+    discountBp: plan?.discountBp ?? null,
+    discountLabel: plan?.discountLabel ?? null,
+    discountUntil: plan?.discountUntil ?? null,
     currencyCode: tenant?.currencyCode ?? "GHS",
   };
 }
@@ -595,7 +791,9 @@ export async function getBillingOverview(
           absenceAlerts: 0,
           codes: 0,
           sharedCodes: 0,
+          familyMessages: 0,
           undelivered: 0,
+          whatsapp: 0,
           billable: 0,
         };
         const [unpaid] = await tx

@@ -11,8 +11,9 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   typedRoutes: true,
-  // Student imports send a spreadsheet (up to 2 MB) and its parsed rows to server actions.
-  experimental: { serverActions: { bodySizeLimit: "4mb" } },
+  // Server actions receive spreadsheets (imports, up to 2 MB with their parsed rows) and student documents
+  // (up to 5 MB; each file's type and size are checked again on the server).
+  experimental: { serverActions: { bodySizeLimit: "6mb" } },
   serverExternalPackages: ["pg", "@react-pdf/renderer"],
   async headers() {
     return [

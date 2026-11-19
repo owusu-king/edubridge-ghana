@@ -2,7 +2,12 @@
  * Sync protocol types shared by the server (src/server/sync) and devices (the browser today; other clients
  * later). Framework-free and browser-safe.
  */
-export const OPERATION_KINDS = ["attendance.register", "assessment.scores", "student.register"] as const;
+export const OPERATION_KINDS = [
+  "attendance.register",
+  "assessment.scores",
+  "student.register",
+  "payment.record",
+] as const;
 export type OperationKind = (typeof OPERATION_KINDS)[number];
 
 /** One change made on a device, as sent to the server. */

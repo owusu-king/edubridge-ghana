@@ -2,6 +2,7 @@ import type { Metadata, Route } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Check } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { buttonStyles } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/layout";
 import { allowed } from "@/server/authz/permissions";
@@ -25,7 +26,7 @@ export default async function SetupGuidePage({ params }: { params: Promise<{ sch
   return (
     <div className="space-y-8">
       <PageHeader
-        eyebrow="Overview"
+        eyebrow="Command Center"
         title="Setup guide"
         description="Steps to get your school running on EduBridge, in the order that works best. Each step ticks itself off once your records show it is done."
       />
@@ -54,10 +55,11 @@ export default async function SetupGuidePage({ params }: { params: Promise<{ sch
         </div>
       </div>
 
-      <ol className="divide-y divide-line border-y border-line">
+      <ol className="divide-y divide-line overflow-hidden rounded-lg border border-line bg-surface">
         {progress.applicable.map((step, i) => {
           const info = STEP_INFO[step];
           const state = progress.steps[step];
+          const done = state.status === "done";
           const isNext = step === next;
           const permitted = allowed(ctx, info.permission);
           return (
@@ -65,37 +67,38 @@ export default async function SetupGuidePage({ params }: { params: Promise<{ sch
               key={step}
               aria-current={isNext ? "step" : undefined}
               className={cn(
-                "grid gap-4 py-5 sm:grid-cols-[2.5rem_1fr_auto] sm:items-start",
-                isNext && "bg-accent-soft/40",
+                "relative grid grid-cols-[2rem_minmax(0,1fr)] gap-x-4 gap-y-3 px-4 py-5 sm:grid-cols-[2rem_minmax(0,1fr)_auto] sm:gap-x-5 sm:px-6",
+                isNext && "bg-subtle/60",
               )}
             >
+              {isNext && <span aria-hidden="true" className="absolute inset-y-0 left-0 w-0.5 bg-accent" />}
               <span
                 aria-hidden="true"
                 className={cn(
-                  "flex size-8 items-center justify-center rounded-full text-sm font-semibold ring-1 sm:ml-1",
-                  state.status === "done"
-                    ? "bg-positive text-white ring-positive"
+                  "flex size-8 items-center justify-center rounded-full text-sm font-semibold tabular-nums ring-1 ring-inset",
+                  done
+                    ? "bg-positive-soft text-positive ring-positive/30"
                     : isNext
                       ? "bg-surface text-accent ring-accent"
                       : "bg-surface text-ink-3 ring-line-strong",
                 )}
               >
-                {state.status === "done" ? <Check className="size-4" /> : i + 1}
+                {done ? <Check className="size-4" /> : i + 1}
               </span>
-              <div className="min-w-0 space-y-1">
-                <h2 className="text-md font-semibold text-ink">
-                  {info.title}
-                  <span className="sr-only">
-                    {state.status === "done"
-                      ? " (done)"
-                      : state.status === "started"
-                        ? " (started)"
-                        : " (to do)"}
-                  </span>
-                </h2>
+              <div className="min-w-0 space-y-1 pt-1">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <h2 className="text-md font-semibold text-ink">
+                    {info.title}
+                    <span className="sr-only">
+                      {done ? " (done)" : state.status === "started" ? " (started)" : " (to do)"}
+                    </span>
+                  </h2>
+                  {isNext && <Badge tone="accent">Next</Badge>}
+                </div>
                 <p className="text-base text-ink-2">{info.why}</p>
-                <p className={cn("text-sm", state.status === "done" ? "text-positive" : "text-ink-3")}>
-                  {state.detail}
+                <p className="flex items-start gap-1.5 text-sm text-ink-3">
+                  {done && <Check aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-positive" />}
+                  <span>{state.detail}</span>
                 </p>
                 {step === "teachers" && allowed(ctx, "academics.manage") && (
                   <p className="text-sm">
@@ -105,7 +108,7 @@ export default async function SetupGuidePage({ params }: { params: Promise<{ sch
                   </p>
                 )}
               </div>
-              <div className="sm:pr-2">
+              <div className="col-start-2 sm:col-start-auto sm:justify-self-end">
                 {permitted ? (
                   <Link
                     href={stepHref(slug, step) as Route}

@@ -15,7 +15,7 @@ import type { TenantContext } from "../tenancy/service";
  */
 
 export interface StudentMessage {
-  kind: "fee_reminder" | "payment_receipt" | "absence_alert";
+  kind: "fee_reminder" | "payment_receipt" | "absence_alert" | "fees_billed" | "portal_invitation";
   recipient: string;
   /** queued: waiting or being retried; sent: accepted by the SMS provider; failed: gave up. */
   state: "queued" | "sent" | "failed";
@@ -50,7 +50,9 @@ export async function listStudentMessages(
         .limit(50);
       return rows
         .filter((r): r is typeof r & { kind: StudentMessage["kind"] } =>
-          ["fee_reminder", "payment_receipt", "absence_alert"].includes(r.kind),
+          ["fee_reminder", "payment_receipt", "absence_alert", "fees_billed", "portal_invitation"].includes(
+            r.kind,
+          ),
         )
         .map((r) => ({
           kind: r.kind,

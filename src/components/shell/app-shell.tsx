@@ -1,6 +1,9 @@
+import { cookies } from "next/headers";
 import type { ReactNode } from "react";
+import { explicitTheme, THEME_COOKIE, type ThemeChoice } from "@/lib/theme";
+import { ROLE_LABELS, ROLES } from "@/server/authz/permissions";
 import { MobileNav } from "./mobile-nav";
-import { ShellIdentity, UserMenu } from "./menus";
+import { ShellIdentity, SidebarFooter, UserMenu } from "./menus";
 import { areaTitle, type ShellArea } from "./navigation";
 import { SidebarNav } from "./sidebar-nav";
 
@@ -15,8 +18,16 @@ export interface AppShellProps {
 }
 
 /** Desktop: fixed sidebar. Mobile: top bar with a navigation drawer. */
-export function AppShell({ area, user, isPlatformAdmin, signOut, notice, children }: AppShellProps) {
-  const menu = { name: user.name, email: user.email, signOut, isPlatformAdmin };
+export async function AppShell({ area, user, isPlatformAdmin, signOut, notice, children }: AppShellProps) {
+  const theme: ThemeChoice = explicitTheme((await cookies()).get(THEME_COOKIE)?.value) ?? "system";
+  // Shown under the person's name in the profile menu: their roles here, in the usual order.
+  const role =
+    area.kind === "platform"
+      ? "Platform administrator"
+      : ROLES.filter((r) => area.roles.includes(r))
+          .map((r) => ROLE_LABELS[r])
+          .join(", ") || "Member";
+  const menu = { name: user.name, role, signOut, isPlatformAdmin, theme };
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[15.5rem_1fr] print:block">
       <a
@@ -28,11 +39,12 @@ export function AppShell({ area, user, isPlatformAdmin, signOut, notice, childre
 
       <aside className="sticky top-0 hidden h-dvh flex-col border-r border-line bg-canvas px-3 py-3 lg:flex print:hidden">
         <ShellIdentity area={area} />
-        <div className="mt-6 flex-1 overflow-y-auto">
+        {/* The scroll area reaches the sidebar edge so its scrollbar sits clear of the rows, never over them. */}
+        <div className="mt-6 -mr-3 flex-1 [scrollbar-gutter:stable] overflow-y-auto overscroll-contain pr-2.5">
           <SidebarNav area={area} />
         </div>
-        <div className="border-t border-line pt-3">
-          <UserMenu {...menu} />
+        <div className="pt-3">
+          <SidebarFooter {...menu} />
         </div>
       </aside>
 

@@ -1,10 +1,11 @@
 import { FileDown, MessageCircle } from "lucide-react";
+import { StatementRangeForm } from "@/components/fees/statement-range";
 import { buttonStyles } from "@/components/ui/button";
 import { Section } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import type { StudentAccount } from "@/server/fees/ledger";
 import { formatCalendarDate } from "@/lib/format";
-import { formatCedis, pesewasToInput } from "@/lib/money";
+import { formatMoney, minorToInput } from "@/lib/money";
 import { cn } from "@/lib/cn";
 import Link from "next/link";
 import { schoolPath } from "@/lib/routes";
@@ -36,14 +37,15 @@ import {
   PaymentPlanDialog,
 } from "./account-controls";
 
-function balanceText(pesewas: number): string {
-  if (pesewas > 0) return `${formatCedis(pesewas)} owed`;
-  if (pesewas < 0) return `${formatCedis(-pesewas)} in credit`;
+function balanceText(pesewas: number, currency: string): string {
+  if (pesewas > 0) return `${formatMoney(pesewas, currency)} owed`;
+  if (pesewas < 0) return `${formatMoney(-pesewas, currency)} in credit`;
   return "Nothing owed";
 }
 
 /** The student's fee statement: every entry, oldest first, with a running balance. */
 export function FeeAccount({
+  currency,
   slug,
   account,
   canManage,
@@ -57,6 +59,8 @@ export function FeeAccount({
   mobileMoney,
   outreach,
 }: {
+  /** The school's currency (ISO 4217). */
+  currency: string;
   slug: string;
   account: StudentAccount;
   canManage: boolean;
@@ -74,6 +78,8 @@ export function FeeAccount({
     enabled: boolean;
     testMode: boolean;
     testHint: string | null;
+    /** The networks of the school's country. */
+    networks: { id: string; label: string }[];
     requests: MobileMoneyRequestRow[];
     phones: PayerPhone[];
     timeZone: string;
@@ -81,6 +87,8 @@ export function FeeAccount({
   /** Statement download and reminders to the family. */
   outreach: {
     statementHref: string;
+    /** When the student has brothers or sisters sharing a guardian: their family statement. */
+    familyStatementHref?: string | null;
     canRemind: boolean;
     /** Set when the family owes and a guardian has a phone number. */
     reminder: {
@@ -99,7 +107,7 @@ export function FeeAccount({
       title="Fees"
       aside={
         <p className="text-base font-semibold whitespace-nowrap text-ink tabular-nums">
-          {balanceText(account.balancePesewas)}
+          {balanceText(account.balancePesewas, currency)}
         </p>
       }
     >
@@ -108,6 +116,7 @@ export function FeeAccount({
           // Ways to take money: the main actions, spaced so each is an easy target.
           <div className="flex flex-wrap items-center gap-3">
             <RecordPaymentDialog
+              currency={currency}
               action={recordPaymentAction.bind(null, slug, account.student.id)}
               studentName={account.student.name}
               payerName={payerName}
@@ -115,34 +124,44 @@ export function FeeAccount({
             />
             {mobileMoney.enabled && (
               <MobileMoneyDialog
+                currency={currency}
                 action={requestMobileMoneyAction.bind(null, slug, account.student.id)}
                 studentName={account.student.name}
-                defaultAmount={account.balancePesewas > 0 ? pesewasToInput(account.balancePesewas) : ""}
+                defaultAmount={
+                  account.balancePesewas > 0 ? minorToInput(account.balancePesewas, currency) : ""
+                }
                 phones={mobileMoney.phones}
                 testMode={mobileMoney.testMode}
                 testHint={mobileMoney.testHint}
+                networks={mobileMoney.networks}
               />
             )}
           </div>
         )}
         {canManage && (
           <div className="-ml-3.5 flex flex-wrap gap-x-2 gap-y-1">
-            <AdjustmentDialog action={recordAdjustmentAction.bind(null, slug, account.student.id)} />
+            <AdjustmentDialog
+              currency={currency}
+              action={recordAdjustmentAction.bind(null, slug, account.student.id)}
+            />
             {feeItems.length > 0 && (
               <AddConcessionDialog
+                currency={currency}
                 action={addConcessionAction.bind(null, slug, account.student.id)}
                 items={feeItems}
               />
             )}
             {!plan && account.balancePesewas > 0 && (
               <PaymentPlanDialog
+                currency={currency}
                 action={createPaymentPlanAction.bind(null, slug, account.student.id)}
-                defaultTotal={pesewasToInput(account.balancePesewas)}
+                defaultTotal={minorToInput(account.balancePesewas, currency)}
                 firstDue={today}
               />
             )}
             {openingAsOf && (
               <OpeningBalanceDialog
+                currency={currency}
                 action={setOpeningBalanceAction.bind(null, slug, account.student.id)}
                 asOf={openingAsOf}
               />
@@ -154,6 +173,13 @@ export function FeeAccount({
             <FileDown aria-hidden="true" />
             Download statement
           </a>
+          {outreach.familyStatementHref && (
+            <a href={outreach.familyStatementHref} className={buttonStyles("ghost", "sm")}>
+              <FileDown aria-hidden="true" />
+              Family statement
+            </a>
+          )}
+          <StatementRangeForm href={outreach.statementHref} today={today} />
           {outreach.canRemind && outreach.reminder && (
             <>
               {outreach.reminder.remindedToday ? (
@@ -180,10 +206,17 @@ export function FeeAccount({
         </div>
       </div>
       {plan && (
-        <PaymentPlanView slug={slug} studentId={account.student.id} plan={plan} canManage={canManage} />
+        <PaymentPlanView
+          currency={currency}
+          slug={slug}
+          studentId={account.student.id}
+          plan={plan}
+          canManage={canManage}
+        />
       )}
       {mobileMoney.requests.length > 0 && (
         <MobileMoneyRequests
+          currency={currency}
           slug={slug}
           studentId={account.student.id}
           requests={mobileMoney.requests}
@@ -203,7 +236,7 @@ export function FeeAccount({
                     ·{" "}
                     {c.percentBasisPoints !== null
                       ? formatPercent(c.percentBasisPoints)
-                      : formatCedis(c.amountPesewas!)}{" "}
+                      : formatMoney(c.amountPesewas!, currency)}{" "}
                     off {c.feeItemName ?? "every fee item"}
                   </span>
                 </span>
@@ -262,10 +295,10 @@ export function FeeAccount({
                     {entry.reversed && <span className="block text-sm text-ink-3">Reversed</span>}
                   </TD>
                   <TD className="text-right whitespace-nowrap tabular-nums">
-                    {formatCedis(entry.amountPesewas)}
+                    {formatMoney(entry.amountPesewas, currency)}
                   </TD>
                   <TD className="hidden text-right whitespace-nowrap tabular-nums sm:table-cell">
-                    {formatCedis(entry.balancePesewas)}
+                    {formatMoney(entry.balancePesewas, currency)}
                   </TD>
                   {canManage && (
                     <TD className="text-right">
@@ -273,7 +306,7 @@ export function FeeAccount({
                         <ReverseEntryDialog
                           action={reverseEntryAction.bind(null, slug, account.student.id, entry.id)}
                           description={entry.description}
-                          amount={formatCedis(entry.amountPesewas)}
+                          amount={formatMoney(entry.amountPesewas, currency)}
                         />
                       )}
                     </TD>

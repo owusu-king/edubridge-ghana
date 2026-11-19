@@ -110,7 +110,10 @@ export default async function ClassAssessmentPage({
               <TBody>
                 {subjects.map((subject) => (
                   <TR key={subject.id}>
-                    <TD className="font-medium text-ink">{subject.name}</TD>
+                    <TD>
+                      <span className="font-medium text-ink">{subject.name}</span>
+                      {subject.teacher && <span className="block text-sm text-ink-3">{subject.teacher}</span>}
+                    </TD>
                     <TD>
                       {students.length === 0 ? (
                         <span className="text-ink-3">No students</span>
@@ -129,13 +132,17 @@ export default async function ClassAssessmentPage({
                       )}
                     </TD>
                     <TD className="text-right">
-                      <Link
-                        href={`${base}/subjects/${subject.id}${q}` as Route}
-                        className="inline-flex h-9 items-center rounded-lg px-3 text-sm font-medium whitespace-nowrap text-accent hover:bg-accent-soft"
-                        aria-label={`Enter ${subject.name} scores`}
-                      >
-                        Enter scores
-                      </Link>
+                      {subject.canEnter ? (
+                        <Link
+                          href={`${base}/subjects/${subject.id}${q}` as Route}
+                          className="inline-flex h-9 items-center rounded-lg px-3 text-sm font-medium whitespace-nowrap text-accent hover:bg-accent-soft"
+                          aria-label={`Enter ${subject.name} scores`}
+                        >
+                          Enter scores
+                        </Link>
+                      ) : (
+                        <span className="text-sm text-ink-3">Subject teacher enters</span>
+                      )}
                     </TD>
                   </TR>
                 ))}

@@ -4,14 +4,15 @@ import { CalendarDays } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { StatusText } from "@/components/ui/badge";
 import { EmptyState, Section } from "@/components/ui/layout";
-import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { RowActions, Table, TableFrame, TBody, TD, TGroupRow, TH, THead, TR } from "@/components/ui/table";
 import { listAcademicYears, suggestedYear } from "@/server/academics/calendar";
 import { listHolidays } from "@/server/academics/holidays";
 import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
 import { isWeekend } from "@/lib/attendance";
 import { formatCalendarDate } from "@/lib/format";
-import { ghanaPublicHolidays } from "@/lib/holidays";
+import { countryName } from "@/lib/format";
+import { suggestedHolidays } from "@/lib/holidays";
 import { requireTenant } from "@/web/auth";
 import {
   addHolidayAction,
@@ -62,51 +63,56 @@ export default async function CalendarPage({ params }: { params: Promise<{ schoo
             {!hasCurrent && (
               <Alert tone="info">Choose the current term so fees and attendance use the right dates.</Alert>
             )}
-            {years.map((year) => (
-              <div key={year.id} className="space-y-3">
-                <h3 className="text-base font-semibold text-ink">
-                  {year.name}{" "}
-                  <span className="font-normal text-ink-3">
-                    · {formatCalendarDate(year.startsOn)} – {formatCalendarDate(year.endsOn)}
-                  </span>
-                </h3>
-                <TableFrame>
-                  <Table>
-                    <caption className="sr-only">Terms in {year.name}</caption>
-                    <THead>
-                      <tr>
-                        <TH>Term</TH>
-                        <TH>Starts</TH>
-                        <TH>Ends</TH>
-                        <TH className="hidden sm:table-cell">Status</TH>
-                        <TH>
-                          <span className="sr-only">Actions</span>
-                        </TH>
-                      </tr>
-                    </THead>
-                    <TBody>
-                      {year.terms.map((term) => (
-                        <TR key={term.id}>
-                          <TD className="font-medium text-ink">{term.name}</TD>
-                          <TD className="whitespace-nowrap">{formatCalendarDate(term.startsOn)}</TD>
-                          <TD className="whitespace-nowrap">{formatCalendarDate(term.endsOn)}</TD>
-                          <TD className="hidden sm:table-cell">
-                            {term.isCurrent ? <StatusText tone="positive">Current</StatusText> : null}
-                          </TD>
-                          <TD>
+            {/* One table for every year, so the term columns line up all the way down. */}
+            <TableFrame>
+              <Table>
+                <caption className="sr-only">Academic years and their terms</caption>
+                <THead>
+                  <tr>
+                    <TH>Term</TH>
+                    <TH>Starts</TH>
+                    <TH>Ends</TH>
+                    <TH className="hidden sm:table-cell">Status</TH>
+                    <TH>
+                      <span className="sr-only">Actions</span>
+                    </TH>
+                  </tr>
+                </THead>
+                {years.map((year) => (
+                  <TBody key={year.id}>
+                    <TGroupRow>
+                      <TD colSpan={5}>
+                        <span className="font-medium text-ink">{year.name}</span>
+                        <span className="ml-2 text-sm text-ink-3">
+                          {formatCalendarDate(year.startsOn)} – {formatCalendarDate(year.endsOn)}
+                        </span>
+                      </TD>
+                    </TGroupRow>
+                    {year.terms.map((term) => (
+                      <TR key={term.id}>
+                        <TD className="pl-10! text-ink">{term.name}</TD>
+                        <TD className="whitespace-nowrap tabular-nums">
+                          {formatCalendarDate(term.startsOn)}
+                        </TD>
+                        <TD className="whitespace-nowrap tabular-nums">{formatCalendarDate(term.endsOn)}</TD>
+                        <TD className="hidden sm:table-cell">
+                          {term.isCurrent ? <StatusText tone="positive">Current</StatusText> : null}
+                        </TD>
+                        <TD>
+                          <RowActions>
                             <TermActions
                               term={term}
                               update={updateTermAction.bind(null, slug, term.id)}
                               makeCurrent={makeCurrentAction.bind(null, slug, term.id)}
                             />
-                          </TD>
-                        </TR>
-                      ))}
-                    </TBody>
-                  </Table>
-                </TableFrame>
-              </div>
-            ))}
+                          </RowActions>
+                        </TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                ))}
+              </Table>
+            </TableFrame>
           </div>
         )}
       </Section>
@@ -119,10 +125,12 @@ export default async function CalendarPage({ params }: { params: Promise<{ schoo
             <div className="flex flex-wrap justify-end gap-1">
               {years.slice(0, 2).map((y) => (
                 <SuggestHolidaysDialog
+                  countryName={countryName(ctx.tenant.countryCode)}
+                  ghana={ctx.tenant.countryCode === "GH"}
                   key={y.id}
                   yearName={y.name}
                   action={addSuggestedHolidaysAction.bind(null, slug)}
-                  suggestions={ghanaPublicHolidays(y.startsOn, y.endsOn).map((h) => ({
+                  suggestions={suggestedHolidays(ctx.tenant.countryCode, y.startsOn, y.endsOn).map((h) => ({
                     ...h,
                     label: formatCalendarDate(h.date),
                     weekend: isWeekend(h.date),

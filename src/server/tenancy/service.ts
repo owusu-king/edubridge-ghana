@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "../audit/record";
 import { assertAllowed, isRole, type Permission, type Role } from "../authz/permissions";
@@ -9,12 +9,16 @@ import {
   membershipCampuses,
   memberships,
   platformAdmins,
+  safeguardingLeads,
+  boardingHouseStaff,
   tenantEntitlements,
   tenants,
   users,
 } from "../db/schema";
 import { readLiveGrant } from "../support/grants";
-import { FEATURES, isFeature, type BillingState, type Feature } from "../../lib/plan";
+import { activeModules, type ModuleState } from "../../lib/modules";
+import type { BillingState, Feature } from "../../lib/plan";
+import { readModuleStates } from "../entitlements/service";
 import { readBillingState } from "../billing/state";
 import { readPreferences } from "./preferences";
 
@@ -40,8 +44,12 @@ export interface TenantContext {
   campusIds: string[] | null;
   /** True when one of the member's roles must use two-step verification here. */
   mfaRequired: boolean;
-  /** Modules the school's plan includes (checked with `allowed` / `assertAllowed`). */
+  /** Modules active for the school today (checked with `allowed` / `assertAllowed`). */
   features: Feature[];
+  /** Every module's state for the school (active, read-only or off, and why), from the resolver. */
+  modules: Record<string, ModuleState>;
+  /** The school's Mobile Money provider as set by platform staff (PAY-06); null or absent: the default. */
+  mobileMoneyProvider?: string | null;
   /** Whether an overdue EduBridge invoice has paused school-initiated SMS (or soon will). */
   billing: BillingState;
   /** Permissions the school's own settings give this member beyond their roles. */
@@ -103,16 +111,48 @@ export async function resolveTenantContext(
       .from(membershipCampuses)
       .where(and(eq(membershipCampuses.tenantId, tenant.id), eq(membershipCampuses.membershipId, row.id)));
     const [plan] = await tx
-      .select({ features: tenantEntitlements.features })
+      .select({ mobileMoney: tenantEntitlements.mobileMoneyProvider })
       .from(tenantEntitlements)
       .where(eq(tenantEntitlements.tenantId, tenant.id));
+    // ENT-01: plan, add-ons, release and dependencies (no plan row: every module, as before).
+    const modules = await readModuleStates(tx, tenant);
     return {
       roles: row.roles,
       campusIds: scope.length > 0 ? scope.map((r) => r.campusId) : null,
-      // A school without a plan row (made outside platform onboarding) gets the column's default: everything.
-      features: plan ? plan.features.filter(isFeature) : [...FEATURES],
+      modules,
+      features: activeModules(modules),
+      mobileMoneyProvider: plan?.mobileMoney ?? null,
       billing: await readBillingState(tx, tenant),
       preferences: await readPreferences(tx, tenant.id),
+      // SFG-01b: designated safeguarding leads handle cases (the database checks the same table).
+      safeguardingLead:
+        (
+          await tx
+            .select({ id: safeguardingLeads.id })
+            .from(safeguardingLeads)
+            .where(
+              and(
+                eq(safeguardingLeads.tenantId, tenant.id),
+                eq(safeguardingLeads.membershipId, row.id),
+                isNull(safeguardingLeads.endedAt),
+              ),
+            )
+        ).length > 0,
+      // BRD-01b: house staff see their house and record its exeats.
+      houseStaff:
+        (
+          await tx
+            .select({ id: boardingHouseStaff.id })
+            .from(boardingHouseStaff)
+            .where(
+              and(
+                eq(boardingHouseStaff.tenantId, tenant.id),
+                eq(boardingHouseStaff.membershipId, row.id),
+                isNull(boardingHouseStaff.endedAt),
+              ),
+            )
+            .limit(1)
+        ).length > 0,
     };
   });
   if (!membership) return resolveSupportContext(database, tenant, userId);
@@ -126,9 +166,16 @@ export async function resolveTenantContext(
     campusIds: membership.campusIds,
     mfaRequired,
     features: membership.features,
+    modules: membership.modules,
+    mobileMoneyProvider: membership.mobileMoneyProvider,
     billing: membership.billing,
-    schoolGrants:
-      membership.preferences.accountantsCanVoid && roles.includes("bursar") ? ["payments.void"] : [],
+    schoolGrants: [
+      ...(membership.preferences.accountantsCanVoid && roles.includes("bursar")
+        ? ["payments.void" as const]
+        : []),
+      ...(membership.safeguardingLead ? ["safeguarding.manage" as const] : []),
+      ...(membership.houseStaff ? ["boarding.view" as const, "boarding.exeat" as const] : []),
+    ],
   };
 }
 
@@ -151,12 +198,16 @@ async function resolveSupportContext(
     const grant = await readLiveGrant(tx, tenant.id);
     if (!grant) return null;
     const [plan] = await tx
-      .select({ features: tenantEntitlements.features })
+      .select({ mobileMoney: tenantEntitlements.mobileMoneyProvider })
       .from(tenantEntitlements)
       .where(eq(tenantEntitlements.tenantId, tenant.id));
+    // Support works with the school's own modules, never more (ADR 0003 §7).
+    const modules = await readModuleStates(tx, tenant);
     return {
       grant,
-      features: plan ? plan.features.filter(isFeature) : [...FEATURES],
+      modules,
+      features: activeModules(modules),
+      mobileMoneyProvider: plan?.mobileMoney ?? null,
       billing: await readBillingState(tx, tenant),
     };
   });
@@ -169,6 +220,8 @@ async function resolveSupportContext(
     // Platform staff can reach many schools, so two-step verification applies as on the admin pages.
     mfaRequired: process.env.PLATFORM_MFA_REQUIRED !== "false",
     features: found.features,
+    modules: found.modules,
+    mobileMoneyProvider: found.mobileMoneyProvider,
     billing: found.billing,
     schoolGrants: [],
     support: { grantId: found.grant.id, expiresAt: found.grant.expiresAt },
@@ -280,11 +333,19 @@ export function canAccessCampus(ctx: TenantContext, campusId: string): boolean {
   return ctx.campusIds === null || ctx.campusIds.includes(campusId);
 }
 
+/** Every country profile's time zone (src/lib/countries.ts), plus London and UTC for international schools. */
 export const SUPPORTED_TIMEZONES = [
   "Africa/Accra",
   "Africa/Lagos",
   "Africa/Nairobi",
+  "Africa/Kampala",
+  "Africa/Dar_es_Salaam",
+  "Africa/Kigali",
+  "Africa/Lusaka",
   "Africa/Johannesburg",
+  "Africa/Abidjan",
+  "Africa/Dakar",
+  "Africa/Douala",
   "Europe/London",
   "UTC",
 ] as const;

@@ -49,6 +49,14 @@ export default async function ScoreSheetPage({
           {lockedCount > 0 &&
             ` ${lockedCount} ${lockedCount === 1 ? "student's report card is" : "students' report cards are"} published, so their marks are locked.`}
         </p>
+        <Link
+          href={
+            `${schoolPath(slug, `assessment/${sheet.cls.id}/subjects/${sheet.subject.id}/comments`)}${termQuery(term.id)}` as Route
+          }
+          className="mt-2 inline-flex text-sm font-medium text-accent hover:underline"
+        >
+          Comments for report cards
+        </Link>
       </div>
       {sheet.students.length === 0 ? (
         <EmptyState

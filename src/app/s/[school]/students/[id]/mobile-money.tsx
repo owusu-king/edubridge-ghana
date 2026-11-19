@@ -2,7 +2,7 @@ import { MobileMoneyStatus } from "@/components/fees/mobile-money-status";
 import { AutoRefresh } from "@/components/ui/auto-refresh";
 import { formatDateTime } from "@/lib/format";
 import { NETWORK_LABELS } from "@/lib/mobile-money";
-import { formatCedis } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { formatPhone } from "@/lib/phone";
 import type { MobileMoneyRequestRow } from "@/server/mobile-money/requests";
 import { checkMobileMoneyAction } from "./account-actions";
@@ -10,12 +10,15 @@ import { CheckStatusButton } from "./mobile-money-controls";
 
 /** A student's recent Mobile Money prompts and their outcomes. Refreshes while one is waiting. */
 export function MobileMoneyRequests({
+  currency,
   slug,
   studentId,
   requests,
   timeZone,
   canCheck,
 }: {
+  /** The school's currency (ISO 4217). */
+  currency: string;
   slug: string;
   studentId: string;
   requests: MobileMoneyRequestRow[];
@@ -36,7 +39,7 @@ export function MobileMoneyRequests({
           <li key={r.id} className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
             <div className="min-w-0 space-y-0.5">
               <p className="text-base text-ink">
-                <span className="font-medium tabular-nums">{formatCedis(r.amountPesewas)}</span>
+                <span className="font-medium tabular-nums">{formatMoney(r.amountPesewas, currency)}</span>
                 <span className="text-ink-3">
                   {" "}
                   · {NETWORK_LABELS[r.network]} {formatPhone(r.msisdn)}
@@ -54,7 +57,7 @@ export function MobileMoneyRequests({
             {canCheck && (r.status === "pending" || r.status === "expired") && (
               <CheckStatusButton
                 action={checkMobileMoneyAction.bind(null, slug, studentId, r.id)}
-                label={`Check status of the ${formatCedis(r.amountPesewas)} request`}
+                label={`Check status of the ${formatMoney(r.amountPesewas, currency)} request`}
               />
             )}
           </li>

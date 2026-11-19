@@ -48,7 +48,7 @@ test("EduBridge staff issue an invoice, record its payment, and the school sees 
   // The school's administrator sees the invoice under Settings, Plan.
   await signIn(page, "admin@example.test", `${SCHOOL.path}/settings/plan`);
   await page.goto(`${SCHOOL.path}/settings/plan`);
-  await expect(page.getByRole("heading", { name: "What your plan includes" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Modules" })).toBeVisible();
   await expect(
     page.getByRole("table", { name: "Invoices from EduBridge" }).getByRole("row").filter({ hasText: number }),
   ).toContainText("Paid");
@@ -80,10 +80,16 @@ test("a module left out of a school's plan disappears for its staff, and comes b
     const nav = page.getByRole("navigation", { name: "School" });
     await expect(nav.getByRole("link", { name: "Assessment" })).toBeVisible();
     await expect(nav.getByRole("link", { name: "Attendance" })).toHaveCount(0);
-    await page.goto("/s/adenta-hall/attendance");
-    await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
+    // Typing the address is refused too, for the module's every page (ENT-03).
+    for (const path of ["/s/adenta-hall/attendance", "/s/adenta-hall/settings/attendance"]) {
+      await page.goto(path);
+      await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
+    }
     await page.goto("/s/adenta-hall/settings/plan");
-    await expect(page.getByText("Attendance: not included")).toBeAttached();
+    const attendance = page
+      .getByRole("listitem")
+      .filter({ has: page.getByText("Attendance", { exact: true }) });
+    await expect(attendance).toContainText("Not included.");
   } finally {
     await setAttendance(true);
   }

@@ -1,12 +1,12 @@
 "use client";
 
 import { useActionState } from "react";
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
 import { FormDialog } from "@/components/ui/form-dialog";
 import { FIRST_CHILD_LABELS, FIRST_CHILD_RULES } from "@/lib/siblings";
 import type { FormState } from "@/web/forms";
+import { FormMessage } from "@/components/ui/toast";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
 
@@ -32,9 +32,7 @@ export function SiblingRuleForm({
   const v = state.values;
   return (
     <form action={formAction} className="space-y-5" noValidate>
-      {state.status !== "idle" && state.message && (
-        <Alert tone={state.status === "success" ? "positive" : "critical"}>{state.message}</Alert>
-      )}
+      {state.status !== "idle" && state.message && <FormMessage state={state} />}
       <div className="grid gap-5 sm:grid-cols-2">
         <Field
           label="Pays in full"
@@ -42,7 +40,9 @@ export function SiblingRuleForm({
           error={errors.firstChild}
         >
           {(p) => (
-            <Select {...p} name="firstChild" defaultValue={v?.firstChild ?? defaults.firstChild}>
+            // Named paysInFull, not firstChild: a form exposes its controls as properties by name, and that
+            // one would hide form.firstChild, which React reads while hydrating (form-field-names.test.ts).
+            <Select {...p} name="paysInFull" defaultValue={v?.paysInFull ?? defaults.firstChild}>
               {FIRST_CHILD_RULES.map((r) => (
                 <option key={r} value={r}>
                   {FIRST_CHILD_LABELS[r]}

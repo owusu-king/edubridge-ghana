@@ -122,8 +122,14 @@ export async function copyFeeStructureAction(
   );
 }
 
-export async function billTermAction(slug: string, termId: string, _prev: FormState) {
-  return run(slug, null, (ctx) => billTerm(db(), ctx, termId), "Students billed.");
+export async function billTermAction(slug: string, termId: string, _prev: FormState, formData: FormData) {
+  const notify = formData.get("notify") === "on";
+  return run(
+    slug,
+    null,
+    (ctx) => billTerm(db(), ctx, termId, { notify }),
+    notify ? "Students billed. Families are being sent their new balance by SMS." : "Students billed.",
+  );
 }
 
 export async function markMobileMoneyReviewedAction(

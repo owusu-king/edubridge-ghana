@@ -5,6 +5,7 @@ import { db } from "@/server/db/client";
 import {
   addGuardian,
   setParentAccess,
+  inviteGuardian,
   setPrimaryGuardian,
   unlinkGuardian,
   updateGuardian,
@@ -95,5 +96,17 @@ export async function setParentAccessAction(
   return run(slug, null, async (ctx) => {
     await setParentAccess(db(), ctx, guardianId, { blocked });
     return blocked ? "They can no longer use the parent view." : "They can use the parent view again.";
+  });
+}
+
+export async function inviteGuardianAction(
+  slug: string,
+  studentId: string,
+  guardianId: string,
+  _prev: FormState,
+) {
+  return run(slug, null, async (ctx) => {
+    await inviteGuardian(db(), ctx, studentId, guardianId);
+    return "Invitation sent by SMS.";
   });
 }

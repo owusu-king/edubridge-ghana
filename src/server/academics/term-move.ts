@@ -21,6 +21,8 @@ import {
   classes,
   enrolments,
   ledgerEntries,
+  lessonMarks,
+  lessonRegisters,
   levels,
   reportCards,
   students,
@@ -405,7 +407,7 @@ export async function undoMove(database: Database, ctx: TenantContext, moveId: s
       .where(eq(termMoveEnrolments.moveId, move.id));
     const ids = placements.map((p) => p.studentId);
     if (ids.length) {
-      const count = async (table: "fees" | "registers" | "marks" | "cards") => {
+      const count = async (table: "fees" | "registers" | "lessons" | "marks" | "cards") => {
         const query =
           table === "fees"
             ? tx
@@ -423,26 +425,35 @@ export async function undoMove(database: Database, ctx: TenantContext, moveId: s
                       inArray(attendanceMarks.studentId, ids),
                     ),
                   )
-              : table === "marks"
+              : table === "lessons"
                 ? tx
-                    .select({ n: sql<number>`count(distinct ${assessmentScores.studentId})::int` })
-                    .from(assessmentScores)
+                    .select({ n: sql<number>`count(distinct ${lessonMarks.studentId})::int` })
+                    .from(lessonMarks)
+                    .innerJoin(lessonRegisters, eq(lessonRegisters.id, lessonMarks.registerId))
                     .where(
-                      and(
-                        eq(assessmentScores.termId, move.toTermId),
-                        inArray(assessmentScores.studentId, ids),
-                      ),
+                      and(eq(lessonRegisters.termId, move.toTermId), inArray(lessonMarks.studentId, ids)),
                     )
-                : tx
-                    .select({ n: sql<number>`count(distinct ${reportCards.studentId})::int` })
-                    .from(reportCards)
-                    .where(and(eq(reportCards.termId, move.toTermId), inArray(reportCards.studentId, ids)));
+                : table === "marks"
+                  ? tx
+                      .select({ n: sql<number>`count(distinct ${assessmentScores.studentId})::int` })
+                      .from(assessmentScores)
+                      .where(
+                        and(
+                          eq(assessmentScores.termId, move.toTermId),
+                          inArray(assessmentScores.studentId, ids),
+                        ),
+                      )
+                  : tx
+                      .select({ n: sql<number>`count(distinct ${reportCards.studentId})::int` })
+                      .from(reportCards)
+                      .where(and(eq(reportCards.termId, move.toTermId), inArray(reportCards.studentId, ids)));
         const [row] = await query;
         return row?.n ?? 0;
       };
       const blockers = [
         [await count("fees"), "have fees billed"],
         [await count("registers"), "are on registers"],
+        [await count("lessons"), "are on lesson registers"],
         [await count("marks"), "have marks"],
         [await count("cards"), "have report cards"],
       ].filter(([n]) => (n as number) > 0) as [number, string][];

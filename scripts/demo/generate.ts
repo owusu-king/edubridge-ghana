@@ -8,7 +8,7 @@
  * sign in to it (its phone numbers are random and could belong to real people).
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { createAcademicYear, listAcademicYears, setCurrentTerm } from "../../src/server/academics/calendar";
 import { addHolidays } from "../../src/server/academics/holidays";
 import {
@@ -28,6 +28,7 @@ import type { Role } from "../../src/server/authz/permissions";
 import { createCampus } from "../../src/server/campuses/service";
 import type { Database } from "../../src/server/db/client";
 import {
+  catalogPrices,
   enrolments,
   feeReminders,
   guardians,
@@ -35,11 +36,16 @@ import {
   levels,
   levelSubjects,
   memberships,
+  planPresets,
+  platformAdmins,
+  schoolModules,
   studentGuardians,
   students,
+  tenantEntitlements,
   tenants,
   users,
 } from "../../src/server/db/schema";
+import { presetValues } from "../../src/server/billing/preset-values";
 import { addConcession } from "../../src/server/fees/concessions";
 import { billTerm } from "../../src/server/fees/ledger";
 import { setOpeningBalance } from "../../src/server/fees/opening-balances";
@@ -70,6 +76,7 @@ import {
   STAFF,
   SURNAMES,
 } from "./data";
+import { generateModuleData } from "./modules";
 
 export const DEFAULT_DEMO_LEVELS = [
   "KG 1",
@@ -116,16 +123,21 @@ const TIME_ZONE = "Africa/Accra";
 const HOLIDAYS = new Set(ghanaPublicHolidays("2020-01-01", "2040-12-31").map((h) => h.date));
 const isSchoolDay = (date: string) => !isWeekend(date) && !HOLIDAYS.has(date);
 
-/** Ghanaian three-term year containing today; the current term is the latest one that has started. */
-export function demoCalendar(today: string) {
-  const make = (y: number) => ({
+/** A Ghanaian three-term school year starting in September of `y`. */
+export function demoYear(y: number) {
+  return {
     name: `${y}/${y + 1}`,
     terms: [
       { name: "Term 1", startsOn: `${y}-09-08`, endsOn: `${y}-12-18` },
       { name: "Term 2", startsOn: `${y + 1}-01-12`, endsOn: `${y + 1}-04-09` },
       { name: "Term 3", startsOn: `${y + 1}-05-04`, endsOn: `${y + 1}-07-24` },
     ],
-  });
+  };
+}
+
+/** Ghanaian three-term year containing today; the current term is the latest one that has started. */
+export function demoCalendar(today: string) {
+  const make = demoYear;
   const year = Number(today.slice(0, 4));
   let calendar = make(Number(today.slice(5, 7)) >= 9 ? year : year - 1);
   if (calendar.terms[0]!.startsOn > today) calendar = make(year - 1);
@@ -214,7 +226,7 @@ export async function generateDemoSchool(
   };
   const ownerPerson = await addPerson(`proprietor@${domain}`, STAFF.owner, ["owner"]);
   const headPerson = await addPerson(`head@${domain}`, STAFF.head, ["headteacher"]);
-  await addPerson(`admin@${domain}`, STAFF.admin, ["admin"]);
+  const adminPerson = await addPerson(`admin@${domain}`, STAFF.admin, ["admin"]);
   const bursarPerson = await addPerson(`accountant@${domain}`, STAFF.bursar, ["bursar"]);
   accounts.push(
     { role: "Proprietor", email: `proprietor@${domain}` },
@@ -223,13 +235,61 @@ export async function generateDemoSchool(
     { role: "Accountant", email: `accountant@${domain}` },
   );
   const teacherFor = new Map<string, string>();
+  const teacherPeople: { level: string; userId: string; membershipId: string; name: string }[] = [];
   let n = 0;
   for (const [i, level] of levelNames.entries()) {
     const featured = level === featuredLevel;
     const email = featured ? `teacher@${domain}` : `teacher.${++n}@${domain}`;
-    const person = await addPerson(email, STAFF.teachers[i % STAFF.teachers.length]!, ["teacher"]);
+    const name = STAFF.teachers[i % STAFF.teachers.length]!;
+    const person = await addPerson(email, name, ["teacher"]);
     teacherFor.set(level, person.membershipId);
+    teacherPeople.push({ level, name, ...person });
     if (featured) accounts.push({ role: `Teacher (class teacher of ${level})`, email });
+  }
+
+  // The demo school is on Premium with the operations add-ons, when EduBridge's plans exist (Admin, Plans), so
+  // it shows a real plan; otherwise it has no plan row, which gives it every module. Written as a platform
+  // administrator, as the app would. Demo schools are never invoiced.
+  const [platformAdmin] = await owner.select({ id: platformAdmins.userId }).from(platformAdmins).limit(1);
+  const [premium] = await owner.select().from(planPresets).where(eq(planPresets.name, "Premium"));
+  if (platformAdmin && premium) {
+    const addOnPrices = await owner
+      .select({ module: catalogPrices.module, price: catalogPrices.pricePesewas })
+      .from(catalogPrices)
+      .where(
+        and(
+          isNull(catalogPrices.archivedAt),
+          isNull(catalogPrices.presetId),
+          eq(catalogPrices.billingPeriod, "termly"),
+          eq(catalogPrices.currencyCode, "GHS"),
+        ),
+      );
+    await owner.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('app.tenant_id', ${tenantId}, true), set_config('app.user_id', ${platformAdmin.id}, true)`,
+      );
+      await tx.insert(tenantEntitlements).values({
+        tenantId,
+        ...presetValues(premium, "GHS"),
+        subscriptionStatus: "active",
+        billingPeriod: "termly",
+      });
+      for (const addOn of ["transport", "boarding", "library", "inventory_assets"] as const) {
+        const price = addOnPrices.find((p) => p.module === addOn)?.price ?? null;
+        await tx.insert(schoolModules).values({
+          tenantId,
+          module: addOn,
+          source: "addon",
+          startsOn: addDays(today, -120),
+          billingPeriod: price === null ? null : "termly",
+          pricePesewas: price,
+          priceUnit: price === null ? null : "flat",
+          currencyCode: price === null ? null : "GHS",
+          note: "Demo school",
+          grantedByUserId: platformAdmin.id,
+        });
+      }
+    });
   }
 
   const ctxOf = async (userId: string) => {
@@ -275,10 +335,28 @@ export async function generateDemoSchool(
   }
   log(`Calendar ${calendar.name} (current: ${term.name}) and ${levelNames.length} classes.`);
 
+  // The term before this one, complete, so the forecast, insights and early warning have history. In Term 1
+  // it is the last term of the year before (students were a class lower then).
+  const yearStart = Number(calendar.name.slice(0, 4));
+  let previous: { id: string; startsOn: string; endsOn: string; sameYear: boolean };
+  if (calendar.current > 0) previous = { ...year!.terms[calendar.current - 1]!, sameYear: true };
+  else {
+    const before = demoYear(yearStart - 1);
+    await createAcademicYear(app, proprietor, { name: before.name, terms: before.terms });
+    const lastYear = (await listAcademicYears(app, proprietor)).find((y) => y.name === before.name)!;
+    await addHolidays(
+      app,
+      proprietor,
+      ghanaPublicHolidays(lastYear.startsOn, lastYear.endsOn)
+        .filter((h) => !isWeekend(h.date))
+        .map((h) => ({ name: h.name, startsOn: h.date, endsOn: h.date })),
+    );
+    previous = { ...lastYear.terms[2]!, sameYear: false };
+  }
+
   // 3. Students and families, through the spreadsheet import (as a school would).
   const families: { surname: string; guardian: string; phone: string; relationship: string }[] = [];
   const rows: string[][] = [];
-  const yearStart = Number(calendar.name.slice(0, 4));
   for (const level of levelNames) {
     for (let i = 0; i < perClass; i++) {
       const female = rng.chance(0.5);
@@ -317,12 +395,16 @@ export async function generateDemoSchool(
   const imported = await importStudents(app, proprietor, { headers, rows }, autoMapColumns(headers));
   if (imported.problems.length)
     throw new Error(`Import problems: ${JSON.stringify(imported.problems.slice(0, 3))}`);
+  // The tables just grew by thousands of rows in one transaction. Autovacuum would analyze them within a
+  // minute; the next query is now, and without statistics it took minutes for 2,000 students (5 ms with).
+  await owner.execute(sql`analyze students, enrolments, student_guardians, guardians`);
 
   const roster = await asTenant(owner, tenantId, (tx) =>
     tx
       .select({
         id: students.id,
         firstName: students.firstName,
+        sex: students.sex,
         lastName: students.lastName,
         classId: enrolments.classId,
         guardianId: guardians.id,
@@ -340,16 +422,38 @@ export async function generateDemoSchool(
   );
   const levelOfClass = new Map([...classIds].map(([level, id]) => [id, level]));
   // Most students joined in earlier years; a few joined this term.
+  const newcomers = new Set<string>();
   await asTenant(owner, tenantId, async (tx) => {
     for (const s of roster) {
       const level = levelOfClass.get(s.classId)!;
-      const admittedOn = rng.chance(0.06)
+      const joinsNow = rng.chance(0.06);
+      if (joinsNow) newcomers.add(s.id);
+      const admittedOn = joinsNow
         ? term.startsOn
-        : addDays(`${yearStart - rng.int(0, Math.max(0, ageFor(level) - 3))}-09-08`, rng.int(0, 20));
+        : addDays(`${yearStart - rng.int(1, Math.max(1, ageFor(level) - 3))}-09-08`, rng.int(0, 20));
       await tx.update(students).set({ admittedOn }).where(eq(students.id, s.id));
     }
   });
-  log(`${roster.length} students in ${families.length} families.`);
+  // Where each student was last term: the same class, or a class lower in the year before (the youngest
+  // class's children had not started).
+  const previousClassOf = new Map<string, string>();
+  for (const s of roster) {
+    if (newcomers.has(s.id)) continue;
+    const i = levelNames.indexOf(levelOfClass.get(s.classId)!);
+    const cls = previous.sameYear ? s.classId : i > 0 ? classIds.get(levelNames[i - 1]!) : undefined;
+    if (cls) previousClassOf.set(s.id, cls);
+  }
+  await asTenant(owner, tenantId, (tx) =>
+    tx.insert(enrolments).values(
+      [...previousClassOf].map(([studentId, classId]) => ({
+        tenantId,
+        studentId,
+        termId: previous.id,
+        classId,
+      })),
+    ),
+  );
+  log(`${roster.length} students in ${families.length} families (${previousClassOf.size} here last term).`);
 
   // 4. Fees: items, amounts per level, scholarships, balances from before, then billing.
   await setupFeeItems(app, bursar, {
@@ -362,6 +466,14 @@ export async function generateDemoSchool(
     );
     const levelId = levelRows.find((l) => l.name === level)!.id;
     await saveLevelFees(app, bursar, term.id, levelId, { amounts, classAmounts: {} });
+    // Last term's fees were about 5% lower (rounded to whole cedis).
+    const lastTerm = Object.fromEntries(
+      items.map((item) => {
+        const fee = FEES[stageOf(level)][item.name];
+        return [item.id, fee === undefined ? "" : String(Math.round(fee * 0.95))];
+      }),
+    );
+    await saveLevelFees(app, bursar, previous.id, levelId, { amounts: lastTerm, classAmounts: {} });
   }
   const tuition = items.find((i) => i.name === "Tuition")!;
   for (const s of roster.filter(() => rng.chance(0.04)))
@@ -371,33 +483,104 @@ export async function generateDemoSchool(
       kind: "percent",
       value: "50",
     });
-  // Balances brought forward from before EduBridge, dated the end of the previous term.
-  const openingDay =
-    calendar.current > 0 ? calendar.terms[calendar.current - 1]!.endsOn : `${yearStart}-07-24`;
+  // Balances brought forward from before EduBridge, dated the day before last term began.
+  const openingDay = addDays(previous.startsOn, -1);
   for (const s of roster) {
-    if (rng.chance(0.22))
+    if (rng.chance(0.15))
       await setOpeningBalance(app, bursar, s.id, { amount: String(rng.int(15, 120) * 10), asOf: openingDay });
-    else if (rng.chance(0.02))
+    else if (rng.chance(0.03))
       await setOpeningBalance(app, bursar, s.id, { amount: String(-rng.int(5, 20) * 10), asOf: openingDay });
   }
+
+  // References are unique, as real ones are: the duplicate-reference check (FIN) stops a repeat.
+  const usedReferences = new Set<string>();
+  const uniqueReference = (make: () => string) => {
+    let reference = make();
+    while (usedReferences.has(reference)) reference = make();
+    usedReferences.add(reference);
+    return reference;
+  };
+  const pickMethod = (): PaymentMethod =>
+    rng.chance(0.45) ? "mobile_money" : rng.chance(0.73) ? "cash" : "bank_deposit";
+  const takePayment = (studentId: string, pesewas: number, paidOn: string, payer: string) => {
+    const method = pickMethod();
+    return recordPayment(app, bursar, {
+      studentId,
+      amount: pesewasToInput(pesewas),
+      method,
+      reference:
+        method === "mobile_money"
+          ? uniqueReference(() => `MP${rng.digits(10)}`)
+          : method === "bank_deposit"
+            ? uniqueReference(() => `SLIP-${rng.digits(6)}`)
+            : "",
+      payerName: payer,
+      paidOn,
+      idempotencyKey: randomUUID(),
+    });
+  };
+  const balances = async () =>
+    asTenant(
+      owner,
+      tenantId,
+      async (tx) =>
+        new Map(
+          (
+            await tx
+              .select({
+                studentId: ledgerEntries.studentId,
+                balance: sql<string>`sum(${ledgerEntries.amountPesewas})`,
+              })
+              .from(ledgerEntries)
+              .where(eq(ledgerEntries.tenantId, tenantId))
+              .groupBy(ledgerEntries.studentId)
+          ).map((r) => [r.studentId, Number(r.balance)]),
+        ),
+    );
+
+  // Last term: billed, and mostly paid over the term (most families early), the rest carried forward.
+  await billTerm(app, bursar, previous.id);
+  const lastTermOwed = await balances();
+  const lastTermDays = schoolDays(previous.startsOn, previous.endsOn);
+  let lastTermPayments = 0;
+  const lastTermPlan: { studentId: string; amount: number; paidOn: string; payer: string }[] = [];
+  for (const s of roster) {
+    const due = lastTermOwed.get(s.id) ?? 0;
+    if (due <= 0 || !previousClassOf.has(s.id)) continue;
+    const roll = rng.next();
+    const early = () => lastTermDays[rng.int(0, Math.min(lastTermDays.length - 1, 14))]!;
+    if (roll < 0.62)
+      lastTermPlan.push({ studentId: s.id, amount: due, paidOn: early(), payer: s.guardianName });
+    else if (roll < 0.88) {
+      const first = Math.max(2000, Math.floor((due * rng.int(40, 60)) / 100 / 1000) * 1000);
+      lastTermPlan.push({ studentId: s.id, amount: first, paidOn: early(), payer: s.guardianName });
+      const rest = rng.chance(0.6) ? due - first : Math.floor((due - first) / 2 / 1000) * 1000;
+      if (rest > 0)
+        lastTermPlan.push({
+          studentId: s.id,
+          amount: rest,
+          paidOn: rng.pick(lastTermDays),
+          payer: s.guardianName,
+        });
+    } else if (roll < 0.95)
+      lastTermPlan.push({
+        studentId: s.id,
+        amount: Math.max(2000, Math.floor((due * rng.int(20, 50)) / 100 / 1000) * 1000),
+        paidOn: rng.pick(lastTermDays),
+        payer: s.guardianName,
+      });
+  }
+  lastTermPlan.sort((a, b) => a.paidOn.localeCompare(b.paidOn));
+  for (const p of lastTermPlan) {
+    await takePayment(p.studentId, p.amount, p.paidOn, p.payer);
+    lastTermPayments++;
+  }
+  await owner.execute(sql`analyze ledger_entries, payments`);
+  log(`Last term billed and ${lastTermPayments} payments taken.`);
+
   await billTerm(app, bursar, term.id);
-  const owed = await asTenant(
-    owner,
-    tenantId,
-    async (tx) =>
-      new Map(
-        (
-          await tx
-            .select({
-              studentId: ledgerEntries.studentId,
-              balance: sql<string>`sum(${ledgerEntries.amountPesewas})`,
-            })
-            .from(ledgerEntries)
-            .where(eq(ledgerEntries.tenantId, tenantId))
-            .groupBy(ledgerEntries.studentId)
-        ).map((r) => [r.studentId, Number(r.balance)]),
-      ),
-  );
+  const owed = await balances();
+  await owner.execute(sql`analyze ledger_entries`);
   log("Fees set and the term billed.");
 
   // 5. Payments and reminders over the term so far, in date order.
@@ -464,27 +647,7 @@ export async function generateDemoSchool(
       ),
     );
 
-  for (const p of planned) {
-    const method: PaymentMethod = rng.chance(0.45)
-      ? "mobile_money"
-      : rng.chance(0.73)
-        ? "cash"
-        : "bank_deposit";
-    await recordPayment(app, bursar, {
-      studentId: p.studentId,
-      amount: pesewasToInput(p.amount),
-      method,
-      reference:
-        method === "mobile_money"
-          ? `MP${rng.digits(10)}`
-          : method === "bank_deposit"
-            ? `SLIP-${rng.digits(6)}`
-            : "",
-      payerName: p.payer,
-      paidOn: p.paidOn,
-      idempotencyKey: randomUUID(),
-    });
-  }
+  for (const p of planned) await takePayment(p.studentId, p.amount, p.paidOn, p.payer);
   // A few families who still owe the most agree instalment plans, starting next week.
   const paidBy = new Map<string, number>();
   for (const p of planned) paidBy.set(p.studentId, (paidBy.get(p.studentId) ?? 0) + p.amount);
@@ -500,6 +663,7 @@ export async function generateDemoSchool(
       firstDueOn: addDays(today, 7),
       frequency: "monthly",
     });
+  await owner.execute(sql`analyze ledger_entries, payments`);
   log(`${planned.length} payments, ${reminders.length} reminders, ${biggest.length} payment plans.`);
 
   // 6. Daily registers up to yesterday (today's is left for trying it out).
@@ -518,72 +682,99 @@ export async function generateDemoSchool(
     ]),
   );
   let registers = 0;
-  for (const [level, classId] of classIds) {
-    const pupils = roster.filter((s) => s.classId === classId);
-    for (const date of registerDays) {
-      await syncRegister(app, head, {
-        classId,
-        date,
-        source: "online",
-        marks: pupils.map((s) => {
-          const status: AttendanceStatus =
-            rng.next() < attendance.get(s.id)!
-              ? rng.chance(0.04)
-                ? "late"
-                : "present"
-              : rng.chance(0.25)
-                ? "excused"
-                : "absent";
-          const away = status === "absent" || status === "excused";
-          return {
-            studentId: s.id,
-            status,
-            reason: away && rng.chance(0.6) ? rng.pick(ABSENCE_REASONS) : null,
-            baseVersion: 0,
-          };
-        }),
-      });
-      registers++;
+  const takeRegisters = async (
+    days: string[],
+    classOf: (s: (typeof roster)[number]) => string | undefined,
+    rate: (s: (typeof roster)[number]) => number,
+  ) => {
+    for (const [level, classId] of classIds) {
+      const pupils = roster.filter((s) => classOf(s) === classId);
+      if (pupils.length === 0) continue;
+      for (const date of days) {
+        await syncRegister(app, head, {
+          classId,
+          date,
+          source: "online",
+          marks: pupils.map((s) => {
+            const status: AttendanceStatus =
+              rng.next() < rate(s)
+                ? rng.chance(0.04)
+                  ? "late"
+                  : "present"
+                : rng.chance(0.25)
+                  ? "excused"
+                  : "absent";
+            const away = status === "absent" || status === "excused";
+            return {
+              studentId: s.id,
+              status,
+              reason: away && rng.chance(0.6) ? rng.pick(ABSENCE_REASONS) : null,
+              baseVersion: 0,
+            };
+          }),
+        });
+        registers++;
+      }
+      log(`Registers for ${level}: ${days.length} days.`);
     }
-    log(`Registers for ${level}: ${registerDays.length} days.`);
-  }
+  };
+  // Last term first (attendance a little better then), then this term.
+  await takeRegisters(
+    schoolDays(previous.startsOn, previous.endsOn),
+    (s) => previousClassOf.get(s.id),
+    (s) => Math.min(1, attendance.get(s.id)! + 0.03),
+  );
+  const lastTermRegisters = registers;
+  await takeRegisters(
+    registerDays,
+    (s) => s.classId,
+    (s) => attendance.get(s.id)!,
+  );
 
   // 7. Subjects and marks: class scores everywhere, exams in a few classes, one class published.
   await setupDefaultSubjects(app, proprietor);
   const examLevels = new Set([featuredLevel, ...levelNames.filter((l) => ["Basic 6", "JHS 2"].includes(l))]);
   const ability = new Map(roster.map((s) => [s.id, Math.min(97, Math.max(28, rng.normal(63, 13)))]));
   const totals = new Map<string, number[]>();
-  for (const [level, classId] of classIds) {
-    const levelId = levelRows.find((l) => l.name === level)!.id;
-    const subjectIds = await asTenant(owner, tenantId, async (tx) =>
-      (
-        await tx
-          .select({ id: levelSubjects.subjectId })
-          .from(levelSubjects)
-          .innerJoin(levels, eq(levels.id, levelSubjects.levelId))
-          .where(and(eq(levelSubjects.tenantId, tenantId), eq(levelSubjects.levelId, levelId)))
-      ).map((r) => r.id),
-    );
-    for (const subjectId of subjectIds) {
-      const sheet = (await getScoreSheet(app, proprietor, term.id, classId, subjectId))!;
-      const cells = sheet.students.flatMap((s) => {
-        const mark = Math.min(99, Math.max(10, ability.get(s.id)! + rng.normal(0, 9)));
-        const list = (totals.get(s.id) ?? []).concat(mark);
-        totals.set(s.id, list);
-        return sheet.components
-          .filter((c) => c.key !== "exam" || examLevels.has(level))
-          .map((c) => ({
-            studentId: s.id,
-            key: c.key,
-            original: "",
-            value: String(
-              Math.min(c.outOf, Math.max(0, Math.round(((mark + rng.normal(0, 5)) * c.outOf) / 100))),
-            ),
-          }));
-      });
-      await saveScores(app, proprietor, term.id, classId, subjectId, { cells });
+  // A few students did clearly better last term, so the early-warning "average down" rule has real cases.
+  const slipped = new Set(roster.filter(() => rng.chance(0.05)).map((s) => s.id));
+  const enterMarks = async (termId: string, lastTerm: boolean) => {
+    for (const [level, classId] of classIds) {
+      const levelId = levelRows.find((l) => l.name === level)!.id;
+      const subjectIds = await asTenant(owner, tenantId, async (tx) =>
+        (
+          await tx
+            .select({ id: levelSubjects.subjectId })
+            .from(levelSubjects)
+            .innerJoin(levels, eq(levels.id, levelSubjects.levelId))
+            .where(and(eq(levelSubjects.tenantId, tenantId), eq(levelSubjects.levelId, levelId)))
+        ).map((r) => r.id),
+      );
+      for (const subjectId of subjectIds) {
+        const sheet = (await getScoreSheet(app, proprietor, termId, classId, subjectId))!;
+        if (sheet.students.length === 0) continue;
+        const cells = sheet.students.flatMap((s) => {
+          const base = ability.get(s.id)! + (lastTerm && slipped.has(s.id) ? 15 : 0);
+          const mark = Math.min(99, Math.max(10, base + rng.normal(0, 9)));
+          if (!lastTerm) totals.set(s.id, (totals.get(s.id) ?? []).concat(mark));
+          return sheet.components
+            .filter((c) => lastTerm || c.key !== "exam" || examLevels.has(level))
+            .map((c) => ({
+              studentId: s.id,
+              key: c.key,
+              original: "",
+              value: String(
+                Math.min(c.outOf, Math.max(0, Math.round(((mark + rng.normal(0, 5)) * c.outOf) / 100))),
+              ),
+            }));
+        });
+        await saveScores(app, proprietor, termId, classId, subjectId, { cells });
+      }
     }
-  }
+  };
+  // Last term is complete: every class sat its exams.
+  await enterMarks(previous.id, true);
+  await enterMarks(term.id, false);
   const featuredClass = classIds.get(featuredLevel)!;
   for (const s of roster.filter((r) => r.classId === featuredClass)) {
     const marks = totals.get(s.id) ?? [];
@@ -601,13 +792,50 @@ export async function generateDemoSchool(
   await publishReportCards(app, head, term.id, featuredClass);
   log(`Marks entered; ${featuredLevel} report cards published.`);
 
+  // 8. Every other module: staff, payroll, safeguarding, visitors, transport, inventory, library, boarding,
+  // timetable, announcements, events, admissions, early-warning reviews and the finance checks.
+  const extra = await generateModuleData({
+    owner,
+    app,
+    tenantId,
+    rng,
+    today,
+    isSchoolDay,
+    term,
+    campusId: campus.id,
+    roster: roster.map((s) => ({ ...s, sex: s.sex === "male" ? "male" : "female" })),
+    classIds,
+    levelIdOf: (level) => levelRows.find((l) => l.name === level)!.id,
+    featuredClass,
+    people: {
+      proprietor: ownerPerson,
+      head: headPerson,
+      admin: adminPerson,
+      bursar: bursarPerson,
+      teachers: teacherPeople,
+    },
+    ctxOf,
+    saveLevelFeesWith: async (level, extra) => {
+      const amounts = Object.fromEntries(
+        items.map((item) => [item.id, String(FEES[stageOf(level)][item.name] ?? "")]),
+      );
+      await saveLevelFees(app, bursar, term.id, levelRows.find((l) => l.name === level)!.id, {
+        amounts: { ...amounts, ...extra },
+        classAmounts: {},
+      });
+    },
+    asTenant: (fn) => asTenant(owner, tenantId, fn),
+    log,
+  });
+
   return {
     tenantId,
     slug: options.slug,
     accounts,
     students: roster.length,
-    payments: planned.length,
-    registers,
+    // This term: the receipts that count (not voided), and this term's registers.
+    payments: planned.length + extra.paymentsAdded - extra.paymentsVoided,
+    registers: registers - lastTermRegisters,
     reminders: reminders.length,
     publishedClass: featuredLevel,
   };

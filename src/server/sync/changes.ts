@@ -1,6 +1,8 @@
 import "server-only";
+import type { StudentStatus } from "@/lib/students";
 import { and, asc, eq, gt, inArray, max, sql } from "drizzle-orm";
 import { listAssessableClasses } from "../assessment/access";
+import { listScoreSheetAccess } from "../assessment/teaching";
 import { allowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
@@ -40,7 +42,7 @@ export interface SyncStudent {
   lastName: string;
   sex: "female" | "male";
   dateOfBirth: string | null;
-  status: "active" | "withdrawn" | "graduated";
+  status: StudentStatus;
   /** The class this term, or null. */
   classId: string | null;
 }
@@ -215,7 +217,8 @@ export async function getSyncChanges(
     const markStudents = idsOf("score");
     let marks: SyncChanges["marks"] = [];
     if (markStudents.length && allowed(ctx, "assessment.enter")) {
-      const reach = new Set((await listAssessableClasses(tx, ctx, "assessment.enter")).map((c) => c.id));
+      // Score sheets this person enters (class teacher, lead, or subject teacher in the class).
+      const reach = new Set((await listScoreSheetAccess(tx, ctx)).map((a) => a.cls.id));
       const termId = await currentTermId(tx, ctx.tenant.id);
       const placed = termId
         ? await tx

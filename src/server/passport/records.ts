@@ -13,6 +13,7 @@ import {
   enrolments,
   guardians,
   learnerRecords,
+  ledgerEntries,
   levels,
   priorRecords,
   reportCards,
@@ -183,7 +184,7 @@ export async function issueRecordInTx(
   transfer: { toSchool: string } | null = null,
 ): Promise<{ recordId: string; pkg: SignedPackage }> {
   const { record, learnerId } = await buildRecord(tx, ctx.tenant.id, studentId, purpose, transfer);
-  const { pkg, sha256 } = signRecord(record);
+  const { pkg, sha256 } = await signRecord(tx, record);
   await tx.insert(learnerRecords).values({
     id: record.id,
     tenantId: ctx.tenant.id,
@@ -330,7 +331,7 @@ const recordShape = z.object({
  * such (a school not on EduBridge can produce them; nobody vouches for them).
  */
 export async function verifyLearnerPackage(database: Database, input: unknown): Promise<Verification> {
-  const check = checkSignature(input);
+  const check = await checkSignature(database, input);
   if (check.status === "invalid") return check;
   const shaped = recordShape.safeParse(check.record);
   const name = (r: Record<string, unknown>) => {
@@ -381,7 +382,7 @@ export async function storePriorRecordInTx(
 ): Promise<void> {
   const v = input.verification;
   if (v.status === "invalid") throw new DomainError("record_invalid", v.reason);
-  const check = checkSignature(input.pkg);
+  const check = await checkSignature(tx, input.pkg);
   if (check.status === "invalid") throw new DomainError("record_invalid", check.reason);
   await tx.insert(priorRecords).values({
     tenantId: ctx.tenant.id,
@@ -546,5 +547,25 @@ export async function listPriorRecords(
       .where(and(eq(priorRecords.tenantId, ctx.tenant.id), eq(priorRecords.studentId, studentId)))
       .orderBy(desc(priorRecords.importedAt));
     return rows.map(({ pkg, ...r }) => ({ ...r, record: (pkg.record ?? {}) as Record<string, unknown> }));
+  });
+}
+
+/**
+ * What the family owes, shown before the school releases a learner record or approves a transfer. The
+ * founder's decision (2026-11-09): each school decides whether to release; nothing is blocked for fees.
+ */
+export async function releaseBalance(
+  database: Database,
+  ctx: TenantContext,
+  studentId: string,
+): Promise<number | null> {
+  assertAllowed(ctx, "transfers.manage");
+  if (!z.string().uuid().safeParse(studentId).success) return null;
+  return withTenant(database, scope(ctx), async (tx) => {
+    const [row] = await tx
+      .select({ total: sql<string>`coalesce(sum(${ledgerEntries.amountPesewas}), 0)` })
+      .from(ledgerEntries)
+      .where(and(eq(ledgerEntries.tenantId, ctx.tenant.id), eq(ledgerEntries.studentId, studentId)));
+    return Number(row?.total ?? 0);
   });
 }

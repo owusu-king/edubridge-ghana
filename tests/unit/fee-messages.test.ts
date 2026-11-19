@@ -3,7 +3,10 @@ import { TEMPLATES } from "@/server/notifications/templates";
 import {
   feeReminderMessage,
   feeReminderSms,
+  feesBilledSms,
   formatCedisSms,
+  paymentReceiptSms,
+  portalInvitationSms,
   receiptMessage,
   whatsappLink,
 } from "@/lib/fee-messages";
@@ -130,6 +133,18 @@ describe("payment receipt SMS", () => {
     expect(text).toMatch(GSM_7);
   });
 
+  it("links to the receipt instead of the thanks when the school is known (FIN-11)", () => {
+    const text = paymentReceiptSms({
+      ...base,
+      balancePesewas: 120_050,
+      link: "https://edubridge.app/p/kpone-ridge/r/R000123",
+    });
+    expect(text).toBe(
+      "Kpone Ridge International School: GHS 450.00 received for Efua, receipt R000123. Balance now GHS 1,200.50. Receipt: https://edubridge.app/p/kpone-ridge/r/R000123",
+    );
+    expect(text).toMatch(GSM_7);
+  });
+
   it("says when fees are fully paid or in credit", () => {
     expect(TEMPLATES.payment_receipt({ ...base, balancePesewas: 0 }).text).toContain("Fees fully paid.");
     expect(TEMPLATES.payment_receipt({ ...base, balancePesewas: -2_500 }).text).toContain(
@@ -165,5 +180,34 @@ describe("announcement SMS", () => {
     expect(text).toContain("x".repeat(90) + ".");
     expect(text).not.toContain("x".repeat(91));
     expect(text.length).toBeLessThanOrEqual(306);
+  });
+});
+
+describe("fees billed and invitation SMS", () => {
+  it("gives the term, the child and the new balance in plain characters", () => {
+    const text = feesBilledSms({
+      schoolName: "Kpone Ridge International School",
+      studentFirstName: "Efua",
+      termLabel: "Term 1 2026/2027",
+      balancePesewas: 125_000,
+      link: "https://edubridge.app/p",
+    });
+    expect(text).toBe(
+      "Kpone Ridge International School: Term 1 2026/2027 fees for Efua are billed. Balance GHS 1,250.00. Details: https://edubridge.app/p",
+    );
+    expect(text.length).toBeLessThanOrEqual(160);
+    expect(text).toMatch(GSM_7);
+  });
+
+  it("invites a guardian without a link to accept: they sign in with their own number", () => {
+    const text = portalInvitationSms({
+      schoolName: "Kpone Ridge",
+      studentFirstName: "Efua",
+      link: "https://edubridge.app/p",
+    });
+    expect(text).toBe(
+      "Kpone Ridge: see Efua's fees, receipts and reports at https://edubridge.app/p Sign in with this phone number.",
+    );
+    expect(text).toMatch(GSM_7);
   });
 });

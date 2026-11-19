@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Wallet } from "lucide-react";
 import { buttonStyles } from "@/components/ui/button";
@@ -10,7 +11,7 @@ import { db } from "@/server/db/client";
 import { billedForTerm } from "@/server/dashboard/finance";
 import { getBillingStatus } from "@/server/fees/ledger";
 import { getFeeStructure, listFeeTerms, type FeeTerm } from "@/server/fees/structure";
-import { formatCedis, pesewasToInput } from "@/lib/money";
+import { minorToInput, moneyFormatter } from "@/lib/money";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 import { billTermAction, copyFeeStructureAction, saveLevelFeesAction } from "./actions";
@@ -29,6 +30,9 @@ export default async function FeeStructurePage({
 }) {
   const [{ school }, search] = await Promise.all([params, searchParams]);
   const { ctx } = await requireTenant(school);
+  // The layout refuses too; pages render alongside it, so check here before reading.
+  if (!allowed(ctx, "fees.view")) notFound();
+  const showMoney = moneyFormatter(ctx.tenant.currencyCode);
   const slug = ctx.tenant.slug;
   const canManage = allowed(ctx, "fees.manage") && ctx.campusIds === null;
   const terms = await listFeeTerms(db(), ctx);
@@ -124,7 +128,7 @@ export default async function FeeStructurePage({
       {billed !== 0 && (
         <p className="text-base text-ink-2">
           Billed for {termLabel(term)}:{" "}
-          <span className="font-semibold text-ink tabular-nums">{formatCedis(billed)}</span>{" "}
+          <span className="font-semibold text-ink tabular-nums">{showMoney(billed)}</span>{" "}
           <span className="text-ink-3">(charges less discounts, leaving out any reversed)</span>
         </p>
       )}
@@ -159,24 +163,24 @@ export default async function FeeStructurePage({
               const hasAmounts = Object.keys(level.amounts).length > 0 || overrides.length > 0;
               const initial: Record<string, string> = {};
               for (const [itemId, amount] of Object.entries(level.amounts))
-                initial[`amount:${itemId}`] = pesewasToInput(amount);
+                initial[`amount:${itemId}`] = minorToInput(amount, ctx.tenant.currencyCode);
               for (const [classId, byItem] of Object.entries(level.classAmounts))
                 for (const [itemId, amount] of Object.entries(byItem))
-                  initial[`class:${classId}:${itemId}`] = pesewasToInput(amount);
+                  initial[`class:${classId}:${itemId}`] = minorToInput(amount, ctx.tenant.currencyCode);
               return (
                 <TR key={level.id}>
                   <TD>
                     <span className="font-medium text-ink">{level.name}</span>
                     {overrides.map((c) => (
                       <span key={c.id} className="block text-sm text-ink-3">
-                        {c.name}: {formatCedis(c.total!)}
+                        {c.name}: {showMoney(c.total!)}
                       </span>
                     ))}
                   </TD>
                   {structure.items.map((item) => (
                     <TD key={item.id} className="hidden text-right tabular-nums lg:table-cell">
                       {item.id in level.amounts ? (
-                        formatCedis(level.amounts[item.id]!)
+                        showMoney(level.amounts[item.id]!)
                       ) : (
                         <span className="text-ink-3">—</span>
                       )}
@@ -184,7 +188,7 @@ export default async function FeeStructurePage({
                   ))}
                   <TD className="text-right font-medium text-ink tabular-nums">
                     {hasAmounts ? (
-                      formatCedis(level.total)
+                      showMoney(level.total)
                     ) : (
                       <span className="font-normal text-ink-3">Not set</span>
                     )}
@@ -193,6 +197,7 @@ export default async function FeeStructurePage({
                     <TD className="text-right whitespace-nowrap">
                       {activeItems.length > 0 && (
                         <LevelFeesDialog
+                          currency={ctx.tenant.currencyCode}
                           action={saveLevelFeesAction.bind(null, slug, term.id, level.id)}
                           levelName={level.name}
                           termLabel={termLabel(term)}
@@ -228,8 +233,8 @@ export default async function FeeStructurePage({
                   entries still to bill:{" "}
                   {[
                     billing.chargesToCreate > 0 &&
-                      `${formatCedis(billing.amountToBillPesewas + billing.discountsPesewas)} in charges`,
-                    billing.discountsToCreate > 0 && `${formatCedis(billing.discountsPesewas)} in discounts`,
+                      `${showMoney(billing.amountToBillPesewas + billing.discountsPesewas)} in charges`,
+                    billing.discountsToCreate > 0 && `${showMoney(billing.discountsPesewas)} in discounts`,
                   ]
                     .filter(Boolean)
                     .join(", less ")}
@@ -248,10 +253,11 @@ export default async function FeeStructurePage({
                 students={billing.studentsToBill}
                 charges={
                   billing.chargesToCreate > 0
-                    ? formatCedis(billing.amountToBillPesewas + billing.discountsPesewas)
+                    ? showMoney(billing.amountToBillPesewas + billing.discountsPesewas)
                     : undefined
                 }
-                discounts={billing.discountsToCreate > 0 ? formatCedis(billing.discountsPesewas) : undefined}
+                discounts={billing.discountsToCreate > 0 ? showMoney(billing.discountsPesewas) : undefined}
+                canNotify={!ctx.tenant.isDemo && ctx.billing.state !== "limited"}
               />
             )}
           </div>
@@ -289,8 +295,8 @@ export default async function FeeStructurePage({
                           <span className="block font-mono text-sm text-ink-3">{d.admissionNumber}</span>
                         </TD>
                         <TD>{d.itemName}</TD>
-                        <TD className="text-right tabular-nums">{formatCedis(d.billedPesewas)}</TD>
-                        <TD className="text-right tabular-nums">{formatCedis(d.structurePesewas)}</TD>
+                        <TD className="text-right tabular-nums">{showMoney(d.billedPesewas)}</TD>
+                        <TD className="text-right tabular-nums">{showMoney(d.structurePesewas)}</TD>
                       </TR>
                     ))}
                   </TBody>

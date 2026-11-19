@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_LIFETIME_MS } from "@/server/auth/policy";
 import { PARENT_SESSION_LIFETIME_MS } from "@/server/parents/policy";
 import { buildCsp } from "@/web/csp";
+import { LAST_SCHOOL_COOKIE, lastSchoolCookieOptions, schoolSlugFromPath } from "@/web/last-school";
 import { PARENT_COOKIE, SESSION_COOKIE, sessionCookieOptions } from "@/web/session-cookie";
 
 /** /verify: anyone can check a learner record (Transfer Passport). */
@@ -14,7 +15,9 @@ const PUBLIC_PATHS = [
   "/verify",
 ];
 /** Balance links (/b/) are read-only and carry their own secret. */
-const PUBLIC_PREFIXES = ["/invite/", "/reset-password/", "/b/"];
+/** /logo/: school logos are public, like the sign on a school gate. */
+/** /apply/: a school's online application form (ADM-02), open only when the school turns it on. */
+const PUBLIC_PREFIXES = ["/invite/", "/reset-password/", "/b/", "/logo/", "/apply/"];
 
 /**
  * No database access here: real session validation happens on the server in src/web/auth.ts.
@@ -54,6 +57,11 @@ export function proxy(request: NextRequest) {
   if (token && request.method === "GET") {
     const lifetime = parentArea ? PARENT_SESSION_LIFETIME_MS : SESSION_LIFETIME_MS;
     response.cookies.set(cookie, token, sessionCookieOptions(lifetime));
+    // Remember the school being opened, so the account pages can keep its sidebar (see last-school.ts).
+    const school = schoolSlugFromPath(pathname);
+    if (school && request.cookies.get(LAST_SCHOOL_COOKIE)?.value !== school) {
+      response.cookies.set(LAST_SCHOOL_COOKIE, school, lastSchoolCookieOptions);
+    }
   }
   return response;
 }

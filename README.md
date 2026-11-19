@@ -116,9 +116,15 @@ All seeded data is fictional.
 
 ## Demo school
 
-The seed is small and made for tests. To show EduBridge to a school, create a demonstration school with a
-term's worth of made-up activity (about 300 students, fees, payments, reminders, daily registers, marks and
-one class's published report cards; it takes under a minute):
+The seed is small and made for tests. To show EduBridge to a school, create a demonstration school with
+made-up activity in every module (about 300 students; last term complete and this term so far: fees,
+payments, reminders, registers, marks and one class's report cards; staff, leave, staff attendance and
+payroll; safeguarding cases; visitors and pickups; bus routes and riders; stock, assets, repairs and
+purchases; the library; boarding houses; the timetable; announcements, events and a consent form;
+admissions; early-warning reviews and support plans; and the finance checks). It takes about a minute and a
+half. Things that happen "today" (visitors, pickups, the morning bus) are for the day it is made, and it
+should be made during school hours (06:00 to 20:00): receipts are stamped with the time they are recorded,
+so a demo made in the evening lists every receipt among the finance checks as recorded out of hours:
 
 ```bash
 npm run demo:school
@@ -206,4 +212,7 @@ browser once with `npx playwright install chromium`. On Windows, clone with Git'
 
 ## Development status
 
-R0 Foundation is complete; R1 phases A to P and phases Q to U (API, sync, Transfer Passport, insights, assistant) are built, with Paystack in test mode (live payments wait for approval). See the [roadmap](docs/11-DEVELOPMENT-ROADMAP.md).
+R0 Foundation and R1 are complete and verified (see the [R1 completion report](docs/R1-COMPLETION-REPORT.md) and the
+one-page [traceability matrix](docs/RTM.md)), with Paystack in test mode: live payments wait for approval. Phases Q to U
+(API, sync, Transfer Passport, insights, assistant) are built early. See the [roadmap](docs/11-DEVELOPMENT-ROADMAP.md).
+Running it in production: [deployment and operations](docs/DEPLOYMENT-AND-OPERATIONS.md).

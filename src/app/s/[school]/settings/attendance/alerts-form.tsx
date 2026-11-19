@@ -1,11 +1,11 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import { absenceAlertSms } from "@/lib/fee-messages";
 import type { FormState } from "@/web/forms";
+import { FormMessage } from "@/components/ui/toast";
 
 /** When families get an SMS about absences. Off by default: each SMS costs the school. */
 export function AbsenceAlertsForm({
@@ -17,7 +17,7 @@ export function AbsenceAlertsForm({
   action: (prev: FormState, formData: FormData) => Promise<FormState>;
   defaults: { enabled: boolean; consecutiveDays: number | null; termDays: number | null };
   schoolName: string;
-  /** "GH₵0.05", or null when no price is set yet. */
+  /** The price of one SMS in the school's currency, formatted, or null when no price is set yet. */
   smsPrice: string | null;
 }) {
   const [state, formAction, pending] = useActionState(action, { status: "idle" } as FormState);
@@ -29,9 +29,7 @@ export function AbsenceAlertsForm({
 
   return (
     <form action={formAction} className="max-w-2xl space-y-6" noValidate>
-      {state.status !== "idle" && state.message && (
-        <Alert tone={state.status === "success" ? "positive" : "critical"}>{state.message}</Alert>
-      )}
+      {state.status !== "idle" && state.message && <FormMessage state={state} />}
       <label className="flex items-start gap-3 text-base text-ink">
         <input
           type="checkbox"

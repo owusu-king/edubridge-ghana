@@ -18,8 +18,14 @@ export const metadata: Metadata = { title: "Register students" };
  * the device and sent through the sync protocol, which assigns the admission number and asks before
  * adding a child who may already be on record.
  */
-export default async function RegisterStudentsPage({ params }: { params: Promise<{ school: string }> }) {
-  const { school } = await params;
+export default async function RegisterStudentsPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ school: string }>;
+  searchParams: Promise<{ class?: string }>;
+}) {
+  const [{ school }, search] = await Promise.all([params, searchParams]);
   const { ctx } = await requireTenant(school);
   if (!allowed(ctx, "students.manage")) notFound();
   const classes = await listClassOptions(db(), ctx);
@@ -43,6 +49,7 @@ export default async function RegisterStudentsPage({ params }: { params: Promise
         school={ctx.tenant.slug}
         userId={ctx.userId}
         classes={classes.map((c) => ({ id: c.id, name: c.name }))}
+        defaultClassId={classes.some((c) => c.id === search.class) ? search.class : undefined}
         action={syncOperationsAction}
       />
     </div>

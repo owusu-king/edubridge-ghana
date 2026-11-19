@@ -1,3 +1,4 @@
+import { getDocumentLogo } from "@/server/tenancy/branding";
 import { db } from "@/server/db/client";
 import { getParentReceipt } from "@/server/parents/portal";
 import { getParentSession } from "@/web/parent-auth";
@@ -19,6 +20,8 @@ export async function GET(
   const pdf = await renderReceiptPdf({
     receipt: found.receipt,
     schoolName: found.school.name,
+    currency: found.school.currencyCode,
+    logo: await getDocumentLogo(db(), found.school.id),
     timeZone: found.school.timezone,
   });
   return pdfResponse(pdf, `receipt-${found.receipt.receiptNumber}.pdf`);

@@ -27,7 +27,9 @@ import {
 import { DomainError, PG_UNIQUE_VIOLATION, pgErrorCode } from "../errors";
 import type { TenantContext } from "../tenancy/service";
 import { loadTerm } from "./access";
-import { DEFAULT_BANDS, DEFAULT_COMPONENTS, DEFAULT_SUBJECTS } from "./defaults";
+import { parseGradePoints, type ReportCardStyle } from "../../lib/report-styles";
+import { readPreferences } from "../tenancy/preferences";
+import { readTemplate } from "../academics/templates";
 
 const scope = (ctx: TenantContext) => ({
   tenantId: ctx.tenant.id,
@@ -66,7 +68,7 @@ export async function readScheme(tx: Transaction, tenantId: string, termId: stri
       .limit(1);
     if (earlier) return { ...earlier, saved: false };
   }
-  return { components: DEFAULT_COMPONENTS, showPositions: false, saved: false };
+  return { components: (await readTemplate(tx, tenantId)).components, showPositions: false, saved: false };
 }
 
 /** Fixes the term's scheme (as shown) before the first score is stored, so scores always have their parts. */
@@ -92,7 +94,7 @@ export async function readBands(tx: Transaction, tenantId: string, stage: Stage)
     .select({ bands: gradingScales.bands })
     .from(gradingScales)
     .where(and(eq(gradingScales.tenantId, tenantId), eq(gradingScales.stage, stage)));
-  return sortBands(row?.bands ?? DEFAULT_BANDS[stage]);
+  return sortBands(row?.bands ?? (await readTemplate(tx, tenantId)).bands[stage]);
 }
 
 /** The subjects a level takes, in report-card order. */
@@ -130,6 +132,10 @@ async function publishedInTerm(tx: Transaction, tenantId: string, termId: string
 }
 
 export interface AssessmentSetup {
+  /** The school's starter template, and its names for the stages. */
+  template: { id: string; name: string; stageLabels: Record<Stage, string> };
+  /** The report-card layout the school chose (null: its template's), and its template's. */
+  reportCard: { chosen: ReportCardStyle | null; templateStyle: ReportCardStyle };
   term: { id: string; name: string };
   scheme: Scheme & { publishedCount: number };
   levels: { id: string; name: string; stage: Stage; subjects: { id: string; name: string }[] }[];
@@ -171,7 +177,13 @@ export async function getAssessmentSetup(
       .from(gradingScales)
       .where(eq(gradingScales.tenantId, ctx.tenant.id));
     const stagesInUse = STAGES.filter((s) => levelRows.some((l) => l.stage === s));
+    const template = await readTemplate(tx, ctx.tenant.id);
     return {
+      template: { id: template.id, name: template.name, stageLabels: template.stageLabels },
+      reportCard: {
+        chosen: (await readPreferences(tx, ctx.tenant.id)).reportCardStyle,
+        templateStyle: template.reportStyle,
+      },
       term: { id: term.id, name: term.name },
       scheme: {
         ...(await readScheme(tx, ctx.tenant.id, term.id)),
@@ -192,7 +204,7 @@ export async function getAssessmentSetup(
       })),
       scales: stagesInUse.map((stage) => {
         const custom = customScales.find((c) => c.stage === stage);
-        return { stage, bands: sortBands(custom?.bands ?? DEFAULT_BANDS[stage]), custom: Boolean(custom) };
+        return { stage, bands: sortBands(custom?.bands ?? template.bands[stage]), custom: Boolean(custom) };
       }),
     };
   });
@@ -213,7 +225,8 @@ export async function setupDefaultSubjects(database: Database, ctx: TenantContex
       .from(levels)
       .where(and(eq(levels.tenantId, ctx.tenant.id), eq(levels.status, "active")));
     if (levelRows.length === 0) throw new DomainError("no_levels", "Set up your levels under Classes first.");
-    const names = [...new Set(levelRows.flatMap((l) => DEFAULT_SUBJECTS[l.stage]))];
+    const template = await readTemplate(tx, ctx.tenant.id);
+    const names = [...new Set(levelRows.flatMap((l) => template.subjects[l.stage]))];
     const created = await tx
       .insert(subjects)
       .values(names.map((name) => ({ tenantId: ctx.tenant.id, name })))
@@ -221,7 +234,7 @@ export async function setupDefaultSubjects(database: Database, ctx: TenantContex
     const idOf = new Map(created.map((s) => [s.name, s.id]));
     await tx.insert(levelSubjects).values(
       levelRows.flatMap((level) =>
-        DEFAULT_SUBJECTS[level.stage].map((name, i) => ({
+        template.subjects[level.stage].map((name, i) => ({
           tenantId: ctx.tenant.id,
           levelId: level.id,
           subjectId: idOf.get(name)!,
@@ -234,7 +247,7 @@ export async function setupDefaultSubjects(database: Database, ctx: TenantContex
       actorUserId: ctx.userId,
       action: "subjects.set_up",
       entityType: "subject",
-      metadata: { count: names.length },
+      metadata: { count: names.length, template: template.id },
     });
     return names.length;
   });
@@ -482,6 +495,20 @@ const bandInput = z.object({
     .min(1, "Give every band a grade.")
     .max(4, "Use 4 characters or fewer for a grade."),
   remark: z.string().trim().max(40, "Use 40 characters or fewer for a remark."),
+  /** Grade points (e.g. 3.7), for schools that report a GPA; empty for none. */
+  points: z
+    .union([z.string(), z.number(), z.null()])
+    .optional()
+    .transform((v, c) => {
+      if (v === undefined || v === null) return undefined;
+      const parsed = typeof v === "number" ? v : parseGradePoints(v);
+      if (parsed === null) return undefined;
+      if (Number.isNaN(parsed)) {
+        c.addIssue({ code: "custom", message: "Enter grade points from 0 to 10, such as 3.7." });
+        return undefined;
+      }
+      return parsed;
+    }),
 });
 
 /** Sets a stage's grade bands. Published report cards keep the bands they were published with. */

@@ -12,7 +12,7 @@ import type { TenantContext } from "@/server/tenancy/service";
 import { Alert } from "@/components/ui/alert";
 import { weekStart } from "@/lib/dashboard";
 import { formatCalendarDate, todayIn } from "@/lib/format";
-import { formatCedis } from "@/lib/money";
+import { moneyFormatter } from "@/lib/money";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 
@@ -27,6 +27,7 @@ export default async function PaymentsPage({
 }) {
   const [{ school }, search] = await Promise.all([params, searchParams]);
   const { ctx } = await requireTenant(school);
+  const showMoney = moneyFormatter(ctx.tenant.currencyCode);
   const slug = ctx.tenant.slug;
   const today = todayIn(ctx.tenant.timezone);
   if (search.from || search.to) {
@@ -79,13 +80,13 @@ export default async function PaymentsPage({
         <>
           <section aria-labelledby="day-totals" className="space-y-2">
             <h2 id="day-totals" className="text-md font-semibold text-ink">
-              Received {label}: <span className="tabular-nums">{formatCedis(day.totalPesewas)}</span>
+              Received {label}: <span className="tabular-nums">{showMoney(day.totalPesewas)}</span>
             </h2>
             <ul className="flex flex-wrap gap-x-6 gap-y-1 text-base text-ink-2">
               {day.byMethod.map((m) => (
                 <li key={m.method}>
                   {METHOD_LABELS[m.method]}:{" "}
-                  <span className="text-ink tabular-nums">{formatCedis(m.totalPesewas)}</span> ({m.count})
+                  <span className="text-ink tabular-nums">{showMoney(m.totalPesewas)}</span> ({m.count})
                 </li>
               ))}
             </ul>
@@ -129,7 +130,7 @@ export default async function PaymentsPage({
                     <TD
                       className={`text-right whitespace-nowrap tabular-nums ${p.voided ? "text-ink-3 line-through" : ""}`}
                     >
-                      {formatCedis(p.amountPesewas)}
+                      {showMoney(p.amountPesewas)}
                     </TD>
                   </TR>
                 ))}
@@ -177,6 +178,7 @@ async function PeriodView({
   today: string;
 }) {
   const slug = ctx.tenant.slug;
+  const showMoney = moneyFormatter(ctx.tenant.currencyCode);
   let totals: PaymentTotals;
   try {
     totals = await listPaymentTotals(db(), ctx, from, to);
@@ -197,13 +199,13 @@ async function PeriodView({
     <>
       <section aria-labelledby="period-totals" className="space-y-2">
         <h2 id="period-totals" className="text-md font-semibold text-ink">
-          Received {label}: <span className="tabular-nums">{formatCedis(totals.totalPesewas)}</span>
+          Received {label}: <span className="tabular-nums">{showMoney(totals.totalPesewas)}</span>
         </h2>
         <ul className="flex flex-wrap gap-x-6 gap-y-1 text-base text-ink-2">
           {totals.byMethod.map((m) => (
             <li key={m.method}>
               {METHOD_LABELS[m.method]}:{" "}
-              <span className="text-ink tabular-nums">{formatCedis(m.totalPesewas)}</span> ({m.count})
+              <span className="text-ink tabular-nums">{showMoney(m.totalPesewas)}</span> ({m.count})
             </li>
           ))}
         </ul>
@@ -232,7 +234,7 @@ async function PeriodView({
                   </Link>
                 </TD>
                 <TD className="text-right tabular-nums">{d.count}</TD>
-                <TD className="text-right tabular-nums">{formatCedis(d.totalPesewas)}</TD>
+                <TD className="text-right tabular-nums">{showMoney(d.totalPesewas)}</TD>
               </TR>
             ))}
           </TBody>

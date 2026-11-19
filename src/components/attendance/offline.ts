@@ -19,6 +19,8 @@ export type SyncAnswer = { ok: true; result: SyncResult } | { ok: false; message
 export type SendRegister = (payload: {
   classId: string;
   date: string;
+  /** Set for a lesson register. */
+  periodId?: string;
   source: "online" | "offline" | "kept_mine";
   recordedAt?: string;
   marks: QueuedMark[];
@@ -93,6 +95,7 @@ export async function sendOrQueue(
     const answer = await send({
       classId: entry.classId,
       date: entry.date,
+      ...(entry.periodId ? { periodId: entry.periodId } : {}),
       source: entry.source,
       marks: entry.marks,
     });
@@ -106,12 +109,20 @@ export async function sendOrQueue(
 }
 
 async function storeConflicts(
-  entry: { userId: string; school: string; classId: string; className: string; date: string },
+  entry: {
+    userId: string;
+    school: string;
+    classId: string;
+    className: string;
+    date: string;
+    periodId?: string;
+  },
   result: SyncResult,
 ): Promise<void> {
   if (!result.conflicts.length) return;
   await addConflicts({
-    key: registerKey(entry.userId, entry.school, entry.classId, entry.date),
+    key: registerKey(entry.userId, entry.school, entry.classId, entry.date, entry.periodId),
+    ...(entry.periodId ? { periodId: entry.periodId } : {}),
     userId: entry.userId,
     school: entry.school,
     classId: entry.classId,
@@ -143,6 +154,7 @@ export async function flushQueued(userId: string, school: string, send: SendRegi
       const answer = await send({
         classId: entry.classId,
         date: entry.date,
+        ...(entry.periodId ? { periodId: entry.periodId } : {}),
         source: entry.source,
         recordedAt: entry.recordedAt,
         marks: entry.marks,

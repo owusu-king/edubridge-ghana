@@ -1,13 +1,14 @@
 "use client";
 
 import { Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Textarea } from "@/components/ui/field";
 import { FormDialog } from "@/components/ui/form-dialog";
 import { useFormAction } from "@/components/ui/use-form-action";
 import type { AssessmentComponent, GradeBand } from "@/lib/assessment";
+import { formatGpa } from "@/lib/report-styles";
 import type { FormState } from "@/web/forms";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
@@ -290,7 +291,7 @@ export function SchemeForm({
   );
 }
 
-type BandRow = { grade: string; min: string; remark: string; id: number };
+type BandRow = { grade: string; min: string; remark: string; points: string; id: number };
 
 /** A stage's grade bands, edited as rows: the lowest mark for each grade. */
 export function ScaleForm({
@@ -307,7 +308,14 @@ export function ScaleForm({
   custom: boolean;
 }) {
   const { state, pending, onSubmit } = useFormAction(action);
-  const toRows = () => bands.map((b, i) => ({ grade: b.grade, min: String(b.min), remark: b.remark, id: i }));
+  const toRows = () =>
+    bands.map((b, i) => ({
+      grade: b.grade,
+      min: String(b.min),
+      remark: b.remark,
+      points: b.points !== undefined && b.points !== null ? formatGpa(b.points) : "",
+      id: i,
+    }));
   const [rows, setRows] = useState<BandRow[]>(toRows);
   // After a save or a reset the stored bands (sorted) replace the rows being edited.
   const version = JSON.stringify(bands);
@@ -324,14 +332,15 @@ export function ScaleForm({
         {state.status !== "idle" && state.message && (
           <Alert tone={state.status === "error" ? "critical" : "positive"}>{state.message}</Alert>
         )}
-        <div className="grid grid-cols-[4rem_5rem_1fr_2.5rem] gap-3 text-sm font-medium text-ink-3">
+        <div className="grid grid-cols-[4rem_5rem_1fr_4.5rem_2.5rem] gap-3 text-sm font-medium text-ink-3">
           <span>Grade</span>
           <span>From mark</span>
           <span>Remark</span>
+          <span title="Grade points, for schools that report a GPA. Leave empty otherwise.">Points</span>
           <span className="sr-only">Remove</span>
         </div>
         {rows.map((row, i) => (
-          <div key={row.id} className="grid grid-cols-[4rem_5rem_1fr_2.5rem] items-center gap-3">
+          <div key={row.id} className="grid grid-cols-[4rem_5rem_1fr_4.5rem_2.5rem] items-center gap-3">
             <Input
               name="grade"
               aria-label={`Grade ${i + 1}`}
@@ -354,6 +363,15 @@ export function ScaleForm({
               onChange={(e) => update(row.id, { remark: e.target.value })}
               maxLength={40}
             />
+            <Input
+              name="points"
+              aria-label={`Grade ${i + 1} grade points (optional)`}
+              inputMode="decimal"
+              value={row.points}
+              onChange={(e) => update(row.id, { points: e.target.value })}
+              placeholder="—"
+              className="tabular-nums"
+            />
             <Button
               variant="ghost"
               size="sm"
@@ -372,7 +390,13 @@ export function ScaleForm({
             onClick={() =>
               setRows((current) => [
                 ...current,
-                { grade: "", min: "", remark: "", id: Math.max(0, ...current.map((r) => r.id)) + 1 },
+                {
+                  grade: "",
+                  min: "",
+                  remark: "",
+                  points: "",
+                  id: Math.max(0, ...current.map((r) => r.id)) + 1,
+                },
               ])
             }
             disabled={rows.length >= 12}
@@ -401,21 +425,102 @@ export function ScaleForm({
   );
 }
 
+export interface RemarkSuggesting {
+  /** False with a reason when AI is off, over a limit or unavailable. */
+  available: boolean;
+  message: string | null;
+  draft: () => Promise<{ ok: true; draftId: string; suggestions: string[] } | { ok: false; message: string }>;
+  discard: (draftId: string) => Promise<void>;
+}
+
+/**
+ * Suggested class-teacher remarks (R5-5, DRF-01): the teacher picks one into the remark and edits it, or sets them
+ * aside. Nothing is saved until the report card is.
+ */
+function RemarkSuggestions({
+  suggest,
+  onPick,
+}: {
+  suggest: RemarkSuggesting;
+  onPick: (text: string, draftId: string) => void;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [result, setResult] = useState<{ draftId: string; suggestions: string[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (!suggest.available)
+    return <p className="text-sm text-ink-3">Suggested remarks are not available: {suggest.message}</p>;
+  return (
+    <div className="space-y-2">
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        pending={pending}
+        onClick={() =>
+          startTransition(async () => {
+            setError(null);
+            const r = await suggest.draft();
+            if (r.ok) setResult({ draftId: r.draftId, suggestions: r.suggestions });
+            else setError(r.message);
+          })
+        }
+      >
+        Suggest remarks
+      </Button>
+      {error && <p className="text-sm text-critical">{error}</p>}
+      {result && (
+        <div className="space-y-2 rounded-lg border border-line bg-subtle/50 p-3">
+          <p className="text-sm text-ink-3">
+            Suggestions from this term&apos;s marks and attendance. No name was sent; check each one before
+            you use it.
+          </p>
+          <ul className="space-y-2">
+            {result.suggestions.map((s) => (
+              <li key={s} className="flex items-start justify-between gap-3">
+                <p className="text-base text-ink">{s}</p>
+                <Button type="button" size="sm" variant="secondary" onClick={() => onPick(s, result.draftId)}>
+                  Use
+                </Button>
+              </li>
+            ))}
+          </ul>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              void suggest.discard(result.draftId);
+              setResult(null);
+            }}
+          >
+            None of these
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Remarks on a draft report card. The head teacher's remark appears only for those who publish. */
 export function RemarksForm({
   action,
   values,
   canWriteHeadRemark,
   registers,
+  suggest = null,
 }: {
   action: Action;
   values: Record<string, string>;
   canWriteHeadRemark: boolean;
   /** Attendance from this term's registers, if any were taken. */
   registers: { present: number; open: number } | null;
+  /** AI suggestions for the class teacher's remark, where the school has drafting. */
+  suggest?: RemarkSuggesting | null;
 }) {
   const { state, pending, onSubmit } = useFormAction(action);
   const v = (name: string) => state.values?.[name] ?? values[name] ?? "";
+  const [remark, setRemark] = useState(v("classTeacherRemark"));
+  const [draftId, setDraftId] = useState("");
   return (
     <form onSubmit={onSubmit} className="space-y-5" noValidate aria-label="Report card remarks">
       {state.status !== "idle" && state.message && (
@@ -464,10 +569,21 @@ export function RemarksForm({
             name="classTeacherRemark"
             rows={3}
             maxLength={500}
-            defaultValue={v("classTeacherRemark")}
+            value={remark}
+            onChange={(e) => setRemark(e.target.value)}
           />
         )}
       </Field>
+      <input type="hidden" name="remarkDraftId" value={draftId} />
+      {suggest && (
+        <RemarkSuggestions
+          suggest={suggest}
+          onPick={(text, id) => {
+            setRemark(text);
+            setDraftId(id);
+          }}
+        />
+      )}
       {canWriteHeadRemark && (
         <Field label="Head teacher's remark" error={state.fieldErrors?.headTeacherRemark}>
           {(p) => (

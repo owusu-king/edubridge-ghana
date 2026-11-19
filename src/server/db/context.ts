@@ -1,5 +1,6 @@
 import "server-only";
 import { sql } from "drizzle-orm";
+import { DomainError } from "../errors";
 import type { Database, Transaction } from "./client";
 
 export interface TenantScope {
@@ -29,10 +30,30 @@ export async function withTenant<T>(
   scope: TenantScope,
   fn: (tx: Transaction) => Promise<T>,
 ): Promise<T> {
-  return database.transaction(async (tx) => {
-    await setTenantContext(tx, scope);
-    return fn(tx);
-  });
+  return database
+    .transaction(async (tx) => {
+      await setTenantContext(tx, scope);
+      return fn(tx);
+    })
+    .catch((error: unknown) => {
+      throw explainDatabaseError(error);
+    });
+}
+
+/**
+ * Errors raised by database rules that people can act on, as a domain error with a plain message (the
+ * rule itself stays in the database, so no code path can bypass it).
+ */
+function explainDatabaseError(error: unknown): unknown {
+  const candidate = error as { message?: unknown; cause?: { message?: unknown } };
+  const message = String(candidate.cause?.message ?? candidate.message ?? "");
+  const locked = /period_locked:(\d{4}-\d{2}-\d{2})/.exec(message);
+  if (locked)
+    return new DomainError(
+      "period_locked",
+      `The books are closed up to ${locked[1]}. Use a later date, or ask the Proprietor to reopen the period.`,
+    );
+  return error;
 }
 
 /** Runs `fn` with only a user context: the user can see their own memberships across tenants. */

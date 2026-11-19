@@ -27,7 +27,7 @@ export function PageHeader({
         <h1 className="font-display text-xl font-medium tracking-tight text-ink sm:text-2xl">{title}</h1>
         {description && <p className="mt-1.5 max-w-2xl text-base text-ink-2">{description}</p>}
       </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap items-center gap-2 sm:shrink-0">{actions}</div>}
     </header>
   );
 }
@@ -59,6 +59,39 @@ export function Section({
   );
 }
 
+/**
+ * One setting in a settings page: its title and a line of explanation on the left, the control on the right
+ * (stacked on narrow screens). Rows are meant to sit in a `divide-y` list.
+ */
+export function SettingRow({
+  title,
+  description,
+  aside,
+  wide = false,
+  children,
+}: {
+  title: string;
+  description?: ReactNode;
+  /** Beside the title, e.g. a status. */
+  aside?: ReactNode;
+  /** Let the control use the full width (tables), instead of a comfortable form width. */
+  wide?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <section className="grid gap-4 py-8 first:pt-0 last:pb-0 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)] md:gap-12">
+      <div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h2 className="text-md font-semibold text-ink">{title}</h2>
+          {aside}
+        </div>
+        {description && <p className="mt-1 text-sm text-ink-3">{description}</p>}
+      </div>
+      <div className={cn("min-w-0 space-y-4", !wide && "max-w-xl")}>{children}</div>
+    </section>
+  );
+}
+
 /** Key–value pairs, e.g. a record's attributes. Stacks on mobile. */
 export function DescriptionList({
   items,
@@ -69,7 +102,7 @@ export function DescriptionList({
   stacked?: boolean;
 }) {
   return (
-    <dl className="divide-y divide-line rounded-lg border border-line bg-surface shadow-raised">
+    <dl className="divide-y divide-line rounded-lg border border-line bg-surface">
       {items.map((item) => (
         <div
           key={item.term}

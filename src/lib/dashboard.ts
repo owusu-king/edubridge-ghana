@@ -1,3 +1,4 @@
+import { currencySymbol, minorDigits } from "./money";
 import { addDays } from "./attendance";
 
 /**
@@ -129,26 +130,30 @@ export function reminderOutcome(
  * Clean axis ticks from 0 up to at least `max`, stepping by 1, 2, 2.5 or 5 times a power of ten
  * (in cedis, so pesewas never show on an axis). Takes and returns pesewas.
  */
-export function niceTicks(maxPesewas: number, count = 4): number[] {
-  const max = maxPesewas / 100;
+export function niceTicks(maxPesewas: number, count = 4, currency = "GHS"): number[] {
+  const unit = 10 ** minorDigits(currency);
+  const max = maxPesewas / unit;
   if (max <= 0) return [0];
   const rough = max / count;
   const power = 10 ** Math.floor(Math.log10(rough));
   const step = [1, 2, 2.5, 5, 10].map((m) => m * power).find((s) => s >= rough)!;
   const ticks: number[] = [0];
   while (ticks[ticks.length - 1]! < max) ticks.push(ticks.length * step);
-  return ticks.map((t) => Math.round(t * 100));
+  return ticks.map((t) => Math.round(t * unit));
 }
 
 /**
- * Cedi amounts for a chart axis: in full (GH₵7,500) unless the axis reaches GH₵10,000, when every tick
+ * Amounts for a chart axis, in the school's currency: in full (GH₵7,500) unless the axis reaches GH₵10,000, when every tick
  * is compact (GH₵2.5K, GH₵12K, GH₵1.5M), so one axis never mixes the two styles.
  */
-export function axisCedis(pesewas: number, compact: boolean): string {
-  const cedis = pesewas / 100;
+export function axisCedis(pesewas: number, compact: boolean, currency = "GHS"): string {
+  const cedis = pesewas / 10 ** minorDigits(currency);
+  const symbol = currencySymbol(currency);
+  // Symbols that are words (Ksh, USh, F CFA) are separated from the figure by a space.
+  const sign = /[A-Za-z]$/.test(symbol) ? `${symbol} ` : symbol;
   const short = (n: number) => String(Number(n.toFixed(1)));
-  if (!compact) return `GH₵${Math.round(cedis).toLocaleString("en-GH")}`;
-  if (Math.abs(cedis) >= 1_000_000) return `GH₵${short(cedis / 1_000_000)}M`;
-  if (cedis === 0) return "GH₵0";
-  return `GH₵${short(cedis / 1_000)}K`;
+  if (!compact) return `${sign}${Math.round(cedis).toLocaleString("en")}`;
+  if (Math.abs(cedis) >= 1_000_000) return `${sign}${short(cedis / 1_000_000)}M`;
+  if (cedis === 0) return `${sign}0`;
+  return `${sign}${short(cedis / 1_000)}K`;
 }

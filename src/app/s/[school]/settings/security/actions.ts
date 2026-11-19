@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/server/db/client";
-import { saveVoidPolicy } from "@/server/tenancy/preferences";
+import { saveOfflineReceiptsPreference, saveVoidPolicy } from "@/server/tenancy/preferences";
 import { updateMfaPolicy } from "@/server/tenancy/service";
 import { schoolPath } from "@/lib/routes";
 import { getClientInfo, requireTenant } from "@/web/auth";
@@ -37,4 +37,21 @@ export async function saveVoidPolicyAction(
   }
   revalidatePath(schoolPath(slug), "layout");
   return { status: "success", message: "Saved. It applies from each person's next page." };
+}
+
+export async function saveOfflineReceiptsAction(
+  slug: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const { ctx } = await requireTenant(slug);
+  try {
+    await saveOfflineReceiptsPreference(db(), ctx, {
+      offlineReceiptsEnabled: formData.get("offlineReceiptsEnabled") === "on",
+    });
+  } catch (error) {
+    return toFormError(error, formData);
+  }
+  revalidatePath(schoolPath(slug), "layout");
+  return { status: "success", message: "Saved." };
 }

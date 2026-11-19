@@ -10,10 +10,22 @@ import {
 import type { AttendanceTotals } from "../../lib/attendance";
 import { readAttendanceTotals } from "../attendance/totals";
 import type { Transaction } from "../db/client";
-import { academicYears, assessmentScores, enrolments, reportCards, students, terms } from "../db/schema";
+import type { ReportCardStyle } from "../../lib/report-styles";
+import { readTemplate } from "../academics/templates";
+import {
+  academicYears,
+  assessmentScores,
+  enrolments,
+  reportCards,
+  students,
+  subjectComments,
+  terms,
+} from "../db/schema";
+import { readPreferences } from "../tenancy/preferences";
 import { fullName } from "../students/service";
 import type { AssessableClass, TermRef } from "./access";
 import { readBands, readLevelSubjects, readScheme } from "./setup";
+import { subjectTeachersIn } from "./teaching";
 
 export interface ClassStudent {
   id: string;
@@ -39,6 +51,19 @@ export interface ClassTermData {
   results: Map<string, StudentResult>;
   /** Attendance from the term's registers. */
   attendance: Map<string, AttendanceTotals>;
+  /** comments[studentId][subjectId] = the subject teacher's comment */
+  comments: Map<string, Map<string, string>>;
+  /** Who teaches each subject in the class: its subject teacher, else the class teacher. */
+  teachers: Map<string, string | null>;
+  /** The school's report-card layout. */
+  style: ReportCardStyle;
+}
+
+/** The layout a school prints: its own choice, else the one that suits its template. */
+export async function readReportCardStyle(tx: Transaction, tenantId: string): Promise<ReportCardStyle> {
+  return (
+    (await readPreferences(tx, tenantId)).reportCardStyle ?? (await readTemplate(tx, tenantId)).reportStyle
+  );
 }
 
 /** Students in the class for the term, by surname then first name. */
@@ -118,9 +143,37 @@ export async function loadClassTermData(
           ),
         )
     : [];
+  const commentRows = ids.length
+    ? await tx
+        .select({
+          studentId: subjectComments.studentId,
+          subjectId: subjectComments.subjectId,
+          comment: subjectComments.comment,
+        })
+        .from(subjectComments)
+        .where(
+          and(
+            eq(subjectComments.tenantId, tenantId),
+            eq(subjectComments.termId, term.id),
+            inArray(subjectComments.studentId, ids),
+          ),
+        )
+    : [];
+  const comments = new Map<string, Map<string, string>>();
+  for (const row of commentRows) {
+    const bySubject = comments.get(row.studentId) ?? new Map<string, string>();
+    bySubject.set(row.subjectId, row.comment);
+    comments.set(row.studentId, bySubject);
+  }
+  const assigned = new Map(
+    (await subjectTeachersIn(tx, tenantId, cls.id)).map((t) => [t.subjectId, t.teacherName]),
+  );
   return {
     term,
     cls,
+    comments,
+    teachers: new Map(subjectList.map((s) => [s.id, assigned.get(s.id) ?? cls.classTeacherName])),
+    style: await readReportCardStyle(tx, tenantId),
     students: roster,
     subjects: subjectList,
     components: scheme.components,
@@ -187,13 +240,19 @@ export function buildSnapshot(
     components: data.components,
     bands: data.bands,
     showPositions: data.showPositions,
-    subjects: result.subjects.map(({ subjectId: _id, ...rest }) => rest),
+    subjects: result.subjects.map(({ subjectId, ...rest }) => ({
+      ...rest,
+      comment: data.comments.get(student.id)?.get(subjectId) ?? null,
+      teacher: data.teachers.get(subjectId) ?? null,
+    })),
     overall: {
       total: result.total,
       average: result.average,
       position: result.position,
       graded: result.graded,
+      gpa: result.gpa,
     },
+    style: data.style,
     attendance: reportAttendance(card, data.attendance.get(student.id)),
     remarks: {
       attitude: card?.attitude ?? null,

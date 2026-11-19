@@ -5,7 +5,7 @@ test("teachers see only what their role allows", async ({ page }) => {
   await signIn(page, "teacher@example.test");
   await page.goto(`${SCHOOL.path}`);
   const nav = page.getByRole("navigation", { name: "School" });
-  await expect(nav.getByRole("link", { name: "Overview" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Command Center" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Members" })).toHaveCount(0);
   await expect(nav.getByRole("link", { name: "Settings" })).toHaveCount(0);
 

@@ -1,16 +1,16 @@
 "use client";
 
 import { useActionState } from "react";
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, Select, Textarea } from "@/components/ui/field";
 import type { FormState } from "@/web/forms";
+import { FormMessage } from "@/components/ui/toast";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
 
 function Message({ state }: { state: FormState }) {
   if (state.status === "idle" || !state.message) return null;
-  return <Alert tone={state.status === "success" ? "positive" : "critical"}>{state.message}</Alert>;
+  return <FormMessage state={state} />;
 }
 
 /** The Proprietor lets EduBridge support in for a chosen time (replacing any current grant). */
@@ -40,7 +40,7 @@ export function GrantSupportForm({
           </Select>
         )}
       </Field>
-      <Field label="What do you need help with? (optional)" error={errors.note}>
+      <Field label="What do you need help with?" optional error={errors.note}>
         {(p) => <Textarea {...p} name="note" rows={3} maxLength={300} defaultValue={state.values?.note} />}
       </Field>
       <Button type="submit" variant={live ? "secondary" : "primary"} pending={pending}>

@@ -12,6 +12,8 @@ import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 import { publishAction, saveRemarksAction, withdrawAction } from "../../../actions";
 import { PublishDialog, RemarksForm, WithdrawDialog } from "../../../assessment-controls";
+import { discardDraftAction, draftRemarksAction } from "../../../../drafting-actions";
+import { draftingAvailability } from "@/server/drafting/service";
 import { chooseTerm, termQuery } from "@/web/terms";
 
 export const metadata: Metadata = { title: "Report card" };
@@ -36,6 +38,7 @@ export default async function ReportCardPage({
   const published = report.status === "published";
   const ungraded = snapshot.subjects.length - snapshot.overall.graded;
 
+  const remarkDrafting = published ? null : await draftingAvailability(db(), ctx, "remarks");
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -105,6 +108,15 @@ export default async function ReportCardPage({
               values={report.remarks}
               canWriteHeadRemark={report.canPublish}
               registers={report.registers}
+              suggest={
+                remarkDrafting
+                  ? {
+                      ...remarkDrafting,
+                      draft: draftRemarksAction.bind(null, slug, term.id, cls.id, report.studentId),
+                      discard: discardDraftAction.bind(null, slug),
+                    }
+                  : null
+              }
             />
           )}
         </section>

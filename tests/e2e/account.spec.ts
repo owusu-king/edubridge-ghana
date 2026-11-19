@@ -32,8 +32,8 @@ test("an owner's account security journey", async ({ browser }) => {
   await page.goto(`/s/${slug}`);
   await expect(page.getByRole("heading", { level: 1, name: `Secure School ${id}` })).toBeVisible();
 
-  // Change password from the account page.
-  await page.goto("/account");
+  // Change password from the account's Security page.
+  await page.goto("/account/security");
   await page.getByLabel("Current password").fill("wrong-password");
   await page.getByLabel("New password").fill("second-strong-password");
   await page.getByRole("button", { name: "Change password" }).click();

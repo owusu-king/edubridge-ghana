@@ -12,9 +12,12 @@ import { createSchoolAction, type InviteResult } from "../../actions";
 import { InviteLinkPanel } from "@/components/ui/invite-link";
 
 interface Options {
-  countries: { code: string; name: string }[];
+  /** With each country's default currency and time zone, chosen when the country changes. */
+  countries: { code: string; name: string; currency: string; timezone: string }[];
   currencies: readonly string[];
   timezones: readonly string[];
+  /** EduBridge's plans (SUB-01); the school's plan can start from one. */
+  presets: { id: string; name: string; summary: string }[];
 }
 
 const toSlug = (name: string) =>
@@ -27,12 +30,16 @@ const toSlug = (name: string) =>
     .slice(0, 48)
     .replace(/-+$/g, "");
 
-export function CreateSchoolForm({ countries, currencies, timezones }: Options) {
+export function CreateSchoolForm({ countries, currencies, timezones, presets }: Options) {
   const { state, pending, onSubmit } = useFormAction<InviteResult>(createSchoolAction);
   const [slug, setSlug] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
   const errors = state.fieldErrors ?? {};
   const v = state.values ?? {};
+  const [currency, setCurrency] = useState(v.currencyCode ?? "GHS");
+  const [timezone, setTimezone] = useState(v.timezone ?? "Africa/Accra");
+  const [presetId, setPresetId] = useState(v.presetId ?? presets[0]?.id ?? "");
+  const preset = presets.find((p) => p.id === presetId);
 
   if (state.status === "success" && state.data) {
     return (
@@ -93,7 +100,18 @@ export function CreateSchoolForm({ countries, currencies, timezones }: Options) 
           </Field>
           <Field label="Country" error={errors.countryCode}>
             {(p) => (
-              <Select {...p} name="countryCode" defaultValue={v.countryCode ?? "GH"}>
+              <Select
+                {...p}
+                name="countryCode"
+                defaultValue={v.countryCode ?? "GH"}
+                onChange={(e) => {
+                  const chosen = countries.find((c) => c.code === e.target.value);
+                  if (chosen) {
+                    setCurrency(chosen.currency);
+                    if (timezones.includes(chosen.timezone)) setTimezone(chosen.timezone);
+                  }
+                }}
+              >
                 {countries.map((c) => (
                   <option key={c.code} value={c.code}>
                     {c.name}
@@ -104,7 +122,12 @@ export function CreateSchoolForm({ countries, currencies, timezones }: Options) 
           </Field>
           <Field label="Default currency" error={errors.currencyCode}>
             {(p) => (
-              <Select {...p} name="currencyCode" defaultValue={v.currencyCode ?? "GHS"}>
+              <Select
+                {...p}
+                name="currencyCode"
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value)}
+              >
                 {currencies.map((c) => (
                   <option key={c}>{c}</option>
                 ))}
@@ -113,7 +136,7 @@ export function CreateSchoolForm({ countries, currencies, timezones }: Options) 
           </Field>
           <Field label="Time zone" error={errors.timezone} className="sm:col-span-2">
             {(p) => (
-              <Select {...p} name="timezone" defaultValue={v.timezone ?? "Africa/Accra"}>
+              <Select {...p} name="timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
                 {timezones.map((tz) => (
                   <option key={tz} value={tz}>
                     {tz.replace("_", " ")}
@@ -126,7 +149,26 @@ export function CreateSchoolForm({ countries, currencies, timezones }: Options) 
       </Section>
 
       <Section title="Plan">
-        <div className="grid gap-5 sm:grid-cols-3">
+        {presets.length > 0 && (
+          <Field
+            label="Start on"
+            description={preset ? preset.summary : "Set the plan's name and limits below."}
+            error={errors.presetId}
+            className="mb-5"
+          >
+            {(p) => (
+              <Select {...p} name="presetId" value={presetId} onChange={(e) => setPresetId(e.target.value)}>
+                {presets.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
+                  </option>
+                ))}
+                <option value="">A plan set by hand</option>
+              </Select>
+            )}
+          </Field>
+        )}
+        <div className={preset ? "hidden" : "grid gap-5 sm:grid-cols-3"}>
           <Field label="Plan name" error={errors.planName}>
             {(p) => (
               <Input {...p} name="planName" defaultValue={v.planName ?? "Pilot"} required maxLength={60} />
@@ -180,7 +222,7 @@ export function CreateSchoolForm({ countries, currencies, timezones }: Options) 
       </Section>
 
       <div className="flex justify-end gap-2 border-t border-line pt-5">
-        <Link href={"/admin" as Route} className={buttonStyles("secondary")}>
+        <Link href={"/admin" as Route} className={buttonStyles("ghost")}>
           Cancel
         </Link>
         <Button type="submit" pending={pending}>

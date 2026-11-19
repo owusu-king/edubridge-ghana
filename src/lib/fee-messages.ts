@@ -1,14 +1,14 @@
 import { formatCalendarDate } from "./format";
-import { formatCedis } from "./money";
+import { formatMoney, formatMoneySms } from "./money";
 
 /**
  * Messages staff share with families from their own WhatsApp (EduBridge sends nothing). Staff see the
  * text in WhatsApp and can edit it before sending. Shared by server and client.
  */
 
-function balanceWords(pesewas: number): string {
-  if (pesewas > 0) return `${formatCedis(pesewas)} owed`;
-  if (pesewas < 0) return `${formatCedis(-pesewas)} in credit`;
+function balanceWords(pesewas: number, currency: string): string {
+  if (pesewas > 0) return `${formatMoney(pesewas, currency)} owed`;
+  if (pesewas < 0) return `${formatMoney(-pesewas, currency)} in credit`;
   return "nothing owed";
 }
 
@@ -16,10 +16,12 @@ export function feeReminderMessage(input: {
   schoolName: string;
   studentName: string;
   balancePesewas: number;
+  /** The school's currency (ISO 4217); GHS when not given. */
+  currency?: string;
 }): string {
   return (
     `Hello, this is ${input.schoolName}. ${input.studentName}'s school fees balance is ` +
-    `${formatCedis(input.balancePesewas)}. Please pay at the school office or by Mobile Money. Thank you.`
+    `${formatMoney(input.balancePesewas, input.currency)}. Please pay at the school office or by Mobile Money. Thank you.`
   );
 }
 
@@ -30,10 +32,12 @@ export function receiptMessage(input: {
   studentName: string;
   paidOn: string;
   balanceAfterPesewas: number;
+  currency?: string;
 }): string {
+  const currency = input.currency ?? "GHS";
   return (
-    `${input.schoolName}: receipt ${input.receiptNumber}. ${formatCedis(input.amountPesewas)} received for ` +
-    `${input.studentName} on ${formatCalendarDate(input.paidOn)}. Balance: ${balanceWords(input.balanceAfterPesewas)}. Thank you.`
+    `${input.schoolName}: receipt ${input.receiptNumber}. ${formatMoney(input.amountPesewas, currency)} received for ` +
+    `${input.studentName} on ${formatCalendarDate(input.paidOn)}. Balance: ${balanceWords(input.balanceAfterPesewas, currency)}. Thank you.`
   );
 }
 
@@ -42,7 +46,7 @@ export function receiptMessage(input: {
  * Unicode one of 70 characters instead of 160, doubling or tripling what the school pays.
  */
 export function formatCedisSms(pesewas: number): string {
-  return formatCedis(pesewas).replace("GH₵", "GHS ");
+  return formatMoneySms(pesewas, "GHS");
 }
 
 /** Longer school names are shortened so a reminder stays one SMS for most schools. */
@@ -59,6 +63,7 @@ export function feeReminderSms(input: {
   studentFirstName: string;
   balancePesewas?: number;
   link?: string;
+  currency?: string;
 }): string {
   const school =
     input.schoolName.length > SMS_SCHOOL_NAME_MAX
@@ -67,7 +72,7 @@ export function feeReminderSms(input: {
   const balance = input.balancePesewas;
   const owed =
     typeof balance === "number" && Number.isSafeInteger(balance) && balance > 0
-      ? `${input.studentFirstName}'s school fees balance is ${formatCedisSms(balance)}.`
+      ? `${input.studentFirstName}'s school fees balance is ${formatMoneySms(balance, input.currency)}.`
       : `a reminder that ${input.studentFirstName}'s school fees are outstanding.`;
   const next = input.link
     ? `See details: ${input.link}`
@@ -104,6 +109,9 @@ export function paymentReceiptSms(input: {
   amountPesewas: number;
   receiptNumber: string;
   balancePesewas: number;
+  /** Where the receipt can be downloaded (FIN-11), after signing in with the number on file. */
+  link?: string;
+  currency?: string;
 }): string {
   const school =
     input.schoolName.length > SMS_SCHOOL_NAME_MAX
@@ -111,11 +119,12 @@ export function paymentReceiptSms(input: {
       : input.schoolName;
   const after =
     input.balancePesewas > 0
-      ? `Balance now ${formatCedisSms(input.balancePesewas)}.`
+      ? `Balance now ${formatMoneySms(input.balancePesewas, input.currency)}.`
       : input.balancePesewas < 0
-        ? `${formatCedisSms(-input.balancePesewas)} in credit.`
+        ? `${formatMoneySms(-input.balancePesewas, input.currency)} in credit.`
         : "Fees fully paid.";
-  return `${school}: ${formatCedisSms(input.amountPesewas)} received for ${input.studentFirstName}, receipt ${input.receiptNumber}. ${after} Thank you.`;
+  const end = input.link ? `Receipt: ${input.link}` : "Thank you.";
+  return `${school}: ${formatMoneySms(input.amountPesewas, input.currency)} received for ${input.studentFirstName}, receipt ${input.receiptNumber}. ${after} ${end}`;
 }
 
 /** A school announcement by SMS: its title and where to read it in full. */
@@ -125,6 +134,72 @@ export function announcementSms(input: { schoolName: string; title: string; link
       ? `${input.schoolName.slice(0, SMS_SCHOOL_NAME_MAX - 1)}.`
       : input.schoolName;
   return `${school}: ${input.title.slice(0, 90)}. Read it here: ${input.link}`;
+}
+
+/** A consent form waiting for an answer (CNS-01): its title, the deadline and where to answer. */
+export function consentRequestSms(input: {
+  schoolName: string;
+  title: string;
+  /** Already in words, e.g. "Fri 20 Nov 2026". */
+  deadline: string;
+  link: string;
+}): string {
+  const school =
+    input.schoolName.length > SMS_SCHOOL_NAME_MAX
+      ? `${input.schoolName.slice(0, SMS_SCHOOL_NAME_MAX - 1)}.`
+      : input.schoolName;
+  return `${school}: please answer "${input.title.slice(0, 80)}" for your child by ${input.deadline}: ${input.link}`;
+}
+
+/** A reminder before a school event (EVT-01): what, when and where. No link: it is complete as it is. */
+export function eventReminderSms(input: {
+  schoolName: string;
+  title: string;
+  /** Already in words (formatEventWhen). */
+  when: string;
+  location?: string | null;
+}): string {
+  const school =
+    input.schoolName.length > SMS_SCHOOL_NAME_MAX
+      ? `${input.schoolName.slice(0, SMS_SCHOOL_NAME_MAX - 1)}.`
+      : input.schoolName;
+  const where = input.location ? `, ${input.location.slice(0, 60)}` : "";
+  return `${school}: reminder, ${input.title.slice(0, 80)}: ${input.when}${where}.`;
+}
+
+/** When a term is billed (COM-01): the new balance and where to see the details. */
+export function feesBilledSms(input: {
+  schoolName: string;
+  studentFirstName: string;
+  termLabel: string;
+  balancePesewas: number;
+  link: string;
+  currency?: string;
+}): string {
+  const school =
+    input.schoolName.length > SMS_SCHOOL_NAME_MAX
+      ? `${input.schoolName.slice(0, SMS_SCHOOL_NAME_MAX - 1)}.`
+      : input.schoolName;
+  const balance =
+    input.balancePesewas > 0
+      ? `Balance ${formatMoneySms(input.balancePesewas, input.currency)}.`
+      : input.balancePesewas < 0
+        ? `${formatMoneySms(-input.balancePesewas, input.currency)} in credit.`
+        : "Nothing owed.";
+  return `${school}: ${input.termLabel.slice(0, 40)} fees for ${input.studentFirstName} are billed. ${balance} Details: ${input.link}`;
+}
+
+/** An invitation to the parent view (PAR-01): which school, and how to sign in. */
+export function portalInvitationSms(input: {
+  schoolName: string;
+  studentFirstName: string;
+  link: string;
+}): string {
+  const school =
+    input.schoolName.length > SMS_SCHOOL_NAME_MAX
+      ? `${input.schoolName.slice(0, SMS_SCHOOL_NAME_MAX - 1)}.`
+      : input.schoolName;
+  return `${school}: see ${input.studentFirstName}'s fees, receipts and reports at ${input.link} Sign in with this phone number.`;
 }
 
 /** Opens WhatsApp (app or web) with a message ready to send to this number (E.164). */

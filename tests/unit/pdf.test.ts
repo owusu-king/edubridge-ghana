@@ -109,4 +109,75 @@ describe("PDFs", () => {
     });
     expect((pdf.toString("latin1").match(/\/Type \/Page\b/g) ?? []).length).toBeGreaterThan(1);
   });
+
+  it("draws the school's logo on receipts and statements", async () => {
+    // A 1x1 PNG.
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const logo = { data: png, format: "png" as const };
+    const images = (pdf: Buffer) => (pdf.toString("latin1").match(/\/Subtype \/Image/g) ?? []).length;
+    const plain = await renderReceiptPdf({ receipt, schoolName: "Kpone Ridge", timeZone: "Africa/Accra" });
+    const withLogo = await renderReceiptPdf({
+      receipt,
+      schoolName: "Kpone Ridge",
+      timeZone: "Africa/Accra",
+      logo,
+    });
+    keep("receipt-logo.pdf", withLogo);
+    expect(images(plain)).toBe(0);
+    expect(images(withLogo)).toBeGreaterThan(0); // PNG transparency adds a second (mask) image
+    const statement = await renderStatementPdf({
+      account: account(),
+      schoolName: "Kpone Ridge",
+      className: null,
+      asOf: "2026-11-04",
+      logo,
+    });
+    expect(images(statement)).toBeGreaterThan(0);
+  });
+
+  it("renders a statement for a date range with its opening balance", async () => {
+    const pdf = await renderStatementPdf({
+      account: account(),
+      schoolName: "Kpone Ridge",
+      className: "Basic 4A",
+      asOf: "2026-11-04",
+      from: "2026-09-10",
+      to: "2026-09-30",
+    });
+    keep("statement-range.pdf", pdf);
+    expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+  });
+});
+
+describe("payslip PDF (PRL-03)", () => {
+  it("renders an approved payslip with the cedi sign, and marks a draft", async () => {
+    const { renderPayslipPdf } = await import("@/web/pdf/payslip");
+    const { calculatePay } = await import("@/lib/payroll");
+    const pay = calculatePay(2_500_00, [
+      { name: "Transport allowance", kind: "earning", basis: "fixed", value: 200_00 },
+      { name: "SSNIT (employee)", kind: "deduction", basis: "percent_basic", value: 550 },
+      { name: "SSNIT (employer)", kind: "employer", basis: "percent_basic", value: 1300 },
+    ]);
+    const slip = {
+      id: "l1",
+      staffId: "s1",
+      staffName: "Ama Mensah",
+      staffNumber: "S0001",
+      position: "Class teacher",
+      ...pay,
+      month: "2026-10",
+      currencyCode: "GHS",
+      status: "approved" as const,
+      approvedAt: new Date("2026-10-30T12:00:00Z"),
+    };
+    const pdf = await renderPayslipPdf({ slip, schoolName: "Kpone Ridge International School" });
+    keep("payslip.pdf", pdf);
+    expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(fontCount(pdf)).toBeGreaterThanOrEqual(2);
+    const draft = await renderPayslipPdf({ slip: { ...slip, status: "draft" }, schoolName: "Kpone Ridge" });
+    expect(draft.length).toBeGreaterThan(pdf.length - 2000);
+  });
 });

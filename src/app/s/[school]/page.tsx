@@ -1,35 +1,47 @@
 import type { Metadata, Route } from "next";
 import Link from "next/link";
-import { CalendarDays, Wallet } from "lucide-react";
+import { CalendarDays, FileDown, Wallet } from "lucide-react";
 import { Aging } from "@/components/overview/aging";
-import { Figures } from "@/components/overview/figures";
+import {
+  AttendanceSummary,
+  EnrolmentSummary,
+  FeesSummary,
+  ReportCardSummary,
+} from "@/components/overview/summary-panel";
 import { WeeklyCollections } from "@/components/overview/weekly-collections";
-import { TermPicker } from "@/components/term-picker";
-import { Badge, StatusText } from "@/components/ui/badge";
+import { ScopePicker } from "@/components/overview/scope-picker";
+import { StatusText } from "@/components/ui/badge";
 import { buttonStyles } from "@/components/ui/button";
-import { DescriptionList, EmptyState, PageHeader, Section } from "@/components/ui/layout";
+import { EmptyState, PageHeader, Section } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { getCurrentTerm } from "@/server/academics/calendar";
 import { pendingMove } from "@/server/academics/term-move";
 import { seesAllClasses } from "@/server/assessment/access";
 import { listAssessmentClasses } from "@/server/assessment/scores";
+import { listLessonRegisters } from "@/server/attendance/lessons";
 import { listRegisters } from "@/server/attendance/registers";
-import { allowed, ROLE_LABELS, ROLES } from "@/server/authz/permissions";
+import { getTeacherTimetable } from "@/server/timetable/service";
+import { isoWeekday } from "@/lib/timetable";
+import { allowed } from "@/server/authz/permissions";
+import { listCampuses } from "@/server/campuses/service";
+import { getOperationsNow, printsBoardSummary } from "@/server/dashboard/board-summary";
 import { getOwedToday, getTermFinance } from "@/server/dashboard/finance";
+import { countWaitingIndicators } from "@/server/early-warning/indicators";
+import { narrowToCampus } from "@/server/fees/access";
 import { getAttendanceOverview, getEnrolment } from "@/server/dashboard/school";
 import { db } from "@/server/db/client";
 import { METHOD_LABELS } from "@/server/fees/payments";
 import { getSetupProgress } from "@/server/setup/progress";
-import { countMembersByRole, type TenantContext } from "@/server/tenancy/service";
+import type { TenantContext } from "@/server/tenancy/service";
 import { percent } from "@/lib/dashboard";
-import { countryName, formatCalendarDate, todayIn } from "@/lib/format";
-import { formatCedis } from "@/lib/money";
+import { formatCalendarDate, todayIn } from "@/lib/format";
+import { moneyFormatter } from "@/lib/money";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 import { STEP_INFO } from "@/web/setup-steps";
 import { chooseTerm, termQuery, type TermOption } from "@/web/terms";
 
-export const metadata: Metadata = { title: "Overview" };
+export const metadata: Metadata = { title: "Command Center" };
 
 const shortDate = (iso: string) =>
   new Intl.DateTimeFormat("en-GH", { day: "numeric", month: "short", timeZone: "UTC" }).format(
@@ -39,45 +51,141 @@ const span = (from: string, to: string) =>
   from === to ? shortDate(from) : `${shortDate(from)} – ${shortDate(to)}`;
 const rate = (value: number | null) => (value === null ? "—" : `${value}%`);
 
-export default async function OverviewPage({
+function Figure({
+  label,
+  value,
+  href,
+  note,
+}: {
+  label: string;
+  value: string;
+  href?: string;
+  note?: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-sm text-ink-3">{label}</p>
+      {href ? (
+        <Link
+          href={href as Route}
+          className="mt-1 block font-display text-xl text-ink tabular-nums decoration-line-strong underline-offset-4 hover:text-accent hover:underline"
+        >
+          {value}
+        </Link>
+      ) : (
+        <p className="mt-1 font-display text-xl text-ink tabular-nums">{value}</p>
+      )}
+      {note && <p className="mt-0.5 text-sm text-ink-3">{note}</p>}
+    </div>
+  );
+}
+
+/**
+ * The Command Center (R5-1): the school's money, attendance, results, students and operations for a term and
+ * campus, each figure linked to its report, with a one-page board summary to download.
+ */
+export default async function CommandCenterPage({
   params,
   searchParams,
 }: {
   params: Promise<{ school: string }>;
-  searchParams: Promise<{ term?: string }>;
+  searchParams: Promise<{ term?: string; campus?: string }>;
 }) {
   const [{ school }, search] = await Promise.all([params, searchParams]);
   const { user, ctx } = await requireTenant(school);
+  const showMoney = moneyFormatter(ctx.tenant.currencyCode);
   const slug = ctx.tenant.slug;
   const today = todayIn(ctx.tenant.timezone);
   const { terms, term } = await chooseTerm(ctx, search.term);
   const lead = seesAllClasses(ctx);
   const teacherOnly = allowed(ctx, "attendance.take") && !lead;
   const firstName = user.name.split(" ")[0] ?? user.name;
+  // OVR-01: the figures for one campus, with exactly the scope a member of that campus has.
+  const campuses =
+    !teacherOnly && (allowed(ctx, "fees.view") || allowed(ctx, "students.view_all"))
+      ? (await listCampuses(db(), ctx)).filter((c) => c.status === "active")
+      : [];
+  const scoped = narrowToCampus(ctx, campuses.length > 1 ? search.campus : null);
+  const campus = scoped === ctx ? null : (campuses.find((c) => c.id === search.campus) ?? null);
+  const reportQuery = (extra: Record<string, string>) =>
+    `?${new URLSearchParams({ ...(campus ? { campus: campus.id } : {}), ...extra }).toString()}`;
 
-  const [setup, finance, owed, enrolment, attendance, assessment, counts, currentTerm] = await Promise.all([
-    getSetupProgress(db(), ctx),
-    allowed(ctx, "fees.view") && term ? getTermFinance(db(), ctx, term.id) : null,
-    allowed(ctx, "fees.view") ? getOwedToday(db(), ctx) : null,
-    allowed(ctx, "students.view_all") && term ? getEnrolment(db(), ctx, term.id) : null,
-    term ? getAttendanceOverview(db(), ctx, term.id, today) : null,
-    lead && allowed(ctx, "assessment.enter") && term ? listAssessmentClasses(db(), ctx, term.id) : null,
-    allowed(ctx, "members.view") ? countMembersByRole(db(), ctx) : null,
-    getCurrentTerm(db(), ctx),
-  ]);
+  const [setup, finance, owed, enrolment, attendance, assessment, operations, currentTerm, toReview] =
+    await Promise.all([
+      getSetupProgress(db(), ctx),
+      allowed(ctx, "fees.view") && term ? getTermFinance(db(), scoped, term.id) : null,
+      allowed(ctx, "fees.view") ? getOwedToday(db(), scoped) : null,
+      allowed(ctx, "students.view_all") && term ? getEnrolment(db(), scoped, term.id) : null,
+      term ? getAttendanceOverview(db(), scoped, term.id, today) : null,
+      lead && allowed(ctx, "assessment.enter") && term ? listAssessmentClasses(db(), ctx, term.id) : null,
+      teacherOnly ? null : getOperationsNow(db(), ctx),
+      getCurrentTerm(db(), ctx),
+      teacherOnly ? null : countWaitingIndicators(db(), ctx),
+    ]);
   const move =
     allowed(ctx, "academics.manage") && ctx.campusIds === null ? await pendingMove(db(), ctx) : null;
+  const opTiles = operations
+    ? (
+        [
+          ["Leave waiting", operations.leaveWaiting, "leave"],
+          ["Repairs open", operations.maintenanceOpen, "inventory/maintenance"],
+          ["Urgent repairs", operations.maintenanceUrgent, "inventory/maintenance"],
+          ["Purchases waiting", operations.purchasesWaiting, "inventory/purchases"],
+          ["Boarders overdue back", operations.exeatsOverdue, "boarding/exeats"],
+          ["Library books overdue", operations.libraryOverdue, "library/loans"],
+          ["Pickups refused today", operations.pickupsRefusedToday, "pickup"],
+          ["Visitors on site", operations.visitorsOnSite, "visitors"],
+          ["Early-warning reviews waiting", toReview, "early-warning"],
+        ] as const
+      ).filter(([, n]) => n !== null)
+    : [];
 
   return (
     <div className="space-y-12">
       <PageHeader
         eyebrow={`Welcome, ${firstName}`}
         title={ctx.tenant.name}
-        description={term ? `School overview for ${term.label}.` : "School overview"}
+        description={
+          term
+            ? `Command Center for ${campus ? `${campus.name} campus, ` : ""}${
+                currentTerm && currentTerm.id === term.id
+                  ? `${currentTerm.name}, ${currentTerm.yearName} · ${formatCalendarDate(currentTerm.startsOn)} – ${formatCalendarDate(currentTerm.endsOn)}`
+                  : term.label
+              }.`
+            : "Command Center"
+        }
         actions={
-          terms.length > 1 && term && !teacherOnly ? (
-            <TermPicker terms={terms} termId={term.id} id="overview-term" />
-          ) : null
+          teacherOnly ? null : (
+            <div className="flex flex-wrap items-end gap-2">
+              {((terms.length > 1 && term) || campuses.length > 1) && (
+                <ScopePicker
+                  terms={terms}
+                  termId={term?.id ?? null}
+                  campuses={campuses}
+                  campusId={campus?.id ?? null}
+                />
+              )}
+              {term && printsBoardSummary(ctx) && (
+                <a
+                  href={`${schoolPath(slug, "board-summary")}?${new URLSearchParams({ term: term.id, ...(campus ? { campus: campus.id } : {}) }).toString()}`}
+                  className={buttonStyles("secondary")}
+                >
+                  <FileDown aria-hidden="true" className="size-4" />
+                  Board summary
+                </a>
+              )}
+              {term && allowed(ctx, "drafting.board_report") && (
+                <Link
+                  href={
+                    `${schoolPath(slug, "board-report")}?${new URLSearchParams({ term: term.id, ...(campus ? { campus: campus.id } : {}) }).toString()}` as Route
+                  }
+                  className={buttonStyles("secondary")}
+                >
+                  Board report
+                </Link>
+              )}
+            </div>
+          )
         }
       />
 
@@ -105,6 +213,8 @@ export default async function OverviewPage({
       )}
 
       {setup && !setup.complete && <SetupPanel slug={slug} progress={setup} />}
+
+      {allowed(ctx, "timetable.view") && <TeacherLessons ctx={ctx} today={today} term={term} />}
 
       {teacherOnly && <TeacherClasses ctx={ctx} today={today} term={term} />}
 
@@ -137,27 +247,29 @@ export default async function OverviewPage({
             />
           ) : (
             <div className="space-y-8">
-              <Figures
-                items={[
+              <FeesSummary
+                rate={finance.collectionRate}
+                rateNote={
+                  finance.collectionRateBasis === "billed"
+                    ? "Of this term's fees"
+                    : `Of ${showMoney(finance.owedAtStartPesewas)} owed at the start plus the term's fees`
+                }
+                figures={[
                   {
                     label: "Billed for the term",
-                    value: formatCedis(finance.billedPesewas),
-                    href: `${schoolPath(slug, "fees")}${termQuery(finance.term.id)}`,
+                    value: showMoney(finance.billedPesewas),
+                    href: campus
+                      ? `${schoolPath(slug, "fees/reports")}${reportQuery({ term: finance.term.id })}`
+                      : `${schoolPath(slug, "fees")}${termQuery(finance.term.id)}`,
                     note: "Charges less discounts",
                   },
                   {
                     label: "Collected",
-                    value: formatCedis(finance.collected?.totalPesewas ?? 0),
-                    href: `${schoolPath(slug, "fees/payments")}?from=${finance.period.from}&to=${finance.period.to}`,
+                    value: showMoney(finance.collected?.totalPesewas ?? 0),
+                    href: campus
+                      ? `${schoolPath(slug, "fees/reports")}${reportQuery({ from: finance.period.from, to: finance.period.to })}`
+                      : `${schoolPath(slug, "fees/payments")}?from=${finance.period.from}&to=${finance.period.to}`,
                     note: `${finance.collected?.count ?? 0} payments, ${span(finance.period.from, finance.period.to)}`,
-                  },
-                  {
-                    label: "Collection rate",
-                    value: rate(finance.collectionRate),
-                    note:
-                      finance.collectionRateBasis === "billed"
-                        ? "Of this term's fees"
-                        : `Of ${formatCedis(finance.owedAtStartPesewas)} owed at the start plus the term's fees`,
                   },
                   {
                     label: "Paid after a reminder",
@@ -169,7 +281,7 @@ export default async function OverviewPage({
                     note:
                       finance.reminders.reminded === 0
                         ? "No reminders sent this term"
-                        : `Paid ${formatCedis(finance.reminders.paidPesewas)} within a week`,
+                        : `Paid ${showMoney(finance.reminders.paidPesewas)} within a week`,
                   },
                 ]}
               />
@@ -177,6 +289,7 @@ export default async function OverviewPage({
                 <div className="space-y-3">
                   <h3 className="text-base font-semibold text-ink">Collected each week</h3>
                   <WeeklyCollections
+                    currency={ctx.tenant.currencyCode}
                     caption={`Money collected each week, ${span(finance.period.from, finance.period.to)}`}
                     weeks={finance.weeks.map((w) => ({
                       ...w,
@@ -208,7 +321,7 @@ export default async function OverviewPage({
                           <tr key={m.method} className="border-b border-line last:border-0">
                             <td className="py-2 text-ink-2">{METHOD_LABELS[m.method]}</td>
                             <td className="py-2 text-right text-ink tabular-nums">
-                              {formatCedis(m.totalPesewas)}
+                              {showMoney(m.totalPesewas)}
                             </td>
                             <td className="py-2 text-right text-ink-3 tabular-nums">
                               {rate(percent(m.totalPesewas, finance.collected!.totalPesewas))}
@@ -249,13 +362,17 @@ export default async function OverviewPage({
                   href={schoolPath(slug, "fees/owing")}
                   className="font-display text-2xl text-ink decoration-line-strong underline-offset-4 hover:text-accent hover:underline"
                 >
-                  {formatCedis(owed.totalPesewas)}
+                  {showMoney(owed.totalPesewas)}
                 </Link>
                 <p className="mt-1 text-sm text-ink-3">
                   Owed by {owed.students} {owed.students === 1 ? "student" : "students"}
                 </p>
               </div>
-              <Aging buckets={owed.buckets} totalPesewas={owed.totalPesewas} />
+              <Aging
+                currency={ctx.tenant.currencyCode}
+                buckets={owed.buckets}
+                totalPesewas={owed.totalPesewas}
+              />
             </div>
           )}
         </Section>
@@ -278,31 +395,15 @@ export default async function OverviewPage({
             <p className="text-base text-ink-2">No registers taken this term.</p>
           ) : (
             <div className="space-y-8">
-              <Figures
-                items={[
-                  {
-                    label: "Attendance this term",
-                    value: rate(attendance.rate),
-                    note: `${attendance.totals.absent + attendance.totals.excused} days absent in all`,
-                  },
-                  attendance.today
-                    ? {
-                        label: "Today's registers",
-                        value: `${attendance.today.taken} of ${attendance.today.classes}`,
-                        href: schoolPath(slug, "attendance"),
-                        note:
-                          attendance.today.taken === attendance.today.classes
-                            ? "All taken"
-                            : "Classes taken so far",
-                      }
-                    : { label: "Today's registers", value: "—", note: "Today is not in this term" },
-                  {
-                    label: `Below ${attendance.concernPercent}% attendance`,
-                    value: String(attendance.concernCount),
-                    note: `Students on ${attendance.concernMinDays} or more registers`,
-                  },
-                  { label: "Classes", value: String(attendance.classes.length) },
-                ]}
+              <AttendanceSummary
+                rate={attendance.rate}
+                absentDays={attendance.totals.absent + attendance.totals.excused}
+                today={attendance.today}
+                concernPercent={attendance.concernPercent}
+                concernMinDays={attendance.concernMinDays}
+                concernCount={attendance.concernCount}
+                classes={attendance.classes.length}
+                registersHref={schoolPath(slug, "attendance")}
               />
               <div className="grid gap-10 lg:grid-cols-2">
                 <div className="space-y-3">
@@ -421,110 +522,39 @@ export default async function OverviewPage({
             <p className="text-base text-ink-2">No students are in classes for this term.</p>
           ) : (
             <div className="space-y-6">
-              <Figures
-                items={[
-                  { label: "In classes", value: String(enrolment.total), href: schoolPath(slug, "students") },
-                  { label: "Girls", value: String(enrolment.female) },
-                  { label: "Boys", value: String(enrolment.male) },
-                  {
-                    label: "Levels",
-                    value: String(enrolment.levels.length),
-                    href: schoolPath(slug, "classes"),
-                  },
-                ]}
+              <EnrolmentSummary
+                total={enrolment.total}
+                female={enrolment.female}
+                male={enrolment.male}
+                levels={enrolment.levels}
+                studentsHref={schoolPath(slug, "students")}
+                classesHref={schoolPath(slug, "classes")}
               />
-              <TableFrame>
-                <Table>
-                  <caption className="sr-only">
-                    Students in classes by level{enrolment.campuses.length > 1 ? " and campus" : ""}
-                  </caption>
-                  <THead>
-                    <tr>
-                      <TH>Level</TH>
-                      {enrolment.campuses.length > 1 &&
-                        enrolment.campuses.map((c) => (
-                          <TH key={c.id} className="text-right">
-                            {c.name}
-                          </TH>
-                        ))}
-                      <TH className="text-right">Students</TH>
-                    </tr>
-                  </THead>
-                  <TBody>
-                    {enrolment.levels.map((l) => (
-                      <TR key={l.id}>
-                        <TD className="font-medium text-ink">{l.name}</TD>
-                        {enrolment.campuses.length > 1 &&
-                          enrolment.campuses.map((c) => (
-                            <TD key={c.id} className="text-right tabular-nums">
-                              {l.byCampus[c.id] ?? 0}
-                            </TD>
-                          ))}
-                        <TD className="text-right tabular-nums">{l.total}</TD>
-                      </TR>
-                    ))}
-                  </TBody>
-                </Table>
-              </TableFrame>
+              <ul
+                className="divide-y divide-line border-y border-line"
+                aria-label="Students in classes by level"
+              >
+                {enrolment.levels.map((l) => (
+                  <li key={l.id} className="flex justify-between gap-3 py-2 text-base">
+                    <span className="text-ink">{l.name}</span>
+                    <span className="text-ink-2 tabular-nums">{l.total}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </Section>
       )}
 
-      {counts && (
-        <Section
-          title="People"
-          description="Active members of this school by role."
-          aside={
-            <Link
-              href={schoolPath(slug, "members")}
-              className="text-sm font-medium text-accent hover:underline"
-            >
-              View members
-            </Link>
-          }
-        >
-          <dl className="grid grid-cols-2 border-y border-line sm:grid-cols-3 lg:grid-cols-7">
-            {ROLES.map((role) => (
-              <div
-                key={role}
-                className="border-line py-4 pr-4 sm:[&:not(:first-child)]:border-l sm:[&:not(:first-child)]:pl-4"
-              >
-                <dt className="text-sm text-ink-3">{ROLE_LABELS[role]}s</dt>
-                <dd className="tabular mt-1 font-display text-xl text-ink">{counts[role]}</dd>
-              </div>
+      {opTiles.length > 0 && (
+        <Section title="Operations now" description="Across the whole school, today.">
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            {opTiles.map(([label, n, segment]) => (
+              <Figure key={label} label={label} value={String(n)} href={schoolPath(slug, segment)} />
             ))}
-          </dl>
+          </div>
         </Section>
       )}
-
-      <Section title="School details">
-        <DescriptionList
-          items={[
-            {
-              term: "Current term",
-              detail: currentTerm ? (
-                `${currentTerm.name}, ${currentTerm.yearName} · ${formatCalendarDate(currentTerm.startsOn)} – ${formatCalendarDate(currentTerm.endsOn)}`
-              ) : (
-                <span className="text-ink-3">Not set</span>
-              ),
-            },
-            { term: "Country", detail: countryName(ctx.tenant.countryCode) },
-            { term: "Time zone", detail: ctx.tenant.timezone.replace("_", " ") },
-            { term: "Currency", detail: ctx.tenant.currencyCode },
-            {
-              term: "Your roles",
-              detail: (
-                <span className="flex flex-wrap gap-1.5">
-                  {ctx.roles.map((role) => (
-                    <Badge key={role}>{ROLE_LABELS[role]}</Badge>
-                  ))}
-                </span>
-              ),
-            },
-          ]}
-        />
-      </Section>
     </div>
   );
 }
@@ -566,12 +596,11 @@ function ReportCardProgress({ classes }: { classes: AssessmentClasses }) {
   const complete = classes.filter((c) => c.subjects > 0 && c.completeSheets === c.subjects).length;
   return (
     <div className="space-y-6">
-      <Figures
-        items={[
-          { label: "Classes with every mark", value: `${complete} of ${classes.length}` },
-          { label: "Report cards published", value: `${published} of ${students}` },
-        ]}
-        className="lg:grid-cols-2"
+      <ReportCardSummary
+        complete={complete}
+        classes={classes.length}
+        published={published}
+        students={students}
       />
       <TableFrame>
         <Table>
@@ -610,6 +639,90 @@ function ReportCardProgress({ classes }: { classes: AssessmentClasses }) {
   );
 }
 
+/**
+ * A teacher's lessons today from the timetable, in order, with each lesson register's state when the school
+ * takes lesson registers. Nothing shows on a day without lessons.
+ */
+async function TeacherLessons({
+  ctx,
+  today,
+  term,
+}: {
+  ctx: TenantContext;
+  today: string;
+  term: TermOption | null;
+}) {
+  if (!term?.isCurrent) return null;
+  const timetable = await getTeacherTimetable(db(), ctx, term.id);
+  const weekday = isoWeekday(today);
+  const order = new Map(timetable?.periods.map((p, i) => [p.id, i]) ?? []);
+  const lessons = (timetable?.lessons ?? [])
+    .filter((l) => l.weekday === weekday)
+    .sort((a, b) => (order.get(a.periodId) ?? 0) - (order.get(b.periodId) ?? 0));
+  if (!timetable || lessons.length === 0) return null;
+  const day = allowed(ctx, "attendance.take") ? await listLessonRegisters(db(), ctx, today) : null;
+  if (day && (!day.term || day.term.holiday)) return null;
+  const slug = ctx.tenant.slug;
+  return (
+    <Section
+      title="Your lessons today"
+      description={`${formatCalendarDate(today)}. ${lessons.length} ${lessons.length === 1 ? "lesson" : "lessons"}.`}
+      aside={
+        <Link href={schoolPath(slug, "timetable") as Route} className="text-sm text-accent hover:underline">
+          Timetable
+        </Link>
+      }
+    >
+      <TableFrame>
+        <Table>
+          <caption className="sr-only">Your lessons today</caption>
+          <THead>
+            <tr>
+              <TH>Time</TH>
+              <TH>Lesson</TH>
+              {day?.enabled && <TH>Register</TH>}
+            </tr>
+          </THead>
+          <TBody>
+            {lessons.map((l) => {
+              const period = timetable.periods.find((p) => p.id === l.periodId);
+              const register = day?.lessons.find(
+                (x) => x.lesson.classId === l.classId && x.lesson.periodId === l.periodId,
+              );
+              return (
+                <TR key={l.id}>
+                  <TD className="tabular-nums">
+                    {period?.startsAt}–{period?.endsAt}
+                    <span className="block text-sm text-ink-3">{period?.name}</span>
+                  </TD>
+                  <TD>
+                    <span className="font-medium text-ink">{l.subjectName}</span>
+                    <span className="block text-sm text-ink-3">{l.className}</span>
+                  </TD>
+                  {day?.enabled && (
+                    <TD>
+                      <a
+                        href={`${schoolPath(slug, `attendance/${l.classId}/lessons/${l.periodId}`)}?date=${today}`}
+                        className="text-accent hover:underline"
+                      >
+                        {!register?.register
+                          ? "Take the register"
+                          : register.register.marked < register.students
+                            ? `${register.register.marked} of ${register.students} marked`
+                            : "Taken"}
+                      </a>
+                    </TD>
+                  )}
+                </TR>
+              );
+            })}
+          </TBody>
+        </Table>
+      </TableFrame>
+    </Section>
+  );
+}
+
 /** A class teacher's day: their classes' registers today and how far marks have got this term. */
 async function TeacherClasses({
   ctx,
@@ -638,7 +751,7 @@ async function TeacherClasses({
         <EmptyState
           icon={<CalendarDays />}
           title="No classes yet"
-          description="Registers and marks are for the classes you are class teacher of. Ask the head teacher to assign you a class."
+          description="Registers are for the classes you are class teacher of, and marks also for the subjects you teach. Ask the head teacher to assign you a class or subject."
         />
       ) : (
         <TableFrame>

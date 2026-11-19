@@ -51,6 +51,7 @@ export async function recordPaymentAction(
       payerName: formData.get("payerName") ?? undefined,
       paidOn: formData.get("paidOn"),
       idempotencyKey: formData.get("idempotencyKey"),
+      confirmDuplicate: formData.get("confirmDuplicate") === "on",
     }));
   } catch (error) {
     return toFormError(error, formData);

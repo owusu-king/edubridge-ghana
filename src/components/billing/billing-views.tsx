@@ -59,8 +59,10 @@ export function UsageTable({ usage }: { usage: MonthUsage[] }) {
             <TH className="hidden text-right md:table-cell">Absence SMS</TH>
             <TH className="text-right">Sign-in codes</TH>
             <TH className="hidden text-right sm:table-cell">Shared codes</TH>
+            <TH className="hidden text-right md:table-cell">Other family SMS</TH>
             <TH className="hidden text-right sm:table-cell">Not delivered</TH>
-            <TH className="text-right">Charged</TH>
+            <TH className="text-right">SMS charged</TH>
+            <TH className="hidden text-right sm:table-cell">WhatsApp</TH>
           </tr>
         </THead>
         <TBody>
@@ -71,17 +73,23 @@ export function UsageTable({ usage }: { usage: MonthUsage[] }) {
               <TD className="hidden text-right tabular-nums md:table-cell">{u.absenceAlerts}</TD>
               <TD className="text-right tabular-nums">{u.codes}</TD>
               <TD className="hidden text-right tabular-nums sm:table-cell">{u.sharedCodes}</TD>
+              <TD className="hidden text-right tabular-nums md:table-cell">{u.familyMessages}</TD>
               <TD className="hidden text-right tabular-nums sm:table-cell">{u.undelivered}</TD>
               <TD className="text-right font-medium tabular-nums">
                 {u.billable.toLocaleString("en-GH", { maximumFractionDigits: 2 })}
               </TD>
+              <TD className="hidden text-right tabular-nums sm:table-cell">{u.whatsapp}</TD>
             </TR>
           ))}
         </TBody>
       </Table>
       <p className="border-t border-line px-4 py-2 text-sm text-ink-3">
-        Shared codes went to a number other schools also have on file: each school is charged an equal share.
-        Messages that could not be delivered are never charged.
+        Counted in SMS segments: a message too long for one SMS (160 characters, or 70 with symbols such as ₵)
+        counts as each part. Other family SMS are payment receipts, announcements, parent-view invitations,
+        fees-billed notices, codes that confirm online applications, consent forms and event reminders. Shared
+        codes went to a number other schools also have on file: each school is charged an equal share.
+        Messages that could not be delivered are never charged. WhatsApp: family messages that went by
+        WhatsApp instead of SMS, one each, at the WhatsApp price.
       </p>
     </TableFrame>
   );

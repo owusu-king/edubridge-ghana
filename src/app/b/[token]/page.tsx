@@ -39,9 +39,9 @@ export default async function BalanceLinkPage({ params }: { params: Promise<{ to
               <div className="flex items-start justify-between gap-4">
                 <div className="space-y-3">
                   <p className="text-sm text-ink-3">As of {formatCalendarDate(view.asOf)}</p>
-                  <ChildFacts child={view.child} />
+                  <ChildFacts currency={view.currency} child={view.child} />
                 </div>
-                <BalanceFigure pesewas={view.child.balancePesewas} size="lg" />
+                <BalanceFigure currency={view.currency} pesewas={view.child.balancePesewas} size="lg" />
               </div>
             </section>
             <p className="text-sm text-ink-2">

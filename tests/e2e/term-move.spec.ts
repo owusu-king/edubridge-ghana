@@ -7,7 +7,8 @@ test("the head teacher moves students into the next term, sees where they went, 
 }) => {
   await signIn(page, "head@example.test", `${SCHOOL.path}/classes`);
   await page.goto(`${SCHOOL.path}/classes`);
-  await page.getByRole("link", { name: "Move to another term" }).click();
+  await page.getByRole("button", { name: "More" }).click();
+  await page.getByRole("menuitem", { name: "Move to another term" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Move students to another term" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Term 1, 2026/2027 to Term 2, 2026/2027" })).toBeVisible();
   // Within a year, each class carries over as it is.

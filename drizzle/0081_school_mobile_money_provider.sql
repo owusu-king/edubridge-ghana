@@ -1,0 +1,2 @@
+ALTER TABLE "tenant_entitlements" ADD COLUMN "mobile_money_provider" text;--> statement-breakpoint
+ALTER TABLE "tenant_entitlements" ADD CONSTRAINT "tenant_entitlements_mobile_money_provider" CHECK ("tenant_entitlements"."mobile_money_provider" is null or "tenant_entitlements"."mobile_money_provider" in ('paystack', 'mock', 'none'));

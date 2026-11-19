@@ -177,7 +177,7 @@ function InviteForm({
         errors={state.fieldErrors ?? {}}
       />
       <div className="flex justify-end gap-2 border-t border-line pt-5">
-        <Button variant="secondary" onClick={onDone}>
+        <Button variant="ghost" onClick={onDone}>
           Cancel
         </Button>
         <Button type="submit" pending={pending}>
@@ -299,7 +299,7 @@ function EditForm({
         errors={state.fieldErrors ?? {}}
       />
       <div className="flex justify-end gap-2 border-t border-line pt-5">
-        <Button variant="secondary" onClick={onDone}>
+        <Button variant="ghost" onClick={onDone}>
           Cancel
         </Button>
         <Button type="submit" pending={pending}>
@@ -330,7 +330,7 @@ export function ConfirmForm({
     <form onSubmit={onSubmit} className="space-y-5">
       <ErrorMessage state={state} />
       <div className="flex justify-end gap-2">
-        <Button variant="secondary" onClick={onDone}>
+        <Button variant="ghost" onClick={onDone}>
           Cancel
         </Button>
         <Button type="submit" variant={danger ? "danger" : "primary"} pending={pending}>
@@ -410,7 +410,7 @@ function ReissueForm({ action, onDone }: { action: Action<InviteLink>; onDone: (
     <form onSubmit={onSubmit} className="space-y-5">
       <ErrorMessage state={state} />
       <div className="flex justify-end gap-2">
-        <Button variant="secondary" onClick={onDone}>
+        <Button variant="ghost" onClick={onDone}>
           Cancel
         </Button>
         <Button type="submit" pending={pending}>

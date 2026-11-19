@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { ACCOUNTANT_AUTH, linkPath, SCHOOL, signIn, waitForMessage } from "./helpers";
+import { ACCOUNTANT_AUTH, linkPath, readMailbox, SCHOOL, signIn, waitForMessage } from "./helpers";
 
 // Kojo Addo (Basic 4B) owes fees; his seeded guardian Adjoa Addo has the number +233 27 555 0133.
 // Kwame Mensah's seeded payment is receipt R000002; his guardian Grace Mensah has +233 54 555 0122.
@@ -42,6 +42,9 @@ test.describe("as the accountant", () => {
 
     // Earlier runs on the same database may have reminded Kojo today already.
     const remindedToday = (await kojo.innerText()).includes("Today");
+    // The mailbox file keeps messages from earlier runs: wait for one newer than those already there.
+    const KOJO_SMS = /Kojo's school fees balance is GHS /;
+    const before = readMailbox("+233275550133", KOJO_SMS).length;
     await kojo.getByRole("checkbox", { name: "Select Kojo Addo" }).check();
     await page.getByRole("button", { name: "Send SMS reminder (1)" }).click();
     const dialog = page.getByRole("dialog");
@@ -53,7 +56,7 @@ test.describe("as the accountant", () => {
       await expect(page.getByText("Sent 1 reminder.")).toBeVisible();
       await expect(kojo).toContainText("Today");
     }
-    const sms = await waitForMessage("+233275550133", /Kojo's school fees balance is GHS /);
+    const sms = await waitForMessage("+233275550133", KOJO_SMS, remindedToday ? 0 : before);
     expect(sms.text).not.toContain("₵");
     expect(sms.text.length).toBeLessThanOrEqual(160);
 

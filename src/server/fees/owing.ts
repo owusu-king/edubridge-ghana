@@ -1,8 +1,9 @@
 import "server-only";
+import type { StudentStatus } from "@/lib/students";
 import { and, asc, desc, eq, gte, inArray, isNull, max, sql } from "drizzle-orm";
 import { z } from "zod";
 import { todayIn } from "@/lib/format";
-import { parseCedis } from "@/lib/money";
+import { parseMoney } from "@/lib/money";
 import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
@@ -38,23 +39,24 @@ const scope = (ctx: TenantContext) => ({
   supportGrantId: ctx.support?.grantId,
 });
 
-const owingSchema = z.object({
-  classId: z.string().uuid().optional(),
-  minAmount: z
-    .string()
-    .optional()
-    .transform((text, ctx) => {
-      if (!text?.trim()) return undefined;
-      const pesewas = parseCedis(text);
-      if (pesewas === null) {
-        ctx.addIssue({ code: "custom", message: "Enter an amount like 500 or 500.50." });
-        return z.NEVER;
-      }
-      return pesewas;
-    }),
-  overdueOnly: z.boolean().default(false),
-  page: z.number().int().min(1).max(10_000).default(1),
-});
+const owingSchema = (currency: string) =>
+  z.object({
+    classId: z.string().uuid().optional(),
+    minAmount: z
+      .string()
+      .optional()
+      .transform((text, ctx) => {
+        if (!text?.trim()) return undefined;
+        const pesewas = parseMoney(text, currency);
+        if (pesewas === null) {
+          ctx.addIssue({ code: "custom", message: "Enter an amount like 500 or 500.50." });
+          return z.NEVER;
+        }
+        return pesewas;
+      }),
+    overdueOnly: z.boolean().default(false),
+    page: z.number().int().min(1).max(10_000).default(1),
+  });
 
 export interface OwingContact {
   guardianId: string;
@@ -68,7 +70,7 @@ export interface OwingRow {
   name: string;
   firstName: string;
   admissionNumber: string;
-  status: "active" | "withdrawn" | "graduated";
+  status: StudentStatus;
   className: string | null;
   balancePesewas: number;
   /** The primary contact, or another guardian with a phone when the primary has none. */
@@ -90,7 +92,7 @@ export interface OwingPage {
 
 export async function listOwing(database: Database, ctx: TenantContext, input: unknown): Promise<OwingPage> {
   assertAllowed(ctx, "fees.view");
-  const filters = owingSchema.parse(input);
+  const filters = owingSchema(ctx.tenant.currencyCode).parse(input);
   return withTenant(database, scope(ctx), async (tx) => {
     const balances = tx
       .select({
@@ -184,11 +186,12 @@ export async function contactsFor(
     .from(studentGuardians)
     .innerJoin(guardians, eq(guardians.id, studentGuardians.guardianId))
     .where(and(eq(studentGuardians.tenantId, ctx.tenant.id), inArray(studentGuardians.studentId, studentIds)))
-    .orderBy(desc(studentGuardians.isPrimary), asc(guardians.fullName));
+    // Finance messages go to the guardian marked as paying the fees (SIS-04), then the primary contact.
+    .orderBy(desc(studentGuardians.isFeePayer), desc(studentGuardians.isPrimary), asc(guardians.fullName));
   const byStudent = new Map<string, OwingContact>();
   for (const link of links) {
     const chosen = byStudent.get(link.studentId);
-    // Keep the primary contact unless they have no phone and this guardian does.
+    // Keep the first (fee payer, else primary) unless they have no phone and this guardian does.
     if (!chosen || (!chosen.phone && link.phone))
       byStudent.set(link.studentId, { guardianId: link.guardianId, name: link.name, phone: link.phone });
   }

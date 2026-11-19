@@ -4,7 +4,7 @@ import type { Route } from "next";
 import Link from "next/link";
 import { useState } from "react";
 import { axisCedis, niceTicks } from "@/lib/dashboard";
-import { formatCedis } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 
 export interface ChartWeek {
   from: string;
@@ -20,10 +20,18 @@ export interface ChartWeek {
  * Money collected per week, as columns from one baseline. Each column links to that week's payments;
  * hovering or focusing it shows the amount, and the same figures are available as a table.
  */
-export function WeeklyCollections({ weeks, caption }: { weeks: ChartWeek[]; caption: string }) {
+export function WeeklyCollections({
+  currency,
+  weeks,
+  caption,
+}: {
+  currency: string;
+  weeks: ChartWeek[];
+  caption: string;
+}) {
   const [active, setActive] = useState<number | null>(null);
   const max = Math.max(0, ...weeks.map((w) => w.totalPesewas));
-  const ticks = niceTicks(max);
+  const ticks = niceTicks(max, 4, currency);
   const top = ticks[ticks.length - 1] || 1;
   const compact = top >= 1_000_000;
   const shown = active === null ? null : weeks[active];
@@ -43,7 +51,7 @@ export function WeeklyCollections({ weeks, caption }: { weeks: ChartWeek[]; capt
               className="absolute right-0 whitespace-nowrap"
               style={{ bottom: `${(t / top) * 100}%`, transform: "translateY(50%)" }}
             >
-              {axisCedis(t, compact)}
+              {axisCedis(t, compact, currency)}
             </span>
           ))}
         </div>
@@ -52,7 +60,7 @@ export function WeeklyCollections({ weeks, caption }: { weeks: ChartWeek[]; capt
             <span
               key={t}
               aria-hidden="true"
-              className={`absolute inset-x-0 h-px ${t === 0 ? "bg-line-strong" : "bg-line"}`}
+              className={`absolute inset-x-0 h-px ${t === 0 ? "bg-line-strong" : "bg-line/60"}`}
               style={{ bottom: `${(t / top) * 100}%` }}
             />
           ))}
@@ -61,7 +69,7 @@ export function WeeklyCollections({ weeks, caption }: { weeks: ChartWeek[]; capt
               <li key={w.from} className="flex h-full min-w-0 flex-1 items-end justify-center">
                 <Link
                   href={w.href as Route}
-                  aria-label={`${w.label}: ${formatCedis(w.totalPesewas)}`}
+                  aria-label={`${w.label}: ${formatMoney(w.totalPesewas, currency)}`}
                   onPointerEnter={() => setActive(i)}
                   onPointerLeave={() => setActive((a) => (a === i ? null : a))}
                   onFocus={() => setActive(i)}
@@ -70,8 +78,8 @@ export function WeeklyCollections({ weeks, caption }: { weeks: ChartWeek[]; capt
                   className="group flex h-full w-full items-end justify-center rounded-sm px-[1px] focus-visible:outline-2 focus-visible:outline-accent"
                 >
                   <span
-                    className={`block w-full max-w-6 rounded-t-[4px] transition-opacity ${
-                      active !== null && active !== i ? "bg-accent/45" : "bg-accent"
+                    className={`block w-full max-w-6 rounded-t-[4px] transition-colors ${
+                      active !== null && active !== i ? "bg-accent/35" : "bg-accent"
                     }`}
                     // A week with nothing collected still shows a hairline on the baseline.
                     style={{
@@ -87,8 +95,8 @@ export function WeeklyCollections({ weeks, caption }: { weeks: ChartWeek[]; capt
       <div className="flex min-h-5 items-baseline justify-between gap-3 pl-[4.75rem] text-xs text-ink-3">
         {shown ? (
           <p aria-live="polite" className="text-sm text-ink-2">
-            <span className="font-semibold text-ink">{formatCedis(shown.totalPesewas)}</span> in the week{" "}
-            {shown.label}
+            <span className="font-semibold text-ink">{formatMoney(shown.totalPesewas, currency)}</span> in the
+            week {shown.label}
           </p>
         ) : (
           <>
@@ -98,7 +106,9 @@ export function WeeklyCollections({ weeks, caption }: { weeks: ChartWeek[]; capt
         )}
       </div>
       <details className="text-sm">
-        <summary className="cursor-pointer text-ink-2 hover:text-ink">Show as a table</summary>
+        <summary className="cursor-pointer text-ink-2 transition-colors hover:text-ink">
+          Show as a table
+        </summary>
         <table className="mt-2 w-full max-w-md text-left">
           <caption className="sr-only">{caption}</caption>
           <thead>
@@ -119,7 +129,7 @@ export function WeeklyCollections({ weeks, caption }: { weeks: ChartWeek[]; capt
                     {w.label}
                   </Link>
                 </td>
-                <td className="py-1.5 text-right tabular-nums">{formatCedis(w.totalPesewas)}</td>
+                <td className="py-1.5 text-right tabular-nums">{formatMoney(w.totalPesewas, currency)}</td>
               </tr>
             ))}
           </tbody>

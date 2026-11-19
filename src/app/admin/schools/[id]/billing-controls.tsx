@@ -1,27 +1,27 @@
 "use client";
 
 import { useActionState } from "react";
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { FormDialog } from "@/components/ui/form-dialog";
 import {
   BILLING_PERIOD_LABELS,
   BILLING_PERIODS,
-  FEATURE_LABELS,
-  FEATURES,
   SUBSCRIPTION_STATUS_LABELS,
   SUBSCRIPTION_STATUSES,
   type BillingPeriod,
   type SubscriptionStatus,
 } from "@/lib/plan";
 import type { FormState } from "@/web/forms";
+import { currencySymbol } from "@/lib/money";
+import { ModuleChoices } from "@/components/billing/module-choices";
+import { FormMessage } from "@/components/ui/toast";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
 
 function Message({ state }: { state: FormState }) {
   if (state.status === "idle" || !state.message) return null;
-  return <Alert tone={state.status === "success" ? "positive" : "critical"}>{state.message}</Alert>;
+  return <FormMessage state={state} />;
 }
 
 export interface EntitlementDefaults {
@@ -96,30 +96,8 @@ export function EntitlementsForm({ action, defaults }: { action: Action; default
           )}
         </Field>
       </div>
-      <fieldset className="space-y-2">
-        <legend className="text-sm font-medium text-ink">Included</legend>
-        <p className="text-sm text-ink-3">
-          Students, classes, fees, payments and receipts are always included.
-        </p>
-        {errors.features && <p className="text-sm text-critical">{errors.features}</p>}
-        <div className="grid gap-3 sm:grid-cols-2">
-          {FEATURES.map((feature) => (
-            <label key={feature} className="flex items-start gap-2 text-base text-ink">
-              <input
-                type="checkbox"
-                name="features"
-                value={feature}
-                defaultChecked={chosen.includes(feature)}
-                className="mt-1 size-4 accent-accent"
-              />
-              <span>
-                {FEATURE_LABELS[feature].name}
-                <span className="block text-sm text-ink-3">{FEATURE_LABELS[feature].description}</span>
-              </span>
-            </label>
-          ))}
-        </div>
-      </fieldset>
+      {errors.features && <p className="text-sm text-critical">{errors.features}</p>}
+      <ModuleChoices chosen={chosen} describe />
       <div className="flex justify-end">
         <Button type="submit" variant="secondary" pending={pending}>
           Save plan
@@ -139,11 +117,27 @@ export interface SubscriptionDefaults {
   /** The platform's SMS price, shown as the default. */
   platformSmsPrice: string;
   settlementAccount: string;
+  /** "" for the deployment's default. */
+  mobileMoneyProvider: string;
   notes: string | null;
+  discountPercent: string;
+  discountLabel: string;
+  discountUntil: string;
 }
 
 /** The subscription record (PLT-03): status, how often the school pays, price and dates. */
-export function SubscriptionForm({ action, defaults }: { action: Action; defaults: SubscriptionDefaults }) {
+export function SubscriptionForm({
+  currency,
+  action,
+  defaults,
+  providerOptions,
+}: {
+  currency: string;
+  action: Action;
+  defaults: SubscriptionDefaults;
+  /** Mobile Money providers platform staff can choose for this school. */
+  providerOptions: { value: string; label: string }[];
+}) {
   const [state, formAction, pending] = useActionState(action, { status: "idle" });
   const errors = state.fieldErrors ?? {};
   const v = state.values;
@@ -173,14 +167,18 @@ export function SubscriptionForm({ action, defaults }: { action: Action; default
             </Select>
           )}
         </Field>
-        <Field label="Price per period (GH₵)" description="Empty when not agreed yet." error={errors.price}>
+        <Field
+          label={`Agreed price per period (${currencySymbol(currency)})`}
+          description="Empty: priced by the plan for the school's size."
+          error={errors.price}
+        >
           {(p) => <Input {...p} name="price" inputMode="decimal" defaultValue={v?.price ?? defaults.price} />}
         </Field>
         <Field
-          label="SMS price (GH₵ per message)"
+          label={`SMS price (${currencySymbol(currency)} per message)`}
           description={
             defaults.platformSmsPrice
-              ? `Empty uses the platform price, GH₵${defaults.platformSmsPrice}.`
+              ? `Empty uses the platform price, GH₵${defaults.platformSmsPrice} (schools billed in cedis only).`
               : "Empty uses the platform price (not set yet)."
           }
           error={errors.smsPrice}
@@ -192,6 +190,25 @@ export function SubscriptionForm({ action, defaults }: { action: Action; default
               inputMode="decimal"
               defaultValue={v?.smsPrice ?? defaults.smsPrice}
             />
+          )}
+        </Field>
+        <Field
+          label="Mobile Money provider"
+          description="Prompts this school sends from now on. Prompts already sent are still checked with the provider that sent them."
+          error={errors.mobileMoneyProvider}
+        >
+          {(p) => (
+            <Select
+              {...p}
+              name="mobileMoneyProvider"
+              defaultValue={v?.mobileMoneyProvider ?? defaults.mobileMoneyProvider}
+            >
+              {providerOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
           )}
         </Field>
         <Field
@@ -227,6 +244,44 @@ export function SubscriptionForm({ action, defaults }: { action: Action; default
               name="paidUntil"
               type="date"
               defaultValue={v?.paidUntil ?? defaults.paidUntil ?? ""}
+            />
+          )}
+        </Field>
+        <Field
+          label="Discount (%)"
+          description="On the plan and add-ons. Empty for none."
+          error={errors.discountPercent}
+        >
+          {(p) => (
+            <Input
+              {...p}
+              name="discountPercent"
+              inputMode="decimal"
+              defaultValue={v?.discountPercent ?? defaults.discountPercent}
+            />
+          )}
+        </Field>
+        <Field
+          label="Discount name"
+          description="On invoices, like “Founding school”."
+          error={errors.discountLabel}
+        >
+          {(p) => (
+            <Input
+              {...p}
+              name="discountLabel"
+              maxLength={60}
+              defaultValue={v?.discountLabel ?? defaults.discountLabel}
+            />
+          )}
+        </Field>
+        <Field label="Discount until" description="Empty: until removed." error={errors.discountUntil}>
+          {(p) => (
+            <Input
+              {...p}
+              name="discountUntil"
+              type="date"
+              defaultValue={v?.discountUntil ?? defaults.discountUntil}
             />
           )}
         </Field>
@@ -267,9 +322,12 @@ const BLANK_LINE = { description: "", quantity: "", unitPrice: "" };
 
 /** Issues an invoice. Lines are prefilled from the plan and last month's SMS; blank rows are ignored. */
 export function IssueInvoiceDialog({
+  currency,
   action,
   suggestion,
 }: {
+  /** The school's currency (ISO 4217). */
+  currency: string;
   action: Action;
   suggestion: InvoiceSuggestion;
 }) {
@@ -329,7 +387,7 @@ export function IssueInvoiceDialog({
             </div>
             <fieldset className="space-y-2">
               <legend className="text-sm font-medium text-ink">
-                Lines: description, quantity, unit price (GH₵)
+                Lines: description, quantity, unit price ({currencySymbol(currency)})
               </legend>
               {errors.lines && <p className="text-sm text-critical">{errors.lines}</p>}
               {lines.map((line, i) => (
@@ -436,5 +494,79 @@ export function InvoiceActions({
         )}
       </FormDialog>
     </div>
+  );
+}
+
+/** Sets the school's plan from one of EduBridge's plans (SUB-01): modules, limits, and price in its currency. */
+export function ApplyPresetForm({
+  action,
+  presets,
+  current,
+}: {
+  action: Action;
+  presets: { id: string; name: string }[];
+  current: string | null;
+}) {
+  const [state, formAction, pending] = useActionState(action, { status: "idle" });
+  return (
+    <form action={formAction} className="space-y-3" noValidate>
+      <Message state={state} />
+      <div className="flex flex-wrap items-end gap-2">
+        <Field label="Set from a plan" error={state.fieldErrors?.presetId} className="min-w-56">
+          {(p) => (
+            <Select {...p} name="presetId" defaultValue={current ?? ""}>
+              <option value="" disabled>
+                Choose a plan
+              </option>
+              {presets.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.name}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+        <Button type="submit" variant="secondary" pending={pending}>
+          Set plan
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** Extra SMS for this month, charged on the school's next invoice. */
+export function SmsTopUpDialog({ action, currency }: { action: Action; currency: string }) {
+  return (
+    <FormDialog
+      trigger="Add SMS for this month"
+      triggerSize="sm"
+      title="Add SMS for this month"
+      description="Raises this month's allowance at once; the price is charged on the school's next invoice."
+      submitLabel="Add SMS"
+      action={action}
+    >
+      {(state) => (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Messages" error={state.fieldErrors?.messages}>
+            {(p) => (
+              <Input
+                {...p}
+                name="messages"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                defaultValue={state.values?.messages ?? "500"}
+                required
+              />
+            )}
+          </Field>
+          <Field label={`Price (${currencySymbol(currency)})`} error={state.fieldErrors?.price}>
+            {(p) => (
+              <Input {...p} name="price" inputMode="decimal" defaultValue={state.values?.price} required />
+            )}
+          </Field>
+        </div>
+      )}
+    </FormDialog>
   );
 }

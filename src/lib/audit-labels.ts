@@ -1,4 +1,4 @@
-import { formatCedis } from "./money";
+import { formatMoney } from "./money";
 
 /** Human-readable descriptions of audit actions. Unknown actions fall back to the raw key. */
 const LABELS: Record<string, string> = {
@@ -94,10 +94,89 @@ const LABELS: Record<string, string> = {
   "subscription_invoice.issued": "EduBridge invoice issued",
   "school.contacts_updated": "Contact details for families changed",
   "school.message_settings_updated": "Message settings changed",
-  "school.overview_preferences_updated": "Overview figures changed",
+  "school.overview_preferences_updated": "Command Center figures changed",
   "school.void_policy_updated": "Who may void receipts changed",
   "support.granted": "Support access allowed",
   "support.ended": "Support access ended",
+  "pickup.collector_added": "Collector added",
+  "pickup.collector_ended": "Collector ended",
+  "pickup.cancelled": "Pickup record cancelled",
+  "transport.vehicle_added": "Vehicle added",
+  "transport.vehicle_changed": "Vehicle changed",
+  "transport.vehicle_archived": "Vehicle archived",
+  "transport.vehicle_restored": "Vehicle restored",
+  "transport.route_added": "Bus route added",
+  "transport.route_changed": "Bus route changed",
+  "transport.route_archived": "Bus route archived",
+  "transport.route_restored": "Bus route restored",
+  "transport.stop_added": "Bus stop added",
+  "transport.stop_changed": "Bus stop changed",
+  "transport.stop_archived": "Bus stop archived",
+  "transport.stop_restored": "Bus stop restored",
+  "transport.fares_set": "Bus fares set",
+  "transport.fee_item_set": "Transport fee item chosen",
+  "transport.notifications_set": "Bus notifications to families changed",
+  "transport.student_assigned": "Student put on a bus route",
+  "transport.student_moved": "Student moved to another bus route",
+  "transport.student_removed": "Student taken off a bus route",
+  "inventory.item_added": "Stock item added",
+  "inventory.item_changed": "Stock item changed",
+  "inventory.item_archived": "Stock item archived",
+  "inventory.item_restored": "Stock item restored",
+  "inventory.stock_received": "Stock received",
+  "inventory.stock_issued": "Stock issued",
+  "inventory.stock_counted": "Stock count corrected",
+  "inventory.supplier_added": "Supplier added",
+  "inventory.supplier_changed": "Supplier changed",
+  "inventory.supplier_archived": "Supplier archived",
+  "inventory.supplier_restored": "Supplier restored",
+  "inventory.asset_added": "Asset added",
+  "inventory.asset_changed": "Asset details corrected",
+  "inventory.asset_moved": "Asset moved or changed hands",
+  "inventory.asset_disposed": "Asset disposed of",
+  "purchases.requested": "Purchase requested",
+  "purchases.approved": "Purchase approved",
+  "purchases.declined": "Purchase declined",
+  "purchases.cancelled": "Purchase request cancelled",
+  "purchases.received": "Purchase received",
+  "maintenance.reported": "Maintenance reported",
+  "maintenance.updated": "Maintenance request updated",
+  "library.title_added": "Book added to the library",
+  "library.title_changed": "Library book changed",
+  "library.title_archived": "Library book archived",
+  "library.title_restored": "Library book restored",
+  "library.copies_added": "Library copies added",
+  "library.copy_withdrawn": "Library copy withdrawn",
+  "library.lent": "Library book lent",
+  "library.returned": "Library book returned",
+  "library.renewed": "Library loan renewed",
+  "library.lost": "Library book lost",
+  "library.reserved": "Library book reserved",
+  "library.reservation_cancelled": "Library reservation cancelled",
+  "library.rules_set": "Library loan rules changed",
+  "library.fines_set": "Library fines changed",
+  "boarding.house_added": "Boarding house added",
+  "boarding.house_changed": "Boarding house changed",
+  "boarding.house_archived": "Boarding house archived",
+  "boarding.house_restored": "Boarding house restored",
+  "boarding.room_added": "Boarding room added",
+  "boarding.beds_added": "Beds added",
+  "boarding.bed_archived": "Bed taken out of use",
+  "boarding.staff_appointed": "House staff appointed",
+  "boarding.staff_ended": "House staff ended",
+  "boarding.boarder_placed": "Boarder given a bed",
+  "boarding.boarder_moved": "Boarder moved to another bed",
+  "boarding.boarder_removed": "Boarder taken out of boarding",
+  "boarding.signed_out": "Boarder signed out on exeat",
+  "boarding.signed_in": "Boarder signed back in",
+  "boarding.fee_item_set": "Boarding fee item chosen",
+  "command_center.summary_downloaded": "Board summary downloaded",
+  "finance_check.reviewed": "Finance check reviewed",
+  "early_warning.reviewed": "Early-warning indicator reviewed",
+  "early_warning.rules_changed": "Early-warning rules changed",
+  "support_plan.opened": "Support plan opened",
+  "support_plan.updated": "Support plan updated",
+  "support_plan.closed": "Support plan closed",
 };
 
 export function auditLabel(action: string): string {
@@ -108,7 +187,8 @@ const scalar = (v: unknown): string =>
   Array.isArray(v) ? v.join(", ") || "none" : v === null || v === undefined ? "none" : String(v);
 
 /** One-line summary of an event's metadata, e.g. "name: Old → New". */
-export function auditSummary(metadata: Record<string, unknown>): string {
+/** `currency`: the school's, for amounts recorded in minor units (fields ending in "Pesewas"). */
+export function auditSummary(metadata: Record<string, unknown>, currency = "GHS"): string {
   const parts: string[] = [];
   const changes = (metadata.changes ?? null) as Record<string, { from: unknown; to: unknown }> | null;
   if (changes) {
@@ -125,8 +205,8 @@ export function auditSummary(metadata: Record<string, unknown>): string {
       // Detailed records (e.g. each mark changed) are kept in full but summarised as a count.
       parts.push(`${key}: ${value.length}`);
     } else if (key.endsWith("Pesewas") && typeof value === "number") {
-      // Money is stored in pesewas; show it in cedis.
-      parts.push(`${key.slice(0, -"Pesewas".length)}: ${formatCedis(value)}`);
+      // Money is stored in minor units; show it in the school's currency.
+      parts.push(`${key.slice(0, -"Pesewas".length)}: ${formatMoney(value, currency)}`);
     } else if (typeof value !== "object" || Array.isArray(value) || value === null) {
       parts.push(`${key}: ${scalar(value)}`);
     }

@@ -6,7 +6,7 @@ import { useState, useTransition } from "react";
 import { Download, Upload } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Button, buttonStyles } from "@/components/ui/button";
-import { Field, Select } from "@/components/ui/field";
+import { Field, Input, Select } from "@/components/ui/field";
 import { Section } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useFormAction } from "@/components/ui/use-form-action";
@@ -104,14 +104,7 @@ export function ImportWizard({ fields, studentsHref, upload, check, runImport }:
             {uploadState.status === "error" && <Alert tone="critical">{uploadState.message}</Alert>}
             <Field label="Spreadsheet file">
               {(p) => (
-                <input
-                  {...p}
-                  name="file"
-                  type="file"
-                  accept=".xlsx,.csv"
-                  required
-                  className="block w-full text-base text-ink-2 file:mr-3 file:rounded-md file:border file:border-line-strong file:bg-surface file:px-3 file:py-2 file:text-base file:font-medium file:text-ink"
-                />
+                <Input {...p} name="file" type="file" accept=".xlsx,.csv" required className="sm:max-w-md" />
               )}
             </Field>
             <Button type="submit" pending={uploading}>

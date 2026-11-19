@@ -312,6 +312,8 @@ describe("Mobile Money database guards", () => {
         reference: method === "cash" ? undefined : "REF-1",
         paidOn: todayIn(s.tenant.timezone),
         idempotencyKey: randomUUID(),
+        // The same reference on purpose: each attempt is a separate payment.
+        confirmDuplicate: true,
       });
     const settle = (paymentId: string) =>
       asApp(s, (tx) =>

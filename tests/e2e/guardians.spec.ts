@@ -10,36 +10,33 @@ test("siblings are linked through their guardian's phone number", async ({ page 
 
   // First child, with the guardian entered while adding the student.
   await page.getByRole("button", { name: "Add student" }).click();
-  let dialog = page.getByRole("dialog", { name: "Add student" });
-  await dialog.getByLabel("First name").fill("Kwesi");
-  await dialog.getByLabel("Surname").fill(surname);
-  await dialog.getByLabel("Sex").selectOption("male");
-  const contact = dialog.getByRole("group", { name: "Primary contact (optional)" });
-  await contact.getByLabel("Full name").fill("Maame Synthetic");
-  await contact.getByLabel("Phone number").fill("0341234567");
-  await dialog.getByRole("button", { name: "Add student" }).click();
-  await expect(contact.getByText("Enter a valid phone number")).toBeVisible();
-  await expect(dialog.getByLabel("First name")).toHaveValue("Kwesi");
-  await contact.getByLabel("Phone number").fill(local);
-  await dialog.getByRole("button", { name: "Add student" }).click();
-  await expect(dialog).toBeHidden();
+  let form = page.getByRole("dialog", { name: "Add a student" });
+  await form.getByLabel("First name").fill("Kwesi");
+  await form.getByLabel("Surname").fill(surname);
+  await form.getByLabel("Sex").selectOption("male");
+  await form.getByText("Add a guardian").click();
+  await form.getByLabel("Full name").fill("Maame Synthetic");
+  await form.getByLabel("Phone number").fill("0341234567");
+  await form.getByRole("button", { name: "Add student" }).click();
+  // The number is checked before anything is saved: the reason shows on the field.
+  await expect(form.getByText("Enter a valid phone number, e.g. 024 123 4567.")).toBeVisible();
+  await form.getByLabel("Phone number").fill(local);
+  await form.getByRole("button", { name: "Add student" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: `Kwesi ${surname}` })).toBeVisible();
 
   // Second child: the same phone number links the existing guardian.
+  await page.goto(`${SCHOOL.path}/students`);
   await page.getByRole("button", { name: "Add student" }).click();
-  dialog = page.getByRole("dialog", { name: "Add student" });
-  await dialog.getByLabel("First name").fill("Esi");
-  await dialog.getByLabel("Surname").fill(surname);
-  await dialog.getByLabel("Sex").selectOption("female");
-  await dialog
-    .getByRole("group", { name: "Primary contact (optional)" })
-    .getByLabel("Full name")
-    .fill("Maame S.");
-  await dialog
-    .getByRole("group", { name: "Primary contact (optional)" })
-    .getByLabel("Phone number")
-    .fill(`+233${local.slice(1)}`);
-  await dialog.getByRole("button", { name: "Add student" }).click();
-  await expect(dialog).toBeHidden();
+  form = page.getByRole("dialog", { name: "Add a student" });
+  await form.getByLabel("First name").fill("Esi");
+  await form.getByLabel("Surname").fill(surname);
+  await form.getByLabel("Sex").selectOption("female");
+  await form.getByText("Add a guardian").click();
+  await form.getByLabel("Full name").fill("Maame S.");
+  await form.getByLabel("Phone number").fill(`+233${local.slice(1)}`);
+  await form.getByRole("button", { name: "Add student" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: `Esi ${surname}` })).toBeVisible();
+  await page.goto(`${SCHOOL.path}/students`);
 
   await page.getByRole("searchbox", { name: "Search by name or admission number" }).fill(`Esi ${surname}`);
   await page.getByRole("button", { name: "Search" }).click();

@@ -70,7 +70,7 @@ function AddYearForm({
         ))}
       </div>
       <div className="flex justify-end gap-2 border-t border-line pt-5">
-        <Button variant="secondary" onClick={onDone}>
+        <Button variant="ghost" onClick={onDone}>
           Cancel
         </Button>
         <Button type="submit" pending={pending}>
@@ -148,7 +148,7 @@ function EditTermForm({
         </Field>
       </div>
       <div className="flex justify-end gap-2 border-t border-line pt-5">
-        <Button variant="secondary" onClick={onDone}>
+        <Button variant="ghost" onClick={onDone}>
           Cancel
         </Button>
         <Button type="submit" pending={pending}>

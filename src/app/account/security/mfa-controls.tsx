@@ -103,7 +103,7 @@ export function EnableMfa() {
           alt="QR code for your authenticator app"
           width={176}
           height={176}
-          className="rounded-md border border-line bg-white p-3"
+          className="rounded-md border border-line bg-[#fff] p-3"
         />
         <div className="min-w-0 space-y-1">
           <p className="text-sm text-ink-3">Setup key</p>
@@ -200,7 +200,7 @@ function RegenerateForm({ onDone }: { onDone: () => void }) {
         )}
       </Field>
       <div className="flex justify-end gap-2">
-        <Button variant="secondary" onClick={onDone}>
+        <Button variant="ghost" onClick={onDone}>
           Cancel
         </Button>
         <Button type="submit" pending={pending}>
@@ -229,7 +229,7 @@ function DisableForm({ onDone }: { onDone: () => void }) {
         {(p) => <Input {...p} name="code" required autoComplete="one-time-code" maxLength={16} />}
       </Field>
       <div className="flex justify-end gap-2">
-        <Button variant="secondary" onClick={onDone}>
+        <Button variant="ghost" onClick={onDone}>
           Cancel
         </Button>
         <Button type="submit" variant="danger" pending={pending}>

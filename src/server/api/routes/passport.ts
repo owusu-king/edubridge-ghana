@@ -25,8 +25,10 @@ export const passportRoutes: ApiRoute[] = [
     path: "/passport/keys",
     summary: "EduBridge's public keys for verifying learner records (Ed25519, SPKI DER in base64).",
     auth: "public",
-    handler: async () => ({
-      keys: publishedKeys().filter((k) => !k.development || process.env.NODE_ENV !== "production"),
+    handler: async ({ database }) => ({
+      keys: (await publishedKeys(database)).filter(
+        (k) => !k.development || process.env.NODE_ENV !== "production",
+      ),
     }),
   },
   {

@@ -2,10 +2,11 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { PageHeader, Section } from "@/components/ui/layout";
 import { allowed } from "@/server/authz/permissions";
-import { assistantConfigured } from "@/server/assistant/model";
-import { listAssistantQueries } from "@/server/assistant/service";
+import { aiAvailability } from "@/server/ai/gateway";
+import { assistantStatus, listAssistantQueries } from "@/server/assistant/service";
 import { db } from "@/server/db/client";
 import { formatDateTime } from "@/lib/format";
+import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 import { askAssistantAction } from "./actions";
 import { AskForm } from "./ask-form";
@@ -22,7 +23,8 @@ export default async function AssistantPage({ params }: { params: Promise<{ scho
   if (!allowed(ctx, "assistant.use")) notFound();
   const everyone = allowed(ctx, "audit.view");
   const history = await listAssistantQueries(db(), ctx, { everyone });
-  const configured = assistantConfigured();
+  const status = await assistantStatus(db(), ctx);
+  const availability = status.platform && status.school ? await aiAvailability(db(), ctx, "assistant") : null;
 
   return (
     <div className="space-y-10">
@@ -30,12 +32,32 @@ export default async function AssistantPage({ params }: { params: Promise<{ scho
         title="Assistant"
         description="Ask about the school in plain words. Answers come only from the school's records that you can see yourself: published report cards, registers, fees and receipts. It reads; it never changes anything. Every question is recorded."
       />
-      {configured ? (
-        <AskForm action={askAssistantAction.bind(null, ctx.tenant.slug)} />
-      ) : (
+      {!status.platform ? (
         <p className="max-w-2xl text-base text-ink-2">
           The assistant is not switched on for EduBridge yet. Insights shows the same figures.
         </p>
+      ) : !status.school ? (
+        <p className="max-w-2xl text-base text-ink-2">
+          The Proprietor has not turned the assistant on for this school
+          {allowed(ctx, "assistant.manage") ? " (Settings, Assistant)" : ""}. Insights shows the same figures.
+        </p>
+      ) : availability && !availability.available ? (
+        <p className="max-w-2xl text-base text-ink-2">
+          {availability.message} Insights shows the same figures.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {(status.deidentified || !status.shareNames) && (
+            <p className="max-w-2xl text-sm text-ink-3">
+              Names are not sent to the assistant&apos;s provider: it sees references, and names are put back
+              here on screen.
+            </p>
+          )}
+          <AskForm
+            action={askAssistantAction.bind(null, ctx.tenant.slug)}
+            schoolPath={schoolPath(ctx.tenant.slug)}
+          />
+        </div>
       )}
       <Section
         title={everyone ? "Recent questions at this school" : "Your recent questions"}
@@ -53,6 +75,9 @@ export default async function AssistantPage({ params }: { params: Promise<{ scho
                   {everyone ? ` · ${q.askedBy}${q.bySupport ? " (EduBridge support)" : ""}` : ""} · read:{" "}
                   {q.tools.length ? q.tools.map((t) => t.name.replace(/_/g, " ")).join(", ") : "nothing"}
                   {q.status !== "answered" ? ` · ${q.status}` : ""}
+                  {q.uncheckedFigures.length > 0
+                    ? ` · figures not checked: ${q.uncheckedFigures.join(", ")}`
+                    : ""}
                 </p>
                 {q.answer && (
                   <details className="text-sm text-ink-2">

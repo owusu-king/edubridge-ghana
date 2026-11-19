@@ -23,7 +23,7 @@ const SCENARIOS = {
 
 type Scenario = (typeof SCENARIOS)[keyof typeof SCENARIOS] | "approve";
 
-const REF = /^MOCK-(approve|declined|no_answer|wrong_amount)-(\d+)-([\w-]+)$/;
+const REF = /^MOCK-(approve|declined|no_answer|wrong_amount)-(\d+)-(?:([A-Z]{3})-)?([\w-]+)$/;
 
 export const MOCK_SIGNATURE_HEADER = "x-mock-signature";
 
@@ -67,13 +67,15 @@ export function mockProvider(
   return {
     name: "mock",
     testMode: true,
+    // A stand-in: it "collects" in any currency, so schools outside Ghana can be tried end to end.
+    currencies: ["GHS", "NGN", "KES", "UGX", "TZS", "RWF", "ZMW", "ZAR", "XOF", "XAF", "USD"],
     testHint:
       "Test mode: no prompt is sent and no money moves. Numbers ending 1111 decline, 2222 never answer, 3333 report a different amount and 4444 are not registered. Any other number approves.",
     async requestPayment(request) {
       const scenario: Scenario = SCENARIOS[request.msisdn.slice(-4) as keyof typeof SCENARIOS] ?? "approve";
       if (scenario === "not_registered")
         throw new ProviderError("This number is not registered for Mobile Money.", true);
-      const providerReference = `MOCK-${scenario}-${request.amountPesewas}-${request.reference}`;
+      const providerReference = `MOCK-${scenario}-${request.amountPesewas}-${request.currency}-${request.reference}`;
       if (callbacks.send && request.callbackUrl && scenario !== "no_answer")
         sendCallback(request.callbackUrl, request.reference, providerReference);
       return { providerReference };
@@ -81,7 +83,8 @@ export function mockProvider(
     async getStatus({ providerReference }) {
       const match = providerReference ? REF.exec(providerReference) : null;
       if (!match) return { state: "not_found" };
-      const [, scenario, amount, reference] = match;
+      const [, scenario, amount, currencyCode, reference] = match;
+      const currency = currencyCode ?? "GHS";
       const transactionId = `MOCK.${reference!.replace(/-/g, "").slice(0, 12).toUpperCase()}`;
       switch (scenario as Exclude<Scenario, "not_registered">) {
         case "declined":
@@ -92,7 +95,7 @@ export function mockProvider(
           return {
             state: "successful",
             amountPesewas: Number(amount) - 100,
-            currency: "GHS",
+            currency,
             transactionId,
             completedAt: null,
           };
@@ -100,7 +103,7 @@ export function mockProvider(
           return {
             state: "successful",
             amountPesewas: Number(amount),
-            currency: "GHS",
+            currency,
             transactionId,
             completedAt: null,
           };

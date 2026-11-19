@@ -36,11 +36,14 @@ export function OfflineRegistration({
   school,
   userId,
   classes,
+  defaultClassId,
   action,
 }: {
   school: string;
   userId: string;
   classes: { id: string; name: string }[];
+  /** Preselected when coming from a class on the students list. */
+  defaultClassId?: string;
   action: SyncAction;
 }) {
   const queue = useSyncQueue({ school, userId, scope: "students:register", action });
@@ -113,7 +116,7 @@ export function OfflineRegistration({
         {error && <Alert tone="critical">{error}</Alert>}
         <div className="grid gap-5 sm:grid-cols-3">
           <Field label="First name">{(p) => <Input {...p} name="firstName" maxLength={60} required />}</Field>
-          <Field label="Other names (optional)">
+          <Field label="Other names" optional>
             {(p) => <Input {...p} name="otherNames" maxLength={60} />}
           </Field>
           <Field label="Surname">{(p) => <Input {...p} name="lastName" maxLength={60} required />}</Field>
@@ -130,12 +133,12 @@ export function OfflineRegistration({
               </Select>
             )}
           </Field>
-          <Field label="Date of birth (optional)">
+          <Field label="Date of birth" optional>
             {(p) => <Input {...p} name="dateOfBirth" type="date" />}
           </Field>
-          <Field label="Class this term (optional)">
+          <Field label="Class this term" optional>
             {(p) => (
-              <Select {...p} name="classId" defaultValue="">
+              <Select {...p} name="classId" defaultValue={defaultClassId ?? ""}>
                 <option value="">Not yet</option>
                 {classes.map((c) => (
                   <option key={c.id} value={c.id}>

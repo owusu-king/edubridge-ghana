@@ -1,4 +1,12 @@
 import "server-only";
+import { localizePhoneField, normalizePhone } from "@/lib/phone";
+import {
+  ENROLLED_STATUSES,
+  STATUS_CHANGES,
+  STUDENT_STATUS_LABELS,
+  STUDENT_STATUSES,
+  type StudentStatus,
+} from "@/lib/students";
 import { and, asc, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "../audit/record";
@@ -20,6 +28,7 @@ import {
 } from "../db/schema";
 import { addGuardianSchema, linkGuardianInTx } from "./guardian-links";
 import { DomainError, PG_UNIQUE_VIOLATION, pgConstraint, pgErrorCode } from "../errors";
+import { readPreferences } from "../tenancy/preferences";
 import type { TenantContext } from "../tenancy/service";
 
 export const PAGE_SIZE = 50;
@@ -37,6 +46,7 @@ export const studentSchema = z.object({
   firstName: z.string().trim().min(1, "Enter the first name.").max(60, "Use 60 characters or fewer."),
   otherNames: optional(z.string().trim().max(60, "Use 60 characters or fewer.")),
   lastName: z.string().trim().min(1, "Enter the surname.").max(60, "Use 60 characters or fewer."),
+  preferredName: optional(z.string().trim().max(60, "Use 60 characters or fewer.")),
   sex: z.enum(["female", "male"], { message: "Choose female or male." }),
   dateOfBirth: optional(
     z
@@ -58,7 +68,7 @@ export interface StudentRow {
   admissionNumber: string;
   fullName: string;
   sex: "female" | "male";
-  status: "active" | "withdrawn" | "graduated";
+  status: StudentStatus;
   className: string | null;
   classId: string | null;
   primaryContact: { name: string; phone: string | null } | null;
@@ -110,6 +120,8 @@ export async function visibleClassIds(tx: Transaction, ctx: TenantContext): Prom
 
 /** Next admission number (0001, 0002, …), skipping any number already used, e.g. by imported records. */
 export async function nextAdmissionNumber(tx: Transaction, tenantId: string): Promise<string> {
+  // The school's format (SIS-01): an optional prefix and a number of digits.
+  const prefs = await readPreferences(tx, tenantId);
   for (;;) {
     const [row] = await tx
       .insert(tenantCounters)
@@ -119,7 +131,7 @@ export async function nextAdmissionNumber(tx: Transaction, tenantId: string): Pr
         set: { value: sql`${tenantCounters.value} + 1` },
       })
       .returning({ value: tenantCounters.value });
-    const candidate = String(row!.value).padStart(4, "0");
+    const candidate = `${prefs.admissionPrefix ?? ""}${String(row!.value).padStart(prefs.admissionDigits, "0")}`;
     const [taken] = await tx
       .select({ id: students.id })
       .from(students)
@@ -213,7 +225,13 @@ export async function createStudent(
   options: { learnerId?: string } = {},
 ): Promise<{ id: string; admissionNumber: string }> {
   assertAllowed(ctx, "students.manage");
-  const data = createStudentSchema.parse(input);
+  // A guardian's number in the school's national form is read in its country (see localizePhoneField).
+  const guardian = (input as { guardian?: unknown } | null)?.guardian;
+  const data = createStudentSchema.parse(
+    guardian && typeof guardian === "object"
+      ? { ...(input as object), guardian: localizePhoneField(guardian, ctx.tenant.countryCode) }
+      : input,
+  );
   return withTenant(database, scope(ctx), async (tx) => {
     await assertStudentCapacity(tx, ctx.tenant.id, 1);
     let termId: string | null = null;
@@ -236,6 +254,7 @@ export async function createStudent(
         firstName: data.firstName,
         otherNames: data.otherNames ?? null,
         lastName: data.lastName,
+        preferredName: data.preferredName ?? null,
         sex: data.sex,
         dateOfBirth: data.dateOfBirth ?? null,
         admittedOn: new Date().toISOString().slice(0, 10),
@@ -263,8 +282,25 @@ export async function createStudent(
 export interface ListStudentsInput {
   q?: string;
   classId?: string;
-  status?: "active" | "withdrawn" | "graduated";
+  status?: StudentStatus;
   page?: number;
+}
+
+/**
+ * Students with a guardian whose phone matches what was typed (SIS-09): a full number in any common form
+ * (024 123 4567, +233 24 123 4567), or at least 6 consecutive digits of it.
+ */
+function guardianPhoneMatch(q: string): SQL | undefined {
+  const digits = q.replace(/\D/g, "");
+  if (digits.length < 6 || /[A-Za-z]/.test(q)) return undefined;
+  const full = normalizePhone(q);
+  const local = digits.replace(/^0/, "");
+  return sql`exists (
+    select 1 from ${studentGuardians}
+    join ${guardians} on ${guardians.id} = ${studentGuardians.guardianId}
+    where ${studentGuardians.studentId} = ${students.id}
+      and (${full ? sql`${guardians.phone} = ${full} or ` : sql``}${guardians.phone} like ${`%${local}%`})
+  )`;
 }
 
 export async function listStudents(
@@ -294,7 +330,9 @@ export async function listStudents(
           ilike(students.lastName, pattern),
           ilike(students.otherNames, pattern),
           ilike(students.admissionNumber, pattern),
+          ilike(students.preferredName, pattern),
           ilike(sql`${students.firstName} || ' ' || ${students.lastName}`, pattern),
+          guardianPhoneMatch(q),
         )!,
       );
     }
@@ -363,12 +401,17 @@ export interface StudentDetail {
   admissionNumber: string;
   firstName: string;
   otherNames: string | null;
+  preferredName: string | null;
+  /** Whether a photograph is on file. */
+  photo: boolean;
+  /** Why the student left or was suspended. */
+  statusReason: string | null;
   lastName: string;
   fullName: string;
   sex: "female" | "male";
   dateOfBirth: string | null;
   admittedOn: string | null;
-  status: "active" | "withdrawn" | "graduated";
+  status: StudentStatus;
   currentClass: { id: string; name: string } | null;
   history: { termName: string; yearName: string; className: string; levelName: string }[];
 }
@@ -412,6 +455,9 @@ export async function getStudent(
       admissionNumber: student.admissionNumber,
       firstName: student.firstName,
       otherNames: student.otherNames,
+      preferredName: student.preferredName,
+      photo: student.photoFileId !== null,
+      statusReason: student.leftReason,
       lastName: student.lastName,
       fullName: fullName(student),
       sex: student.sex,
@@ -454,6 +500,7 @@ export async function updateStudent(
     const next = {
       firstName: data.firstName,
       otherNames: data.otherNames ?? null,
+      preferredName: data.preferredName ?? null,
       lastName: data.lastName,
       sex: data.sex,
       dateOfBirth: data.dateOfBirth ?? null,
@@ -467,6 +514,7 @@ export async function updateStudent(
     for (const key of [
       "firstName",
       "otherNames",
+      "preferredName",
       "lastName",
       "sex",
       "dateOfBirth",
@@ -533,23 +581,48 @@ export async function assignClass(
 }
 
 /** Withdrawn and graduated students keep their records; they drop out of class lists and billing. */
+/**
+ * Changes a student's status (SIS-03) along the allowed transitions, with the reason recorded. Suspended
+ * students stay in their class (and are billed); students who leave (withdrawn, transferred, graduated)
+ * leave this term's class. Reactivating needs room under the plan's student limit.
+ */
 export async function setStudentStatus(
   database: Database,
   ctx: TenantContext,
   studentId: string,
-  status: "active" | "withdrawn" | "graduated",
+  status: StudentStatus,
+  reason?: string | null,
 ): Promise<void> {
   assertAllowed(ctx, "students.manage");
-  const parsed = z.enum(["active", "withdrawn", "graduated"]).parse(status);
+  const parsed = z.enum(STUDENT_STATUSES).parse(status);
+  const why = z
+    .string()
+    .trim()
+    .max(200, "Use 200 characters or fewer.")
+    .optional()
+    .nullable()
+    .parse(reason ?? null);
   await withTenant(database, scope(ctx), async (tx) => {
     const student = await loadStudent(tx, ctx, studentId);
     if (student.status === parsed) return;
-    if (parsed === "active") await assertStudentCapacity(tx, ctx.tenant.id, 1);
+    if (!STATUS_CHANGES[student.status].includes(parsed))
+      throw new DomainError(
+        "status_change_invalid",
+        `A ${STUDENT_STATUS_LABELS[student.status].toLowerCase()} student cannot become ${STUDENT_STATUS_LABELS[parsed].toLowerCase()}.`,
+        "status",
+      );
+    if (parsed === "active" && !ENROLLED_STATUSES.includes(student.status))
+      await assertStudentCapacity(tx, ctx.tenant.id, 1);
     await tx
       .update(students)
-      .set({ status: parsed, updatedAt: new Date() })
+      .set({
+        status: parsed,
+        leftReason: parsed === "active" ? null : (why ?? null),
+        statusChangedAt: new Date(),
+        updatedAt: new Date(),
+      })
       .where(eq(students.id, student.id));
-    if (parsed !== "active") {
+    if (!ENROLLED_STATUSES.includes(parsed)) {
       // Leave the current term's class so the student is not counted there.
       const termId = await currentTermId(tx, ctx.tenant.id);
       if (termId)
@@ -563,7 +636,7 @@ export async function setStudentStatus(
       action: `student.${parsed === "active" ? "reactivated" : parsed}`,
       entityType: "student",
       entityId: student.id,
-      metadata: { from: student.status, to: parsed },
+      metadata: { from: student.status, to: parsed, reason: why ?? null },
     });
   });
 }
@@ -591,7 +664,7 @@ export interface PossibleDuplicate {
   id: string;
   name: string;
   admissionNumber: string;
-  status: "active" | "withdrawn" | "graduated";
+  status: StudentStatus;
   dateOfBirth: string | null;
 }
 

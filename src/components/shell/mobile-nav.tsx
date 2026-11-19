@@ -11,13 +11,13 @@ export function MobileNav({ area }: { area: ShellArea }) {
   const [open, setOpen] = useState(false);
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
-      <Dialog.Trigger className="-ml-1.5 inline-flex size-9 items-center justify-center rounded-md text-ink-2 hover:bg-subtle hover:text-ink">
-        <Menu aria-hidden="true" className="size-5" />
+      <Dialog.Trigger className="-ml-1.5 inline-flex size-9 items-center justify-center rounded-md text-ink-2 transition-colors hover:bg-subtle hover:text-ink">
+        <Menu aria-hidden="true" className="size-5" strokeWidth={1.75} />
         <span className="sr-only">Open navigation</span>
       </Dialog.Trigger>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-ink/30" />
-        <Dialog.Content className="fixed inset-y-0 left-0 z-50 flex w-[min(20rem,85vw)] flex-col border-r border-line bg-canvas p-3 shadow-overlay focus:outline-none">
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-ink/30 data-[state=closed]:animate-fade-out data-[state=open]:animate-fade-in dark:bg-canvas/70" />
+        <Dialog.Content className="fixed inset-y-0 left-0 z-50 flex w-[min(20rem,85vw)] flex-col overflow-y-auto overscroll-contain border-r border-line bg-canvas p-3 shadow-overlay focus:outline-none data-[state=closed]:animate-drawer-out data-[state=open]:animate-drawer-in">
           <Dialog.Title className="sr-only">Navigation</Dialog.Title>
           <Dialog.Description className="sr-only">
             Move between areas of {areaTitle(area)}.
@@ -26,8 +26,8 @@ export function MobileNav({ area }: { area: ShellArea }) {
             <div className="min-w-0 flex-1">
               <ShellIdentity area={area} />
             </div>
-            <Dialog.Close className="inline-flex size-9 items-center justify-center rounded-md text-ink-2 hover:bg-subtle hover:text-ink">
-              <X aria-hidden="true" className="size-5" />
+            <Dialog.Close className="inline-flex size-9 items-center justify-center rounded-md text-ink-2 transition-colors hover:bg-subtle hover:text-ink">
+              <X aria-hidden="true" className="size-5" strokeWidth={1.75} />
               <span className="sr-only">Close navigation</span>
             </Dialog.Close>
           </div>

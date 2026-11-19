@@ -49,7 +49,7 @@ export function RequestTransferDialog({ action, schools }: { action: Action; sch
               </Field>
             </div>
             <div className="grid gap-5 sm:grid-cols-2">
-              <Field label="Date of birth (optional)" error={e.dateOfBirth}>
+              <Field label="Date of birth" optional error={e.dateOfBirth}>
                 {(p) => <Input {...p} name="dateOfBirth" type="date" defaultValue={v?.dateOfBirth} />}
               </Field>
               <Field label="Guardian's mobile number" error={e.guardianPhone}>
@@ -155,7 +155,7 @@ export function AcceptTransferDialog({
       action={action}
     >
       {(state) => (
-        <Field label="Class this term (optional)" error={state.fieldErrors?.classId}>
+        <Field label="Class this term" optional error={state.fieldErrors?.classId}>
           {(p) => (
             <Select {...p} name="classId" defaultValue={state.values?.classId ?? ""}>
               <option value="">Not yet</option>
@@ -203,7 +203,7 @@ export function ImportRecordDialog({ action, classes }: { action: Action; classe
           <Field label="Record file (.json)" error={state.fieldErrors?.file}>
             {(p) => <Input {...p} name="file" type="file" accept="application/json,.json" required />}
           </Field>
-          <Field label="Class this term (optional)" error={state.fieldErrors?.classId}>
+          <Field label="Class this term" optional error={state.fieldErrors?.classId}>
             {(p) => (
               <Select {...p} name="classId" defaultValue="">
                 <option value="">Not yet</option>

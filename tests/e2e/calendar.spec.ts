@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { SCHOOL, signIn } from "./helpers";
 
-test("the current term shows on the overview", async ({ page }) => {
+test("the current term shows on the Command Center", async ({ page }) => {
   await signIn(page, "teacher@example.test");
   await page.goto(SCHOOL.path);
   await expect(page.getByText("Term 1, 2026/2027 · 8 Sept 2026 – 18 Dec 2026")).toBeVisible();
@@ -41,10 +41,12 @@ test("a head teacher manages the academic calendar", async ({ page }) => {
   await ends.nth(2).fill(`${y + 1}-07-30`);
   await dialog.getByRole("button", { name: "Add year" }).click();
   await expect(dialog).toBeHidden();
-  const heading = page.getByRole("heading", { name: new RegExp(`^${y}/${y + 1}`) });
-  await expect(heading).toBeVisible();
-
-  const table = page.getByRole("table", { name: `Terms in ${y}/${y + 1}` });
+  // Every year sits in one table; each year's terms are a group of rows under it.
+  const table = page
+    .getByRole("table", { name: "Academic years and their terms" })
+    .getByRole("rowgroup")
+    .filter({ hasText: `${y}/${y + 1}` });
+  await expect(table.getByRole("cell", { name: new RegExp(`^${y}/${y + 1}`) })).toBeVisible();
   await table.getByRole("button", { name: "Edit Term 3" }).click();
   await page
     .getByRole("dialog")
@@ -52,5 +54,6 @@ test("a head teacher manages the academic calendar", async ({ page }) => {
     .fill(`${y + 1}-08-06`);
   await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
   await expect(page.getByRole("dialog")).toBeHidden();
-  await expect(table.getByRole("cell", { name: `6 Aug ${y + 1}` })).toBeVisible();
+  // Exact: the year's own row also shows its whole span, which ends on the same day.
+  await expect(table.getByRole("cell", { name: `6 Aug ${y + 1}`, exact: true })).toBeVisible();
 });

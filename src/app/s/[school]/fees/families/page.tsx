@@ -1,11 +1,14 @@
-import type { Metadata } from "next";
+import type { Metadata, Route } from "next";
 import Link from "next/link";
 import { Users } from "lucide-react";
+import { buttonStyles } from "@/components/ui/button";
+import { ExpandingSearch } from "@/components/ui/expanding-search";
 import { EmptyState, Section } from "@/components/ui/layout";
+import { PageNav } from "@/components/ui/page-nav";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { db } from "@/server/db/client";
 import { allowed } from "@/server/authz/permissions";
-import { formatPercent, listFamilies } from "@/server/fees/concessions";
+import { FAMILIES_PAGE_SIZE, formatPercent, listFamilies } from "@/server/fees/concessions";
 import { getSiblingRule, previewSiblingDiscounts } from "@/server/fees/siblings";
 import { listFeeItems } from "@/server/fees/structure";
 import { FIRST_CHILD_LABELS, ordinalPlace } from "@/lib/siblings";
@@ -17,17 +20,36 @@ import { ApplySiblingDiscounts, SiblingRuleForm } from "./sibling-controls";
 
 export const metadata: Metadata = { title: "Fees · Families" };
 
-export default async function FamiliesPage({ params }: { params: Promise<{ school: string }> }) {
-  const { school } = await params;
+/** Waiting changes shown before applying; the rest are counted (a new rule can change hundreds at once). */
+const PENDING_SHOWN = 50;
+
+type Search = { q?: string; page?: string };
+
+export default async function FamiliesPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ school: string }>;
+  searchParams: Promise<Search>;
+}) {
+  const [{ school }, search] = await Promise.all([params, searchParams]);
   const { ctx } = await requireTenant(school);
   const slug = ctx.tenant.slug;
   const canManage = allowed(ctx, "fees.manage") && ctx.campusIds === null;
-  const [families, rule, changes, items] = await Promise.all([
-    listFamilies(db(), ctx),
+  const q = search.q?.trim().slice(0, 60) || undefined;
+  const requestedPage = Math.max(1, Math.min(10_000, Number.parseInt(search.page ?? "1", 10) || 1));
+  const [result, rule, changes, items] = await Promise.all([
+    listFamilies(db(), ctx, { q, page: requestedPage }),
     getSiblingRule(db(), ctx),
     previewSiblingDiscounts(db(), ctx),
     canManage ? listFeeItems(db(), ctx) : Promise.resolve([]),
   ]);
+  const { families } = result;
+  const pages = Math.max(1, Math.ceil(result.total / FAMILIES_PAGE_SIZE));
+  const pageHref = (page: number) => {
+    const qs = new URLSearchParams({ ...(q ? { q } : {}), page: String(page) });
+    return `${schoolPath(slug, "fees/families")}?${qs.toString()}` as Route;
+  };
   const pending = changes.filter((c) => c.change !== "keep");
   const count = (kind: string) => changes.filter((c) => c.change === kind).length;
   const describe = (c: (typeof changes)[number]) =>
@@ -86,7 +108,7 @@ export default async function FamiliesPage({ params }: { params: Promise<{ schoo
                   </tr>
                 </THead>
                 <TBody>
-                  {pending.map((c) => (
+                  {pending.slice(0, PENDING_SHOWN).map((c) => (
                     <TR key={c.studentId}>
                       <TD className="text-ink">{c.name || c.admissionNumber || "A former student"}</TD>
                       <TD className="hidden sm:table-cell">
@@ -98,19 +120,54 @@ export default async function FamiliesPage({ params }: { params: Promise<{ schoo
                 </TBody>
               </Table>
             </TableFrame>
+            {pending.length > PENDING_SHOWN && (
+              <p className="text-sm text-ink-3">
+                The first {PENDING_SHOWN} of {pending.length} changes. All {pending.length} are applied
+                together.
+              </p>
+            )}
           </div>
         )}
       </Section>
       <Section
         title="Families with more than one child"
-        description="Children who share a parent or guardian. A discount for one child can also be added by hand from the child's page."
+        description={`${
+          q && result.total > 0
+            ? `${result.total} ${result.total === 1 ? "family matches" : "families match"} the search.`
+            : result.total > 0
+              ? `${result.total} ${result.total === 1 ? "family" : "families"} whose children share a parent or guardian.`
+              : "Children who share a parent or guardian."
+        } A discount for one child can also be added by hand from the child's page.`}
       >
-        {families.length === 0 ? (
-          <EmptyState
-            icon={<Users />}
-            title="No families with more than one child"
-            description="Families appear here when two or more active students share a guardian."
+        <div role="search" aria-label="Find families" className="flex items-center justify-end gap-2">
+          <form id="family-search" method="get" />
+          {q && (
+            <Link href={schoolPath(slug, "fees/families")} className={buttonStyles("ghost")}>
+              Clear
+            </Link>
+          )}
+          <ExpandingSearch
+            form="family-search"
+            defaultValue={q}
+            placeholder="Guardian, phone or child"
+            label="Search by guardian, phone, child or admission number"
+            buttonLabel="Find families"
           />
+        </div>
+        {families.length === 0 ? (
+          q ? (
+            <EmptyState
+              icon={<Users />}
+              title="No families match"
+              description="Try a guardian's name or phone number, or a child's name or admission number."
+            />
+          ) : (
+            <EmptyState
+              icon={<Users />}
+              title="No families with more than one child"
+              description="Families appear here when two or more active students share a guardian."
+            />
+          )
         ) : (
           <div className="space-y-6">
             {families.map((family) => (
@@ -166,6 +223,7 @@ export default async function FamiliesPage({ params }: { params: Promise<{ schoo
                 </TableFrame>
               </section>
             ))}
+            <PageNav label="Family pages" page={result.page} pages={pages} href={pageHref} />
           </div>
         )}
       </Section>

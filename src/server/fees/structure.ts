@@ -1,16 +1,27 @@
 import "server-only";
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { parseCedis, sumPesewas } from "@/lib/money";
+import { parseMoney, sumPesewas } from "@/lib/money";
 import { recordAudit } from "../audit/record";
 import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
-import { academicYears, classes, feeItems, feeStructureLines, levels, terms } from "../db/schema";
+import {
+  academicYears,
+  classes,
+  FEE_CATEGORIES,
+  feeItems,
+  feeStructureLines,
+  levels,
+  studentFeeOptions,
+  terms,
+} from "../db/schema";
 import { DomainError, PG_UNIQUE_VIOLATION, pgErrorCode } from "../errors";
 import { canAccessCampus, type TenantContext } from "../tenancy/service";
-import { assertCanManageSchoolFees } from "./access";
+import { assertCanManageSchoolFees, loadFinanceStudent } from "./access";
 import { resolveFees, totalFees } from "./resolve";
+import { transportFeeItemId } from "../transport/billing";
+import { boardingFeeItemId } from "../boarding/billing";
 
 /**
  * Fee structures: what each level (and optionally each class) is charged per term, by fee item.
@@ -22,7 +33,25 @@ export interface FeeItem {
   id: string;
   name: string;
   status: "active" | "archived";
+  category: FeeCategory;
+  /** Billed only to students who take it (e.g. transport). */
+  optional: boolean;
 }
+
+export type FeeCategory = (typeof FEE_CATEGORIES)[number];
+
+export const FEE_CATEGORY_LABELS: Record<FeeCategory, string> = {
+  tuition: "Tuition",
+  admission: "Admission",
+  examination: "Examination",
+  transport: "Transport",
+  boarding: "Boarding",
+  feeding: "Feeding",
+  uniform: "Uniform",
+  books: "Books and stationery",
+  levy: "Levies and dues",
+  other: "Other",
+};
 
 export interface FeeTerm {
   id: string;
@@ -80,7 +109,13 @@ export async function listFeeItems(database: Database, ctx: TenantContext): Prom
 
 function selectItems(tx: Transaction, ctx: TenantContext): Promise<FeeItem[]> {
   return tx
-    .select({ id: feeItems.id, name: feeItems.name, status: feeItems.status })
+    .select({
+      id: feeItems.id,
+      name: feeItems.name,
+      status: feeItems.status,
+      category: feeItems.category,
+      optional: feeItems.optional,
+    })
     .from(feeItems)
     .where(eq(feeItems.tenantId, ctx.tenant.id))
     .orderBy(asc(feeItems.sequence), asc(feeItems.name));
@@ -166,6 +201,131 @@ export async function renameFeeItem(
       metadata: { name },
     });
   }).catch(duplicateName);
+}
+
+const detailsSchema = z.object({
+  category: z.enum(FEE_CATEGORIES, { message: "Choose a category." }),
+  optional: z.boolean(),
+});
+
+/** Sets an item's category (for reports) and whether it is optional (billed only to students who take it). */
+export async function setFeeItemDetails(
+  database: Database,
+  ctx: TenantContext,
+  itemId: string,
+  input: unknown,
+): Promise<void> {
+  assertCanManageSchoolFees(ctx);
+  const data = detailsSchema.parse(input);
+  await withTenant(database, scope(ctx), async (tx) => {
+    const [item] = await tx
+      .update(feeItems)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(eq(feeItems.tenantId, ctx.tenant.id), eq(feeItems.id, itemId)))
+      .returning({ name: feeItems.name });
+    if (!item) throw new DomainError("not_found", "This fee item no longer exists.");
+    await recordAudit(tx, {
+      tenantId: ctx.tenant.id,
+      actorUserId: ctx.userId,
+      action: "fee_item.details_changed",
+      entityType: "fee_item",
+      entityId: itemId,
+      metadata: { name: item.name, ...data },
+    });
+  });
+}
+
+export interface StudentFeeOption {
+  feeItemId: string;
+  name: string;
+  takes: boolean;
+}
+
+/** The school's optional items and whether this student takes each. */
+export async function listStudentFeeOptions(
+  database: Database,
+  ctx: TenantContext,
+  studentId: string,
+): Promise<StudentFeeOption[]> {
+  assertAllowed(ctx, "fees.view");
+  return withTenant(database, scope(ctx), async (tx) => {
+    if (!(await loadFinanceStudent(tx, ctx, studentId))) return [];
+    // While Transport decides who pays the transport item, it is chosen there, not here (TRN-02b).
+    const transportItem = await transportFeeItemId(tx, ctx);
+    const boardingItem = await boardingFeeItemId(tx, ctx);
+    const rows = await tx
+      .select({
+        feeItemId: feeItems.id,
+        name: feeItems.name,
+        takes: sql<boolean>`exists (select 1 from ${studentFeeOptions} o where o.student_id = ${studentId} and o.fee_item_id = ${feeItems.id})`,
+      })
+      .from(feeItems)
+      .where(
+        and(eq(feeItems.tenantId, ctx.tenant.id), eq(feeItems.optional, true), eq(feeItems.status, "active")),
+      )
+      .orderBy(asc(feeItems.sequence));
+    return rows.filter((r) => r.feeItemId !== transportItem && r.feeItemId !== boardingItem);
+  });
+}
+
+/** Records that a student takes (or stops taking) an optional item; it applies from the next billing. */
+export async function setStudentFeeOption(
+  database: Database,
+  ctx: TenantContext,
+  studentId: string,
+  input: unknown,
+): Promise<void> {
+  assertAllowed(ctx, "fees.manage");
+  const data = z.object({ feeItemId: z.string().uuid(), takes: z.boolean() }).parse(input);
+  await withTenant(database, scope(ctx), async (tx) => {
+    const student = await loadFinanceStudent(tx, ctx, studentId);
+    if (!student) throw new DomainError("student_not_found", "Student not found.");
+    const [item] = await tx
+      .select({ name: feeItems.name })
+      .from(feeItems)
+      .where(
+        and(
+          eq(feeItems.tenantId, ctx.tenant.id),
+          eq(feeItems.id, data.feeItemId),
+          eq(feeItems.optional, true),
+        ),
+      );
+    if (!item) throw new DomainError("not_optional", "That item is not optional.");
+    if ((await transportFeeItemId(tx, ctx)) === data.feeItemId)
+      throw new DomainError(
+        "transport_item",
+        "Transport is charged from the student's route. Put them on a route under Transport.",
+      );
+    if ((await boardingFeeItemId(tx, ctx)) === data.feeItemId)
+      throw new DomainError(
+        "boarding_item",
+        "Boarding is charged to boarders. Give them a bed under Boarding.",
+      );
+    if (data.takes)
+      await tx
+        .insert(studentFeeOptions)
+        .values({
+          tenantId: ctx.tenant.id,
+          studentId: student.id,
+          feeItemId: data.feeItemId,
+          addedByUserId: ctx.userId,
+        })
+        .onConflictDoNothing();
+    else
+      await tx
+        .delete(studentFeeOptions)
+        .where(
+          and(eq(studentFeeOptions.studentId, student.id), eq(studentFeeOptions.feeItemId, data.feeItemId)),
+        );
+    await recordAudit(tx, {
+      tenantId: ctx.tenant.id,
+      actorUserId: ctx.userId,
+      action: data.takes ? "fees.optional_item_added" : "fees.optional_item_removed",
+      entityType: "student",
+      entityId: student.id,
+      metadata: { item: item.name },
+    });
+  });
 }
 
 /** Archived items keep their history but are no longer offered in new fee structures. */
@@ -290,11 +450,11 @@ export interface LevelFeesInput {
 export const levelAmountField = (itemId: string) => `amount:${itemId}`;
 export const classAmountField = (classId: string, itemId: string) => `class:${classId}:${itemId}`;
 
-function parseAmount(text: string | undefined, field: string): number | null {
+function parseAmount(text: string | undefined, field: string, currency: string): number | null {
   if (text === undefined || text.trim() === "") return null;
-  const pesewas = parseCedis(text);
+  const pesewas = parseMoney(text, currency);
   if (pesewas === null)
-    throw new DomainError("invalid_amount", "Enter an amount in cedis, like 450 or 450.50.", field);
+    throw new DomainError("invalid_amount", "Enter an amount, like 450 or 450.50.", field);
   return pesewas;
 }
 
@@ -342,7 +502,7 @@ export async function saveLevelFees(
     for (const [itemId, text] of Object.entries(input.amounts)) {
       if (!activeItems.has(itemId))
         throw new DomainError("unknown_item", "A fee item is no longer available.");
-      const amount = parseAmount(text, levelAmountField(itemId));
+      const amount = parseAmount(text, levelAmountField(itemId), ctx.tenant.currencyCode);
       if (amount !== null) rows.push({ feeItemId: itemId, classId: null, amountPesewas: amount });
     }
     for (const [classId, byItem] of Object.entries(input.classAmounts)) {
@@ -351,7 +511,7 @@ export async function saveLevelFees(
       for (const [itemId, text] of Object.entries(byItem)) {
         if (!activeItems.has(itemId))
           throw new DomainError("unknown_item", "A fee item is no longer available.");
-        const amount = parseAmount(text, classAmountField(classId, itemId));
+        const amount = parseAmount(text, classAmountField(classId, itemId), ctx.tenant.currencyCode);
         if (amount !== null) rows.push({ feeItemId: itemId, classId, amountPesewas: amount });
       }
     }

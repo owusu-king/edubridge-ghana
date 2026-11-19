@@ -1,5 +1,5 @@
 import "server-only";
-import type { AssistantModel } from "../../assistant/model";
+import type { AiProvider } from "../../ai/types";
 import { askAssistant, listAssistantQueries } from "../../assistant/service";
 import {
   getAttendanceInsights,
@@ -38,12 +38,13 @@ export const intelligenceRoutes: ApiRoute[] = [
     summary:
       "Ask the school assistant a question: { question }. Answers come only from records the caller may see.",
     auth: "school",
+    module: "assistant",
     handler: async ({ database, ctx, request, deps }) =>
       askAssistant(
         database,
         ctx,
         await readJson(request, 8 * 1024),
-        (deps.assistantModel as AssistantModel) ?? null,
+        deps.aiProvider ? { provider: deps.aiProvider as AiProvider } : null,
       ),
   },
   {
@@ -52,6 +53,7 @@ export const intelligenceRoutes: ApiRoute[] = [
     summary:
       "Recent questions: the caller's own, or everyone's (?everyone=1) for those who see the audit log.",
     auth: "school",
+    module: "assistant",
     handler: async ({ database, ctx, url }) => ({
       questions: await listAssistantQueries(database, ctx, {
         everyone: url.searchParams.get("everyone") === "1",

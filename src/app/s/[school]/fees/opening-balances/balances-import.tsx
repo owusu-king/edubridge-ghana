@@ -9,17 +9,20 @@ import { Button, buttonStyles } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useFormAction } from "@/components/ui/use-form-action";
-import { formatCedis } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import type { ParsedFile } from "@/server/imports/students";
 import type { FormState } from "@/web/forms";
 import type { CheckedFile, ImportResult } from "./actions";
 
 export function BalancesImport({
+  currency,
   check,
   runImport,
   defaultAsOf,
   accountsHref,
 }: {
+  /** The school's currency (ISO 4217). */
+  currency: string;
   check: (prev: FormState<CheckedFile>, formData: FormData) => Promise<FormState<CheckedFile>>;
   runImport: (parsed: ParsedFile, asOf: string) => Promise<ImportResult>;
   defaultAsOf: string;
@@ -65,7 +68,7 @@ export function BalancesImport({
         )}
         <div className="grid gap-5 sm:grid-cols-2">
           <Field label="Spreadsheet (.xlsx or .csv)" error={state.fieldErrors?.file}>
-            {(p) => <Input {...p} name="file" type="file" accept=".xlsx,.csv" required className="pt-2" />}
+            {(p) => <Input {...p} name="file" type="file" accept=".xlsx,.csv" required />}
           </Field>
           <Field label="Balances as of" description="Usually the day before this term began.">
             {(p) => (
@@ -87,8 +90,8 @@ export function BalancesImport({
           <ul className="space-y-1 text-base text-ink-2">
             <li>
               <span className="font-medium text-ink">{checked.check.ready.length}</span> balances ready to
-              record: {formatCedis(checked.check.owedPesewas)} owed and{" "}
-              {formatCedis(checked.check.creditPesewas)} in credit.
+              record: {formatMoney(checked.check.owedPesewas, currency)} owed and{" "}
+              {formatMoney(checked.check.creditPesewas, currency)} in credit.
             </li>
             {checked.check.alreadySet > 0 && (
               <li>

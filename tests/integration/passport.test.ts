@@ -71,7 +71,7 @@ describe("learner records", () => {
     expect(await verifyLearnerPackage(conn.app, forged)).toMatchObject({ status: "invalid" });
     // Keys are sorted before signing, so the order of fields in the file does not matter.
     const reordered = JSON.parse(canonicalJson(pkg)) as typeof pkg;
-    expect(checkSignature(reordered).status).toBe("valid");
+    expect((await checkSignature(conn.app, reordered)).status).toBe("valid");
 
     // The issuing school can revoke a record issued in error.
     const [row] = await asSchool(from, (tx) =>
@@ -178,7 +178,7 @@ describe("transfers between schools", () => {
 
     await approveTransfer(conn.app, from.head, id);
     const [left] = await asSchool(from, (tx) => tx.select().from(students).where(eq(students.id, ama)));
-    expect(left).toMatchObject({ status: "withdrawn", leftReason: `Transferred to ${to.tenant.name}` });
+    expect(left).toMatchObject({ status: "transferred", leftReason: `Transferred to ${to.tenant.name}` });
 
     const joined = await acceptTransfer(conn.app, to.head, id, { classId: to.classA });
     expect(await learnerOf(to, joined.studentId)).toBe(await learnerOf(from, ama));

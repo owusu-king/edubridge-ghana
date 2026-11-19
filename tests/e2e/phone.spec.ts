@@ -6,6 +6,8 @@ test("a member adds a phone number, signs in with it and recovers their password
   page,
   browser,
 }) => {
+  // A long journey with two SMS waits: on a busy machine it needs more than the default 30 seconds.
+  test.setTimeout(60_000);
   const id = randomUUID().slice(0, 8);
   const email = `phone-${id}@example.test`;
   const local = `024${String(randomInt(0, 10_000_000)).padStart(7, "0")}`;
@@ -44,8 +46,12 @@ test("a member adds a phone number, signs in with it and recovers their password
     member.getByText(`+233 ${local.slice(1, 3)} ${local.slice(3, 6)} ${local.slice(6)}`),
   ).toBeVisible();
 
-  // Sign in with the phone number in local format.
+  // Sign in with the phone number in local format (once the sign-in page has loaded).
   await member.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect(member).toHaveURL(/\/login/);
+  // On a busy machine the page can still be settling after the redirect: wait, so the form is not reset.
+  await member.waitForLoadState("networkidle");
+  await expect(member.getByRole("button", { name: "Sign in" })).toBeEnabled();
   await member.getByLabel("Email or phone number").fill(local);
   await member.getByLabel("Password").fill("a-long-synthetic-password");
   await member.getByRole("button", { name: "Sign in" }).click();
@@ -63,6 +69,8 @@ test("a member adds a phone number, signs in with it and recovers their password
   await member.getByLabel("New password").fill("another-synthetic-password");
   await member.getByRole("button", { name: "Set new password" }).click();
   await expect(member.getByText("Your password has been changed.")).toBeVisible();
+  await expect(member).toHaveURL(/\/login\?reset=1/);
+  await member.waitForLoadState("networkidle");
   await member.getByLabel("Email or phone number").fill(e164);
   await member.getByLabel("Password").fill("another-synthetic-password");
   await member.getByRole("button", { name: "Sign in" }).click();

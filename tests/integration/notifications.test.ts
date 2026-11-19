@@ -13,6 +13,7 @@ function fakeProviders(behaviour: () => Promise<{ messageId: string }>) {
   const providers: Providers = {
     email: { name: "fake", sendEmail },
     sms: { name: "fake", sendSms: vi.fn(behaviour) },
+    push: { name: "fake", sendPush: vi.fn(behaviour) },
   };
   return { providers, sendEmail };
 }

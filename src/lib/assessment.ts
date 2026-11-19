@@ -1,3 +1,5 @@
+import type { ReportCardStyle } from "./report-styles";
+
 /**
  * Assessment arithmetic: components and weights, grade bands, subject totals, class positions. Pure and
  * framework-free, shared by the server (report cards, PDFs) and the score sheet (live totals).
@@ -22,6 +24,8 @@ export interface GradeBand {
   min: number;
   grade: string;
   remark: string;
+  /** Grade points in hundredths (A = 400 for 4.00), for schools that report a GPA; absent otherwise. */
+  points?: number | null;
 }
 
 export const MAX_COMPONENTS = 6;
@@ -58,6 +62,12 @@ export function bandProblems(bands: readonly GradeBand[]): string[] {
     if (!Number.isInteger(b.min) || b.min < 0 || b.min > 100)
       problems.push(`Lowest marks must be whole numbers from 0 to 100 (grade ${b.grade}).`);
     if (mins.has(b.min)) problems.push(`Two grades start at ${b.min}.`);
+    if (
+      b.points !== undefined &&
+      b.points !== null &&
+      (!Number.isInteger(b.points) || b.points < 0 || b.points > 1000)
+    )
+      problems.push(`Grade points must be from 0 to 10, with at most two decimals (grade ${b.grade}).`);
     mins.add(b.min);
   }
   if (bands.length > 0 && !mins.has(0))
@@ -156,6 +166,11 @@ export interface StudentResult {
   position: number | null;
   /** Subjects with every component scored. */
   graded: number;
+  /**
+   * Grade point average in hundredths, over graded subjects, when every graded subject's grade carries points
+   * (otherwise null). Unweighted: every subject counts once.
+   */
+  gpa: number | null;
 }
 
 /** Results for a whole class: every student's subjects, totals, grades and positions. */
@@ -214,6 +229,7 @@ export function classResults(input: {
     });
     const total = overall.get(studentId) ?? null;
     results.set(studentId, {
+      gpa: gradePointAverage(subjectResults, bands),
       studentId,
       subjects: subjectResults,
       total,
@@ -223,6 +239,22 @@ export function classResults(input: {
     });
   }
   return results;
+}
+
+/** Mean grade points of graded subjects, in hundredths rounded half up; null without points or grades. */
+export function gradePointAverage(
+  subjects: readonly Pick<SubjectResult, "total">[],
+  bands: readonly GradeBand[],
+): number | null {
+  const points: number[] = [];
+  for (const s of subjects) {
+    if (s.total === null) continue;
+    const p = bandFor(bands, s.total)?.points;
+    if (p === undefined || p === null) return null;
+    points.push(p);
+  }
+  if (points.length === 0) return null;
+  return Math.floor(points.reduce((a, b) => a + b, 0) / points.length + 0.5 + 1e-9);
 }
 
 export interface ReportRemarks {
@@ -247,8 +279,21 @@ export interface ReportCardSnapshot {
   components: AssessmentComponent[];
   bands: GradeBand[];
   showPositions: boolean;
-  subjects: Omit<SubjectResult, "subjectId">[];
-  overall: { total: number | null; average: number | null; position: number | null; graded: number };
+  subjects: (Omit<SubjectResult, "subjectId"> & {
+    /** The subject teacher's comment for this student (absent on cards published before comments existed). */
+    comment?: string | null;
+    /** Who teaches the subject in the class. */
+    teacher?: string | null;
+  })[];
+  overall: {
+    total: number | null;
+    average: number | null;
+    position: number | null;
+    graded: number;
+    gpa?: number | null;
+  };
+  /** The layout it was published in (absent on earlier cards, which print as the GES terminal report). */
+  style?: ReportCardStyle;
   attendance: { present: number | null; open: number | null };
   remarks: ReportRemarks;
   classTeacherName: string | null;

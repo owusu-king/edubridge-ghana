@@ -1,3 +1,4 @@
+import { getDocumentLogo } from "@/server/tenancy/branding";
 import { db } from "@/server/db/client";
 import { getReceipt } from "@/server/fees/payments";
 import { requireTenant } from "@/web/auth";
@@ -15,6 +16,12 @@ export async function GET(
   const { ctx } = await requireTenant(school);
   const receipt = await getReceipt(db(), ctx, id);
   if (!receipt) return new Response("Not found", { status: 404 });
-  const pdf = await renderReceiptPdf({ receipt, schoolName: ctx.tenant.name, timeZone: ctx.tenant.timezone });
+  const pdf = await renderReceiptPdf({
+    receipt,
+    schoolName: ctx.tenant.name,
+    currency: ctx.tenant.currencyCode,
+    logo: await getDocumentLogo(db(), ctx.tenant.id),
+    timeZone: ctx.tenant.timezone,
+  });
   return pdfResponse(pdf, `receipt-${receipt.receiptNumber}.pdf`);
 }

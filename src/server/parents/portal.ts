@@ -1,7 +1,10 @@
 import "server-only";
+import type { StudentStatus } from "@/lib/students";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
+import { schoolLogoUrl } from "@/lib/branding";
 import { todayIn } from "@/lib/format";
+import { readBranding } from "../tenancy/branding";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import { readSchoolContacts, type SchoolContacts } from "../messages/announcements";
@@ -23,6 +26,10 @@ import { readStudentAccount, type StudentAccount } from "../fees/ledger";
 import { readPaymentPlan, type PaymentPlan } from "../fees/payment-plans";
 import { readReceipt, type PaymentMethod, type Receipt } from "../fees/payments";
 import { fullName } from "../students/service";
+import { moduleActive } from "../entitlements/service";
+import { readParentTransport, type ParentTransport } from "../transport/trips";
+import { readParentLibrary } from "../library/loans";
+import { readParentBoarding } from "../boarding/boarders";
 import { schoolBySlug, schoolsForPhone, type ParentSchoolRef } from "./schools";
 
 /**
@@ -40,7 +47,7 @@ export interface ChildSummary {
   name: string;
   firstName: string;
   className: string | null;
-  status: "active" | "withdrawn" | "graduated";
+  status: StudentStatus;
   balancePesewas: number;
   lastPayment: { paidOn: string; amountPesewas: number } | null;
   /** The next unpaid instalment of an active payment plan, with what is left to pay on it. */
@@ -51,6 +58,10 @@ export interface ChildSummary {
 export interface ParentSchool {
   slug: string;
   name: string;
+  /** The school's logo (TEN-04), or null. */
+  logoUrl: string | null;
+  /** The school's currency (ISO 4217). */
+  currency: string;
   children: ChildSummary[];
 }
 
@@ -142,14 +153,16 @@ export async function listParentChildren(database: Database, phone: string): Pro
   const schools = await schoolsForPhone(database, phone);
   const result: ParentSchool[] = [];
   for (const school of schools) {
-    const children = await withTenant(database, parentScope(school.id), async (tx) => {
+    const { children, logoUrl } = await withTenant(database, parentScope(school.id), async (tx) => {
       const today = todayIn(school.timezone);
       const rows = await linkedStudents(tx, school.id, phone);
       const summaries: ChildSummary[] = [];
       for (const row of rows) summaries.push(await readChildSummary(tx, school.id, row, today));
-      return summaries;
+      const { logoFileId } = await readBranding(tx, school.id);
+      return { children: summaries, logoUrl: schoolLogoUrl(school.slug, logoFileId) };
     });
-    if (children.length > 0) result.push({ slug: school.slug, name: school.name, children });
+    if (children.length > 0)
+      result.push({ slug: school.slug, name: school.name, logoUrl, currency: school.currencyCode, children });
   }
   return result;
 }
@@ -165,6 +178,7 @@ export interface ChildPayment {
 
 export interface ParentChildDetail {
   school: ParentSchoolRef;
+  logoUrl: string | null;
   summary: ChildSummary;
   admissionNumber: string;
   account: StudentAccount;
@@ -176,6 +190,12 @@ export interface ParentChildDetail {
   /** This term's attendance from the registers, or null before any register (or out of term). */
   attendance: Awaited<ReturnType<typeof readStudentAttendance>>;
   contacts: SchoolContacts | null;
+  /** The child's school bus this term and today's trips (TRN-03b), when the school uses Transport. */
+  transport: ParentTransport | null;
+  /** Books the child has on loan from the school library, when the school uses it (LIB-03). */
+  libraryBooks: { title: string; dueOn: string; daysLate: number }[] | null;
+  /** The child's house, room and bed this term, and an open exeat (BRD-05). */
+  boarding: Awaited<ReturnType<typeof readParentBoarding>>;
 }
 
 /** One child's account, plan and receipts, or null when the number does not reach the child. */
@@ -207,6 +227,7 @@ export async function getParentChild(
       .orderBy(desc(payments.paidOn), desc(payments.recordedAt));
     return {
       school,
+      logoUrl: schoolLogoUrl(school.slug, (await readBranding(tx, school.id)).logoFileId),
       summary: await readChildSummary(tx, school.id, student, today),
       admissionNumber: student.admissionNumber,
       account: await readStudentAccount(tx, school.id, student),
@@ -215,7 +236,40 @@ export async function getParentChild(
       reportCards: await readPublishedReportCards(tx, school.id, student.id),
       attendance: await readStudentAttendance(tx, school.id, student.id, today),
       contacts: await readSchoolContacts(tx, school.id),
+      transport: (await moduleActive(tx, school.id, "transport"))
+        ? await readParentTransport(tx, school.id, student.id, today)
+        : null,
+      libraryBooks: (await moduleActive(tx, school.id, "library"))
+        ? await readParentLibrary(tx, school.id, student.id, today)
+        : null,
+      boarding: (await moduleActive(tx, school.id, "boarding"))
+        ? await readParentBoarding(tx, school.id, student.id)
+        : null,
     };
+  });
+}
+
+/**
+ * The payment behind a receipt number, for the link in the receipt SMS (FIN-11): only when the receipt is
+ * for one of the parent's children.
+ */
+export async function findParentReceiptId(
+  database: Database,
+  phone: string,
+  slug: string,
+  receiptNumber: string,
+): Promise<string | null> {
+  if (!/^[A-Z]{1,3}\d{1,9}$/.test(receiptNumber)) return null;
+  const school = await schoolBySlug(database, slug);
+  if (!school) return null;
+  return withTenant(database, parentScope(school.id), async (tx) => {
+    const [row] = await tx
+      .select({ id: payments.id, studentId: payments.studentId })
+      .from(payments)
+      .where(and(eq(payments.tenantId, school.id), eq(payments.receiptNumber, receiptNumber)));
+    if (!row) return null;
+    const [linked] = await linkedStudents(tx, school.id, phone, row.studentId);
+    return linked ? row.id : null;
   });
 }
 
@@ -252,5 +306,32 @@ export async function getParentReportCard(
     const [linked] = await linkedStudents(tx, school.id, phone, studentId);
     if (!linked) return null;
     return readPublishedSnapshot(tx, school.id, linked.id, reportCardId);
+  });
+}
+
+/** All of the parent's children at one school, each with their account, for a family statement (PRT-04). */
+export async function getParentFamilyStatement(
+  database: Database,
+  phone: string,
+  slug: string,
+): Promise<{
+  school: ParentSchoolRef;
+  children: { account: StudentAccount; className: string | null }[];
+} | null> {
+  const school = await schoolBySlug(database, slug);
+  if (!school) return null;
+  return withTenant(database, parentScope(school.id), async (tx) => {
+    const linked = await linkedStudents(tx, school.id, phone);
+    if (linked.length === 0) return null;
+    const today = todayIn(school.timezone);
+    const children = [];
+    for (const student of linked) {
+      const summary = await readChildSummary(tx, school.id, student, today);
+      children.push({
+        account: await readStudentAccount(tx, school.id, student),
+        className: summary.className,
+      });
+    }
+    return { school, children };
   });
 }

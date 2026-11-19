@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Route } from "next";
 import Link from "next/link";
 import { Smartphone } from "lucide-react";
 import { MobileMoneyStatus } from "@/components/fees/mobile-money-status";
@@ -6,6 +6,7 @@ import { Alert } from "@/components/ui/alert";
 import { AutoRefresh } from "@/components/ui/auto-refresh";
 import { buttonStyles } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/layout";
+import { PageNav } from "@/components/ui/page-nav";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { allowed } from "@/server/authz/permissions";
 import { db } from "@/server/db/client";
@@ -19,10 +20,11 @@ import {
 import { cn } from "@/lib/cn";
 import { formatDateTime } from "@/lib/format";
 import { NETWORK_LABELS } from "@/lib/mobile-money";
-import { formatCedis } from "@/lib/money";
+import { moneyFormatter } from "@/lib/money";
 import { formatPhone } from "@/lib/phone";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
+import { countOpenDifferences } from "@/server/mobile-money/reconciliation";
 import { markMobileMoneyReviewedAction } from "../actions";
 import { ReviewDialog } from "./review-dialog";
 
@@ -51,12 +53,16 @@ export default async function MobileMoneyPage({
 }) {
   const [{ school }, search] = await Promise.all([params, searchParams]);
   const { ctx } = await requireTenant(school);
+  const showMoney = moneyFormatter(ctx.tenant.currencyCode);
   const slug = ctx.tenant.slug;
   const filter = (MOBILE_MONEY_FILTERS as readonly string[]).includes(search.show ?? "")
     ? (search.show as MobileMoneyFilter)
     : "all";
   const page = Math.max(1, Math.min(10_000, Number.parseInt(search.page ?? "1", 10) || 1));
-  const result = await listSchoolMobileMoneyRequests(db(), ctx, { filter, page });
+  const [result, differences] = await Promise.all([
+    listSchoolMobileMoneyRequests(db(), ctx, { filter, page }),
+    countOpenDifferences(db(), ctx),
+  ]);
   const setup = mobileMoneySetup(ctx);
   const canReview = allowed(ctx, "payments.record");
   const pages = Math.max(1, Math.ceil(result.total / MOBILE_MONEY_PAGE_SIZE));
@@ -101,18 +107,39 @@ export default async function MobileMoneyPage({
         </Alert>
       )}
 
-      <nav aria-label="Show requests" className="flex flex-wrap gap-1">
-        {tabs.map((t) => (
+      {differences > 0 && (
+        <Alert tone="critical">
+          The daily check found {differences === 1 ? "1 payment" : `${differences} payments`} that the
+          provider reports differently from EduBridge.{" "}
           <Link
-            key={t.show}
-            href={href(t.show)}
-            aria-current={filter === t.show ? "page" : undefined}
-            className={cn(buttonStyles(filter === t.show ? "secondary" : "ghost", "sm"))}
+            href={schoolPath(slug, "fees/mobile-money/reconciliation") as Route}
+            className="font-medium underline"
           >
-            {t.label}
+            Review the differences
           </Link>
-        ))}
-      </nav>
+        </Alert>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <nav aria-label="Show requests" className="flex flex-wrap gap-1">
+          {tabs.map((t) => (
+            <Link
+              key={t.show}
+              href={href(t.show)}
+              aria-current={filter === t.show ? "page" : undefined}
+              className={cn(buttonStyles(filter === t.show ? "secondary" : "ghost", "sm"))}
+            >
+              {t.label}
+            </Link>
+          ))}
+        </nav>
+        <Link
+          href={schoolPath(slug, "fees/mobile-money/reconciliation") as Route}
+          className={buttonStyles("ghost", "sm")}
+        >
+          Daily reconciliation
+        </Link>
+      </div>
 
       {result.rows.length === 0 ? (
         <EmptyState icon={<Smartphone />} {...EMPTY[filter]} />
@@ -150,7 +177,7 @@ export default async function MobileMoneyPage({
                       </span>
                     </TD>
                     <TD className="text-right whitespace-nowrap tabular-nums">
-                      {formatCedis(r.amountPesewas)}
+                      {showMoney(r.amountPesewas)}
                     </TD>
                     <TD className="hidden whitespace-nowrap xl:table-cell">
                       {formatPhone(r.msisdn)}
@@ -165,7 +192,7 @@ export default async function MobileMoneyPage({
                         <div className="mt-2">
                           <ReviewDialog
                             action={markMobileMoneyReviewedAction.bind(null, slug, r.id)}
-                            summary={`${formatCedis(r.amountPesewas)} for ${r.studentName}`}
+                            summary={`${showMoney(r.amountPesewas)} for ${r.studentName}`}
                           />
                         </div>
                       )}
@@ -175,25 +202,7 @@ export default async function MobileMoneyPage({
               </TBody>
             </Table>
           </TableFrame>
-          {pages > 1 && (
-            <nav aria-label="Request pages" className="flex items-center justify-between text-sm text-ink-2">
-              <span>
-                Page {result.page} of {pages}
-              </span>
-              <span className="flex gap-2">
-                {result.page > 1 && (
-                  <Link href={href(filter, result.page - 1)} className={buttonStyles("secondary", "sm")}>
-                    Previous
-                  </Link>
-                )}
-                {result.page < pages && (
-                  <Link href={href(filter, result.page + 1)} className={buttonStyles("secondary", "sm")}>
-                    Next
-                  </Link>
-                )}
-              </span>
-            </nav>
-          )}
+          <PageNav label="Request pages" page={result.page} pages={pages} href={(p) => href(filter, p)} />
         </>
       )}
     </div>

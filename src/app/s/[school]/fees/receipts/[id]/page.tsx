@@ -10,10 +10,12 @@ import { getReceipt, METHOD_LABELS } from "@/server/fees/payments";
 import { getReminderState } from "@/server/fees/reminders";
 import { receiptMessage, whatsappLink } from "@/lib/fee-messages";
 import { formatCalendarDate, formatDateTime } from "@/lib/format";
-import { formatCedis } from "@/lib/money";
+import { moneyFormatter } from "@/lib/money";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
-import { voidPaymentAction } from "./actions";
+import { ActionButton, UploadForm } from "@/components/ui/action-forms";
+import { listPaymentEvidence } from "@/server/fees/evidence";
+import { addEvidenceAction, removeEvidenceAction, voidPaymentAction } from "./actions";
 import { PrintButton, VoidReceiptDialog } from "./receipt-controls";
 
 export const metadata: Metadata = { title: "Receipt" };
@@ -30,12 +32,19 @@ function Row({ term, children }: { term: string; children: React.ReactNode }) {
 export default async function ReceiptPage({ params }: { params: Promise<{ school: string; id: string }> }) {
   const { school, id } = await params;
   const { ctx } = await requireTenant(school);
+  const showMoney = moneyFormatter(ctx.tenant.currencyCode);
   const receipt = await getReceipt(db(), ctx, id);
   if (!receipt) notFound();
   const slug = ctx.tenant.slug;
   const tz = ctx.tenant.timezone;
   const balance = receipt.balanceAfterPesewas;
-  const contact = (await getReminderState(db(), ctx, receipt.student.id))?.contact;
+  const [reminder, evidence] = await Promise.all([
+    getReminderState(db(), ctx, receipt.student.id),
+    listPaymentEvidence(db(), ctx, receipt.id),
+  ]);
+  const contact = reminder?.contact;
+  const canAttach = allowed(ctx, "payments.record");
+  const canRemove = allowed(ctx, "payments.void");
   const shareHref =
     contact?.phone && !receipt.voided
       ? whatsappLink(
@@ -114,7 +123,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ school
           <span
             className={`text-2xl font-semibold text-ink tabular-nums ${receipt.voided ? "line-through" : ""}`}
           >
-            {formatCedis(receipt.amountPesewas)}
+            {showMoney(receipt.amountPesewas)}
           </span>
         </p>
         <dl className="divide-y divide-line border-y border-line text-base">
@@ -135,15 +144,63 @@ export default async function ReceiptPage({ params }: { params: Promise<{ school
           </Row>
           <Row term="Balance after this payment">
             {balance > 0
-              ? `${formatCedis(balance)} owed`
+              ? `${showMoney(balance)} owed`
               : balance < 0
-                ? `${formatCedis(-balance)} in credit`
+                ? `${showMoney(-balance)} in credit`
                 : "Nothing owed"}
           </Row>
           <Row term="Received by">{receipt.recordedBy ?? "—"}</Row>
         </dl>
         <p className="pt-4 text-sm text-ink-3">Recorded {formatDateTime(receipt.recordedAt, tz)}.</p>
       </article>
+
+      {(evidence.length > 0 || canAttach) && (
+        <section aria-labelledby="evidence" className="space-y-3 print:hidden">
+          <div>
+            <h2 id="evidence" className="text-base font-semibold text-ink">
+              Evidence
+            </h2>
+            <p className="text-sm text-ink-3">
+              A bank slip, cheque or Mobile Money screenshot. Kept with the payment; every download is
+              recorded.
+            </p>
+          </div>
+          {evidence.length > 0 && (
+            <ul className="divide-y divide-line border-y border-line text-sm">
+              {evidence.map((f) => (
+                <li key={f.id} className="flex flex-wrap items-center justify-between gap-3 py-2">
+                  <span>
+                    <a
+                      href={schoolPath(slug, `fees/receipts/${receipt.id}/evidence/${f.id}`)}
+                      className="text-accent underline"
+                    >
+                      {f.filename}
+                    </a>{" "}
+                    <span className="text-ink-3">
+                      {Math.ceil(f.sizeBytes / 1024)} KB · {f.uploadedBy}, {formatDateTime(f.uploadedAt, tz)}
+                    </span>
+                  </span>
+                  {canRemove && (
+                    <ActionButton
+                      action={removeEvidenceAction.bind(null, slug, receipt.id, f.id)}
+                      label="Remove"
+                      ariaLabel={`Remove ${f.filename}`}
+                    />
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {canAttach && (
+            <UploadForm
+              action={addEvidenceAction.bind(null, slug, receipt.id)}
+              label="Attach evidence (PDF, PNG or JPEG, up to 2 MB)"
+              accept="application/pdf,image/png,image/jpeg"
+              submitLabel="Attach"
+            />
+          )}
+        </section>
+      )}
     </div>
   );
 }

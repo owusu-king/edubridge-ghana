@@ -18,7 +18,7 @@ export default async function AttendanceLayout({
     <div className="space-y-8">
       <PageHeader
         title="Attendance"
-        description="Class registers, day by day. They work without a connection too."
+        description="Class and lesson registers, day by day. They work without a connection too."
       />
       {children}
     </div>
