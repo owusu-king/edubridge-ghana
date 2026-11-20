@@ -7,6 +7,7 @@ import type { Stage } from "@/server/academics/classes";
 import { requestReportCardPrint } from "@/server/assessment/batches";
 import { publishReportCards, saveReportRemarks, withdrawReportCard } from "@/server/assessment/report-cards";
 import { saveScores } from "@/server/assessment/scores";
+import { setElectiveTakers } from "@/server/assessment/electives";
 import {
   createSubject,
   resetGradingScale,
@@ -61,9 +62,11 @@ export async function addSubjectAction(slug: string, _prev: FormState, formData:
     slug,
     formData,
     (ctx) =>
-      createSubject(db(), ctx, { name: formData.get("name"), levelIds: strings(formData, "levelIds") }).then(
-        () => undefined,
-      ),
+      createSubject(db(), ctx, {
+        name: formData.get("name"),
+        levelIds: strings(formData, "levelIds"),
+        electiveLevelIds: strings(formData, "electiveLevelIds"),
+      }).then(() => undefined),
     "Subject added.",
   );
 }
@@ -81,6 +84,7 @@ export async function updateSubjectAction(
       updateSubject(db(), ctx, subjectId, {
         name: formData.get("name"),
         levelIds: strings(formData, "levelIds"),
+        electiveLevelIds: strings(formData, "electiveLevelIds"),
       }),
     "Subject saved.",
   );
@@ -123,6 +127,31 @@ export async function resetScaleAction(slug: string, stage: Stage, _prev: FormSt
 }
 
 /** Score sheet fields are "s:{studentId}:{part}" (the mark) and "o:…" (the mark when the sheet was opened). */
+/** Who takes an elective subject in a class (2026-11-18). */
+export async function setTakersAction(
+  slug: string,
+  termId: string,
+  classId: string,
+  subjectId: string,
+  _prev: FormState,
+  formData: FormData,
+) {
+  return run(
+    slug,
+    null,
+    async (ctx) => {
+      const { takers } = await setElectiveTakers(db(), ctx, {
+        termId,
+        classId,
+        subjectId,
+        studentIds: strings(formData, "studentIds"),
+      });
+      return `${takers} student${takers === 1 ? "" : "s"} take it.`;
+    },
+    "Saved.",
+  );
+}
+
 export async function saveScoresAction(
   slug: string,
   termId: string,

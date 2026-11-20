@@ -110,6 +110,9 @@ function ReportCardPage({ card, draft }: { card: ReportCardSnapshot; draft: bool
           />
         ) : null}
         {info.showGpa ? <Fact label="Term GPA" value={gpa !== null ? formatGpa(gpa) : "—"} /> : null}
+        {card.overall.aggregate !== undefined && card.overall.aggregate !== null ? (
+          <Fact label="Aggregate (best six)" value={String(card.overall.aggregate)} />
+        ) : null}
         {positionsShown ? (
           <Fact
             label="Position in class"

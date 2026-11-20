@@ -2,7 +2,7 @@
 
 import { Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { Alert } from "@/components/ui/alert";
+import { FormMessage } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { FormDialog } from "@/components/ui/form-dialog";
@@ -446,9 +446,7 @@ export function AdmissionFeesForm({
   const next = () => Math.max(0, ...rows.map((r) => r.id)) + 1;
   return (
     <form onSubmit={onSubmit} className="max-w-2xl space-y-3" noValidate aria-label="Admission fees">
-      {state.status !== "idle" && state.message && (
-        <Alert tone={state.status === "error" ? "critical" : "positive"}>{state.message}</Alert>
-      )}
+      <FormMessage state={state} />
       {rows.length > 0 && (
         <div className="grid grid-cols-[1fr_8rem_2.5rem] gap-3 text-sm font-medium text-ink-3">
           <span>Fee</span>

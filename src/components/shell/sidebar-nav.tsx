@@ -5,9 +5,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useId } from "react";
 import { cn } from "@/lib/cn";
+import { iconMotion } from "./nav-icon-motion";
 import { navLinks, type NavLink, type ShellArea } from "./navigation";
 
-/** Leave's plane takes off and lands when its row is hovered or reached by keyboard (globals.css). */
+/**
+ * Leave's plane takes off and lands when its row is hovered or reached by keyboard (globals.css). Every other
+ * icon makes its own gesture (nav-icon-motion.ts).
+ */
 const FLY = "group-hover:animate-icon-fly group-focus-visible:animate-icon-fly";
 
 export function SidebarNav({ area, onNavigate }: { area: ShellArea; onNavigate?: () => void }) {
@@ -59,6 +63,7 @@ export function SidebarNav({ area, onNavigate }: { area: ShellArea; onNavigate?:
                     >
                       <Icon
                         aria-hidden="true"
+                        data-motion={Icon === Plane ? undefined : iconMotion(Icon)}
                         className={cn(
                           "size-4 shrink-0 transition-colors",
                           Icon === Plane && FLY,

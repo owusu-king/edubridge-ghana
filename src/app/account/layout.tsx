@@ -28,7 +28,7 @@ export default async function AccountLayout({ children }: { children: ReactNode 
           bordered={false}
           actions={
             <form action={signOut}>
-              <Button type="submit" variant="secondary">
+              <Button type="submit" variant="danger-outline">
                 Sign out
               </Button>
             </form>

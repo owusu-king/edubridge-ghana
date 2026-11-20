@@ -65,7 +65,11 @@ export default async function PayrollRunPage({
                 action={recalculatePayrollAction.bind(null, slug, run.month)}
                 label="Recalculate"
               />
-              <ActionButton action={cancelPayrollAction.bind(null, slug, run.id)} label="Cancel draft" />
+              <ActionButton
+                action={cancelPayrollAction.bind(null, slug, run.id)}
+                variant="danger-outline"
+                label="Cancel draft"
+              />
             </>
           )}
           {draft && allowed(ctx, "payroll.approve") && (

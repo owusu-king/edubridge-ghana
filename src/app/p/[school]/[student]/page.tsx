@@ -161,6 +161,7 @@ export default async function ParentChildPage({
                     <p className="text-sm text-ink-3">
                       {formatDateTime(a.createdAt, child.school.timezone)} · {maskPhone(a.msisdn)}
                       {a.receiptNumber ? ` · ${a.receiptNumber}` : ""}
+                      {a.family ? ` · part of a family payment of ${showMoney(a.totalPesewas)}` : ""}
                     </p>
                     {a.status === "failed" && a.statusReason && (
                       <p className="text-sm text-ink-3">{a.statusReason}</p>

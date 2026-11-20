@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "../audit/record";
-import { assertAllowed, isRole, type Permission, type Role } from "../authz/permissions";
+import { assertAllowed, isRole, ROLES, type Permission, type Role } from "../authz/permissions";
 import type { Database } from "../db/client";
 import { withTenant, withUser } from "../db/context";
 import {
@@ -11,6 +11,7 @@ import {
   platformAdmins,
   safeguardingLeads,
   boardingHouseStaff,
+  demoVisitors,
   tenantEntitlements,
   tenants,
   users,
@@ -59,6 +60,11 @@ export interface TenantContext {
    * the Proprietor's permissions except support access and exports, until the grant ends.
    */
   support?: { grantId: string; expiresAt: Date } | null;
+  /**
+   * The shared account behind "Try the demo school": everything can be seen, nothing changed (the database
+   * makes its transactions read-only), and nothing that costs money (AI) runs.
+   */
+  demoVisitor?: boolean;
 }
 
 const tenantColumns = {
@@ -116,7 +122,13 @@ export async function resolveTenantContext(
       .where(eq(tenantEntitlements.tenantId, tenant.id));
     // ENT-01: plan, add-ons, release and dependencies (no plan row: every module, as before).
     const modules = await readModuleStates(tx, tenant);
+    const visitor = await tx
+      .select({ id: demoVisitors.userId })
+      .from(demoVisitors)
+      .where(eq(demoVisitors.userId, userId))
+      .limit(1);
     return {
+      demoVisitor: visitor.length > 0,
       roles: row.roles,
       campusIds: scope.length > 0 ? scope.map((r) => r.campusId) : null,
       modules,
@@ -169,6 +181,7 @@ export async function resolveTenantContext(
     modules: membership.modules,
     mobileMoneyProvider: membership.mobileMoneyProvider,
     billing: membership.billing,
+    ...(membership.demoVisitor ? { demoVisitor: true } : {}),
     schoolGrants: [
       ...(membership.preferences.accountantsCanVoid && roles.includes("bursar")
         ? ["payments.void" as const]
@@ -315,15 +328,7 @@ export async function countMembersByRole(database: Database, ctx: TenantContext)
         .where(and(eq(memberships.tenantId, ctx.tenant.id), eq(memberships.status, "active")))
         .groupBy(sql`r.role`),
   );
-  const counts: RoleCounts = {
-    owner: 0,
-    headteacher: 0,
-    admin: 0,
-    bursar: 0,
-    teacher: 0,
-    parent: 0,
-    student: 0,
-  };
+  const counts = Object.fromEntries(ROLES.map((role) => [role, 0])) as RoleCounts;
   for (const row of rows) if (isRole(row.role)) counts[row.role] = row.n;
   return counts;
 }

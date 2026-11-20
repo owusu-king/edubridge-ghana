@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/field";
+import { besideField, Field, Input } from "@/components/ui/field";
 import { contrastRatio, isAccessibleAccent } from "@/lib/branding";
 import type { FormState } from "@/web/forms";
 import { FormMessage } from "@/components/ui/toast";
@@ -22,7 +22,7 @@ export function BrandColorForm({ action, color }: { action: Action; color: strin
   return (
     <form action={formAction} className="max-w-xl space-y-4">
       <Message state={state} />
-      <div className="flex flex-wrap items-end gap-4">
+      <div className="flex flex-wrap items-start gap-4">
         <label className="space-y-1.5 text-sm font-medium text-ink">
           <span className="block">Accent colour</span>
           <input
@@ -46,7 +46,7 @@ export function BrandColorForm({ action, color }: { action: Action; color: strin
           )}
         </Field>
         <span
-          className="inline-flex h-10 items-center rounded-md px-4 text-sm font-medium text-[#fff]"
+          className={`${besideField} inline-flex h-10 items-center rounded-md px-4 text-sm font-medium text-[#fff]`}
           style={{ background: /^#[0-9a-f]{6}$/i.test(value) ? value : "#24467a" }}
         >
           Example button

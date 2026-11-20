@@ -2,8 +2,14 @@
 
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
-import type { ReactNode } from "react";
+import { createContext, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
+
+/**
+ * True inside a dialog's body. A modal hides the rest of the page from assistive technology and closes on a
+ * click outside it, so a form's error is shown inside the dialog there rather than as a toast (FormError).
+ */
+export const InDialog = createContext(false);
 
 /**
  * Modal dialog for short, focused tasks (rename, confirm, a form). Controlled by the caller.
@@ -63,7 +69,7 @@ export function Dialog({
               footer ? "pb-5" : "pb-5 sm:pb-6",
             )}
           >
-            {children}
+            <InDialog.Provider value={true}>{children}</InDialog.Provider>
           </div>
           {footer && (
             <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line px-5 py-4 sm:px-6">

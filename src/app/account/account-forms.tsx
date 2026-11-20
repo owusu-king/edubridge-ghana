@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
+import { FormDialog } from "@/components/ui/form-dialog";
 import { Field, Input } from "@/components/ui/field";
 import type { FormState } from "@/web/forms";
 import { changePasswordAction, signOutOthersAction, updateProfileAction } from "./actions";
@@ -77,13 +78,14 @@ export function PasswordForm({ minLength, email }: { minLength: number; email: s
 }
 
 export function SignOutOthersForm() {
-  const [state, action, pending] = useActionState<FormState, FormData>(signOutOthersAction, idle);
   return (
-    <form action={action} className="space-y-4">
-      <Message state={state} />
-      <Button type="submit" variant="secondary" pending={pending}>
-        Sign out of other devices
-      </Button>
-    </form>
+    <FormDialog
+      trigger="Sign out of other devices"
+      title="Sign out of other devices?"
+      description="Every other browser signed in to your account is signed out. This one stays signed in."
+      submitLabel="Sign out"
+      danger
+      action={signOutOthersAction}
+    />
   );
 }

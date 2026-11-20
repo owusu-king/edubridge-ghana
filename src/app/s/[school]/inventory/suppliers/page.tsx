@@ -69,6 +69,7 @@ export default async function SuppliersPage({ params }: { params: Promise<{ scho
                         <ActionButton
                           action={setSupplierArchivedAction.bind(null, slug, s.id, s.status === "active")}
                           label={s.status === "active" ? "Archive" : "Restore"}
+                          variant={s.status === "active" ? "danger-outline" : "secondary"}
                           ariaLabel={`${s.status === "active" ? "Archive" : "Restore"} ${s.name}`}
                         />
                       </div>

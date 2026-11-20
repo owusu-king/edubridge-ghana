@@ -2,16 +2,15 @@
 
 import { Plus } from "lucide-react";
 import { startTransition, useActionState, useState, type FormEvent } from "react";
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { Field, Input, Select } from "@/components/ui/field";
+import { besideField, Field, Input, Select } from "@/components/ui/field";
 import { FormDialog } from "@/components/ui/form-dialog";
 import { LessonText, TimetableGrid, type GridPeriod } from "@/components/timetable/timetable-grid";
 import { cn } from "@/lib/cn";
 import { WEEKDAY_NAMES } from "@/lib/timetable";
 import type { FormState } from "@/web/forms";
-import { FormMessage } from "@/components/ui/toast";
+import { FormError, FormMessage } from "@/components/ui/toast";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
 
@@ -78,7 +77,7 @@ export function CopyTimetableForm({
   return (
     <form action={formAction} className="max-w-2xl space-y-3">
       {state.status !== "idle" && state.message && <FormMessage state={state} />}
-      <div className="flex flex-wrap items-end gap-2">
+      <div className="flex flex-wrap items-start gap-2">
         <Field label="Copy from" error={state.fieldErrors?.fromTermId}>
           {(p) => (
             <Select {...p} name="fromTermId" defaultValue={terms[0]?.id} className="min-w-56">
@@ -90,7 +89,7 @@ export function CopyTimetableForm({
             </Select>
           )}
         </Field>
-        <Button type="submit" variant="secondary" pending={pending}>
+        <Button type="submit" variant="secondary" className={besideField} pending={pending}>
           Copy timetables
         </Button>
       </div>
@@ -225,9 +224,7 @@ function LessonForm({
     );
   return (
     <form onSubmit={onSubmit} className="space-y-5" noValidate>
-      {state.status === "error" && state.message && !Object.keys(errors).length && (
-        <Alert tone="critical">{state.message}</Alert>
-      )}
+      <FormError state={state} />
       {Object.entries(hidden).map(([name, value]) => (
         <input key={name} type="hidden" name={name} value={value} />
       ))}
@@ -269,7 +266,7 @@ function LessonForm({
       </Field>
       <div className="flex flex-wrap justify-between gap-2 border-t border-line pt-5">
         {lesson ? (
-          <Button type="submit" name="intent" value="clear" variant="ghost" disabled={pending}>
+          <Button type="submit" name="intent" value="clear" variant="danger-outline" disabled={pending}>
             Clear this lesson
           </Button>
         ) : (

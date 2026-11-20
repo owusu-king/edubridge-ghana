@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useFormAction } from "@/components/ui/use-form-action";
 import { UserPlus } from "lucide-react";
-import { Alert } from "@/components/ui/alert";
+import { FormError } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/field";
@@ -14,10 +14,6 @@ type Action<T = undefined> = (prev: FormState<T>, formData: FormData) => Promise
 export interface Option {
   value: string;
   label: string;
-}
-
-function ErrorMessage({ state }: { state: FormState<unknown> }) {
-  return state.status === "error" && state.message ? <Alert tone="critical">{state.message}</Alert> : null;
 }
 
 /** Roles and campus scope, shared by the invite and edit dialogs. */
@@ -37,18 +33,24 @@ function AccessFields({
     <>
       <fieldset className="space-y-2">
         <legend className="mb-1.5 text-sm font-medium text-ink">Roles</legend>
-        {roleOptions.map((role) => (
-          <label key={role.value} className="flex items-center gap-2.5 text-base text-ink">
-            <input
-              type="checkbox"
-              name="roles"
-              value={role.value}
-              defaultChecked={defaults.roles.includes(role.value)}
-              className="size-4 accent-ink"
-            />
-            {role.label}
-          </label>
-        ))}
+        <p className="text-sm text-ink-2">
+          Cashier, Librarian, Storekeeper, Transport officer, Front desk, School nurse and Admissions officer
+          see only their own area.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {roleOptions.map((role) => (
+            <label key={role.value} className="flex items-center gap-2.5 text-base text-ink">
+              <input
+                type="checkbox"
+                name="roles"
+                value={role.value}
+                defaultChecked={defaults.roles.includes(role.value)}
+                className="size-4 accent-ink"
+              />
+              {role.label}
+            </label>
+          ))}
+        </div>
         {errors.roles && <p className="text-sm text-critical">{errors.roles}</p>}
       </fieldset>
       {campusOptions.length > 1 && (
@@ -153,7 +155,7 @@ function InviteForm({
   const values = state.values ?? {};
   return (
     <form onSubmit={onSubmit} className="space-y-5" noValidate>
-      {state.status === "error" && !state.fieldErrors && <ErrorMessage state={state} />}
+      {state.status === "error" && !state.fieldErrors && <FormError state={state} />}
       <Field label="Email" error={state.fieldErrors?.email}>
         {(p) => (
           <Input
@@ -227,7 +229,7 @@ export function MemberActions({
       )}
       {canChangeStatus && (
         <Button
-          variant="ghost"
+          variant={status === "active" ? "danger-outline" : "ghost"}
           size="sm"
           onClick={() => setDialog("status")}
           aria-label={`${status === "active" ? "Suspend" : "Reactivate"} ${name}`}
@@ -290,7 +292,7 @@ function EditForm({
   return (
     <form onSubmit={onSubmit} className="space-y-5" noValidate>
       {state.status === "error" && !state.fieldErrors?.roles && !state.fieldErrors?.campusIds && (
-        <ErrorMessage state={state} />
+        <FormError state={state} />
       )}
       <AccessFields
         roleOptions={roleOptions}
@@ -328,7 +330,7 @@ export function ConfirmForm({
   });
   return (
     <form onSubmit={onSubmit} className="space-y-5">
-      <ErrorMessage state={state} />
+      <FormError state={state} />
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={onDone}>
           Cancel
@@ -363,7 +365,7 @@ export function InvitationActions({
         New link
       </Button>
       <Button
-        variant="ghost"
+        variant="danger-outline"
         size="sm"
         onClick={() => setDialog("revoke")}
         aria-label={`Revoke invitation for ${email}`}
@@ -408,7 +410,7 @@ function ReissueForm({ action, onDone }: { action: Action<InviteLink>; onDone: (
   }
   return (
     <form onSubmit={onSubmit} className="space-y-5">
-      <ErrorMessage state={state} />
+      <FormError state={state} />
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={onDone}>
           Cancel

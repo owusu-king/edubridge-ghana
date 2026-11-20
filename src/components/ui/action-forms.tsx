@@ -4,7 +4,7 @@ import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import type { FormState } from "@/web/forms";
-import { SuccessToast } from "@/components/ui/toast";
+import { FormError, SuccessToast } from "@/components/ui/toast";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
 type Bare = (prev: FormState) => Promise<FormState>;
@@ -19,7 +19,8 @@ export function ActionButton({
   action: Bare;
   label: string;
   ariaLabel?: string;
-  variant?: "primary" | "secondary" | "danger";
+  /** danger-outline for an action that removes, cancels or ends something. */
+  variant?: "primary" | "secondary" | "danger" | "danger-outline";
 }) {
   const [state, formAction, pending] = useActionState(action, { status: "idle" } as FormState);
   return (
@@ -27,9 +28,7 @@ export function ActionButton({
       <Button type="submit" size="sm" variant={variant} pending={pending} aria-label={ariaLabel}>
         {label}
       </Button>
-      {state.status === "error" && (
-        <span className="max-w-xs text-right text-sm text-critical">{state.message}</span>
-      )}
+      <FormError state={state} />
     </form>
   );
 }

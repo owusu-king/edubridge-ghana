@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Alert } from "@/components/ui/alert";
+import { toast } from "@/components/ui/toast";
 import { Button, buttonStyles } from "@/components/ui/button";
 import { Field, Textarea } from "@/components/ui/field";
 
@@ -35,7 +36,6 @@ export function ReportEditor({
   const [text, setText] = useState("");
   const [draftId, setDraftId] = useState("");
   const [unchecked, setUnchecked] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
   return (
     <div className="max-w-3xl space-y-4">
       {available ? (
@@ -45,9 +45,8 @@ export function ReportEditor({
           pending={pending}
           onClick={() =>
             startTransition(async () => {
-              setError(null);
               const r = await draft(termId, campusId);
-              if (!r.ok) return setError(r.message);
+              if (!r.ok) return void toast(r.message, "critical");
               setText(r.text);
               setDraftId(r.draftId);
               setUnchecked(r.uncheckedFigures);
@@ -61,7 +60,6 @@ export function ReportEditor({
           Drafting is not available: {unavailableMessage} You can still write the report yourself below.
         </p>
       )}
-      {error && <Alert tone="critical">{error}</Alert>}
       {unchecked.length > 0 && (
         <Alert tone="info">
           The draft contains figures that are not from the Command Center: {unchecked.join(", ")}. Check or

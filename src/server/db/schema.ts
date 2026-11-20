@@ -102,7 +102,7 @@ export const tenants = pgTable(
   (t) => [
     check(
       "tenants_mfa_required_roles_valid",
-      sql`${t.mfaRequiredRoles} <@ ARRAY['owner','headteacher','admin','bursar','teacher','parent','student']::text[]`,
+      sql`${t.mfaRequiredRoles} <@ ARRAY['owner','headteacher','admin','bursar','teacher','parent','student','cashier','librarian','storekeeper','transport_officer','front_desk','nurse','admissions_officer']::text[]`,
     ),
     check("tenants_slug_format", sql`${t.slug} ~ '^[a-z0-9](?:[a-z0-9-]{1,46}[a-z0-9])$'`),
     check("tenants_country_code_format", sql`${t.countryCode} ~ '^[A-Z]{2}$'`),
@@ -305,7 +305,7 @@ export const memberships = pgTable(
     check("memberships_roles_not_empty", sql`cardinality(${t.roles}) > 0`),
     check(
       "memberships_roles_valid",
-      sql`${t.roles} <@ ARRAY['owner','headteacher','admin','bursar','teacher','parent','student']::text[]`,
+      sql`${t.roles} <@ ARRAY['owner','headteacher','admin','bursar','teacher','parent','student','cashier','librarian','storekeeper','transport_officer','front_desk','nurse','admissions_officer']::text[]`,
     ),
   ],
 );
@@ -317,6 +317,47 @@ export const platformAdmins = pgTable("platform_admins", {
     .references(() => users.id, { onDelete: "restrict" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * The shared accounts visitors use to look round a demo school from the landing page ("Try the demo school",
+ * 2026-11-19). Set only by `npm run demo:visitor`. The app may only read it: every school transaction of such an
+ * account is read-only (db/context.ts), and the database refuses a membership in any school that is not a demo.
+ */
+export const demoVisitors = pgTable("demo_visitors", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Schools asking for a visit from the public landing page (2026-11-19). Read on Admin, Enquiries. Holds a
+ * prospective customer's contact details, so only the platform reads it; nothing is ever deleted, an enquiry is
+ * only marked as handled.
+ */
+export const salesEnquiries = pgTable(
+  "sales_enquiries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    role: text("role", { enum: ["proprietor", "head", "bursar", "administrator", "other"] }).notNull(),
+    schoolName: text("school_name").notNull(),
+    town: text("town").notNull(),
+    /** E.164. */
+    phone: text("phone").notNull(),
+    email: text("email"),
+    students: text("students", { enum: ["under_150", "150_400", "400_800", "over_800"] }).notNull(),
+    message: text("message"),
+    ipAddress: text("ip_address"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    handledAt: timestamp("handled_at", { withTimezone: true }),
+    handledByUserId: uuid("handled_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+  },
+  (t) => [
+    index("sales_enquiries_created_idx").on(t.createdAt),
+    index("sales_enquiries_ip_idx").on(t.ipAddress, t.createdAt),
+  ],
+);
 
 /** Plan limits for a school, editable only by platform administrators. */
 export const tenantEntitlements = pgTable(
@@ -485,7 +526,7 @@ export const levels = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: "restrict" }),
     name: citext("name").notNull(),
-    stage: text("stage", { enum: ["creche", "nursery", "kindergarten", "primary", "jhs"] }).notNull(),
+    stage: text("stage", { enum: ["creche", "nursery", "kindergarten", "primary", "jhs", "shs"] }).notNull(),
     sequence: integer("sequence").notNull(),
     status: text("status", { enum: ["active", "archived"] })
       .notNull()
@@ -746,7 +787,7 @@ export const invitations = pgTable(
     check("invitations_roles_not_empty", sql`cardinality(${t.roles}) > 0`),
     check(
       "invitations_roles_valid",
-      sql`${t.roles} <@ ARRAY['owner','headteacher','admin','bursar','teacher','parent','student']::text[]`,
+      sql`${t.roles} <@ ARRAY['owner','headteacher','admin','bursar','teacher','parent','student','cashier','librarian','storekeeper','transport_officer','front_desk','nurse','admissions_officer']::text[]`,
     ),
   ],
 );
@@ -1227,6 +1268,48 @@ export const mobileMoneyRequests = pgTable(
 );
 
 /**
+ * A family payment (2026-11-18): one Mobile Money prompt that pays several children's fees. The request carries the
+ * total and its first child; each share is one child's part. When the provider confirms the total, every share gets
+ * its own receipt in the same transaction, so each child's account and statement stay exact. Shares are written once
+ * with the request; only their payment is set later, once (database triggers).
+ */
+export const mobileMoneyRequestShares = pgTable(
+  "mobile_money_request_shares",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    requestId: uuid("request_id").notNull(),
+    studentId: uuid("student_id").notNull(),
+    amountPesewas: bigint("amount_pesewas", { mode: "number" }).notNull(),
+    paymentId: uuid("payment_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "mobile_money_request_shares_request_fk",
+      columns: [t.tenantId, t.requestId],
+      foreignColumns: [mobileMoneyRequests.tenantId, mobileMoneyRequests.id],
+    }),
+    foreignKey({
+      name: "mobile_money_request_shares_student_fk",
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }),
+    foreignKey({
+      name: "mobile_money_request_shares_payment_fk",
+      columns: [t.tenantId, t.paymentId],
+      foreignColumns: [payments.tenantId, payments.id],
+    }),
+    unique("mobile_money_request_shares_one_per_child").on(t.requestId, t.studentId),
+    unique("mobile_money_request_shares_payment_unique").on(t.paymentId),
+    index("mobile_money_request_shares_student_idx").on(t.tenantId, t.studentId),
+    check("mobile_money_request_shares_amount_range", sql`${t.amountPesewas} between 1 and 1000000000`),
+  ],
+);
+
+/**
  * Callbacks received from Mobile Money providers, stored before anything else happens so none is lost.
  * A callback only says which request to look at: its content is never trusted, and the outcome always
  * comes from asking the provider. The raw body is not kept (it may hold personal data); its SHA-256
@@ -1457,6 +1540,8 @@ export const levelSubjects = pgTable(
     levelId: uuid("level_id").notNull(),
     subjectId: uuid("subject_id").notNull(),
     sequence: integer("sequence").notNull(),
+    /** Taken only by the students chosen for it (SHS electives, 2026-11-18); otherwise by the whole level. */
+    elective: boolean("elective").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -1511,7 +1596,7 @@ export const gradingScales = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "restrict" }),
-    stage: text("stage", { enum: ["creche", "nursery", "kindergarten", "primary", "jhs"] }).notNull(),
+    stage: text("stage", { enum: ["creche", "nursery", "kindergarten", "primary", "jhs", "shs"] }).notNull(),
     bands: jsonb("bands").$type<GradeBand[]>().notNull(),
     updatedByUserId: uuid("updated_by_user_id").references(() => users.id, { onDelete: "restrict" }),
     ...timestamps,
@@ -2159,6 +2244,8 @@ export const schoolPreferences = pgTable(
     autoRemindersEnabled: boolean("auto_reminders_enabled").notNull().default(false),
     autoReminderIntervalDays: integer("auto_reminder_interval_days").notNull().default(14),
     autoReminderMinPesewas: bigint("auto_reminder_min_pesewas", { mode: "number" }).notNull().default(10_000),
+    /** Expenses of at least this amount wait for the Proprietor's approval (minor units; 0: every expense). */
+    expenseApprovalMinor: bigint("expense_approval_minor", { mode: "number" }).notNull().default(100_000),
     /** The school day automatic reminders last ran (once a day, after 9:00 school time). */
     autoRemindersLastRunOn: date("auto_reminders_last_run_on", { mode: "string" }),
     /** How families reach the school (shown in the parent view). */
@@ -5673,5 +5760,282 @@ export const aiDrafts = pgTable(
     index("ai_drafts_tenant_idx").on(t.tenantId, t.createdAt),
     foreignKey({ columns: [t.tenantId], foreignColumns: [tenants.id] }),
     check("ai_drafts_decided", sql`(${t.outcome} is null) = (${t.decidedAt} is null)`),
+  ],
+);
+
+/**
+ * The elective subjects a student takes (2026-11-18): a student takes every subject of their level, except electives,
+ * which they take only when chosen here. Kept across terms; a change applies to scores and report cards from then on.
+ */
+export const studentSubjectChoices = pgTable(
+  "student_subject_choices",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    studentId: uuid("student_id").notNull(),
+    subjectId: uuid("subject_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.studentId, t.subjectId] }),
+    foreignKey({
+      name: "student_subject_choices_student_fk",
+      columns: [t.tenantId, t.studentId],
+      foreignColumns: [students.tenantId, students.id],
+    }),
+    foreignKey({
+      name: "student_subject_choices_subject_fk",
+      columns: [t.tenantId, t.subjectId],
+      foreignColumns: [subjects.tenantId, subjects.id],
+    }).onDelete("cascade"),
+    index("student_subject_choices_subject_idx").on(t.tenantId, t.subjectId),
+  ],
+);
+
+/*
+ * School money beyond fees (2026-11-18): where money is kept, cash and cheques taken to the bank, the bank's own
+ * statement matched against EduBridge, and what the school spends. Every amount is in minor units of the school's
+ * currency. Deposits and expenses are never deleted: a deposit is cancelled and an expense voided, with a reason.
+ */
+
+/** A place the school keeps money: a bank account, a cash box or safe, or a Mobile Money wallet. */
+export const financeAccounts = pgTable(
+  "finance_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+    kind: text("kind", { enum: ["bank", "cash", "mobile_money"] }).notNull(),
+    /** The bank or network, e.g. "GCB Bank". */
+    institution: text("institution"),
+    /** The last digits of the account number, enough to tell accounts apart (never the full number). */
+    accountEnding: text("account_ending"),
+    status: text("status", { enum: ["active", "closed"] })
+      .notNull()
+      .default("active"),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    ...timestamps,
+  },
+  (t) => [
+    unique("finance_accounts_tenant_id_unique").on(t.tenantId, t.id),
+    uniqueIndex("finance_accounts_name_unique").on(t.tenantId, sql`lower(${t.name})`),
+    check(
+      "finance_accounts_lengths",
+      sql`char_length(${t.name}) between 2 and 80
+        and (${t.institution} is null or char_length(${t.institution}) between 2 and 80)
+        and (${t.accountEnding} is null or ${t.accountEnding} ~ '^[0-9]{2,6}$')`,
+    ),
+  ],
+);
+
+/** Cash and cheque receipts taken to the bank together, with the bank slip's reference. */
+export const bankDeposits = pgTable(
+  "bank_deposits",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    depositNumber: text("deposit_number").notNull(),
+    accountId: uuid("account_id").notNull(),
+    depositedOn: date("deposited_on", { mode: "string" }).notNull(),
+    slipReference: text("slip_reference"),
+    amountPesewas: bigint("amount_pesewas", { mode: "number" }).notNull(),
+    recordedByUserId: uuid("recorded_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelledByUserId: uuid("cancelled_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    cancelReason: text("cancel_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("bank_deposits_tenant_id_unique").on(t.tenantId, t.id),
+    unique("bank_deposits_number_unique").on(t.tenantId, t.depositNumber),
+    foreignKey({
+      name: "bank_deposits_account_fk",
+      columns: [t.tenantId, t.accountId],
+      foreignColumns: [financeAccounts.tenantId, financeAccounts.id],
+    }),
+    index("bank_deposits_account_idx").on(t.tenantId, t.accountId, t.depositedOn),
+    check("bank_deposits_amount", sql`${t.amountPesewas} > 0`),
+    check(
+      "bank_deposits_cancel",
+      sql`(${t.cancelledAt} is null) = (${t.cancelReason} is null)
+        and (${t.cancelReason} is null or char_length(${t.cancelReason}) between 3 and 200)`,
+    ),
+    check(
+      "bank_deposits_slip",
+      sql`${t.slipReference} is null or char_length(${t.slipReference}) between 1 and 60`,
+    ),
+  ],
+);
+
+/** The receipts in a deposit. A receipt is in at most one deposit that has not been cancelled. */
+export const bankDepositItems = pgTable(
+  "bank_deposit_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    depositId: uuid("deposit_id").notNull(),
+    paymentId: uuid("payment_id").notNull(),
+    amountPesewas: bigint("amount_pesewas", { mode: "number" }).notNull(),
+    /** Set when the deposit is cancelled, which frees the receipt for another deposit. */
+    released: boolean("released").notNull().default(false),
+  },
+  (t) => [
+    foreignKey({
+      name: "bank_deposit_items_deposit_fk",
+      columns: [t.tenantId, t.depositId],
+      foreignColumns: [bankDeposits.tenantId, bankDeposits.id],
+    }),
+    foreignKey({
+      name: "bank_deposit_items_payment_fk",
+      columns: [t.tenantId, t.paymentId],
+      foreignColumns: [payments.tenantId, payments.id],
+    }),
+    uniqueIndex("bank_deposit_items_one_live")
+      .on(t.paymentId)
+      .where(sql`not ${t.released}`),
+    index("bank_deposit_items_deposit_idx").on(t.tenantId, t.depositId),
+  ],
+);
+
+/** What a school spends: recorded by finance staff, approved by the Proprietor above the school's amount. */
+export const expenses = pgTable(
+  "expenses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    expenseNumber: text("expense_number").notNull(),
+    spentOn: date("spent_on", { mode: "string" }).notNull(),
+    category: text("category").notNull(),
+    payee: text("payee").notNull(),
+    description: text("description"),
+    amountPesewas: bigint("amount_pesewas", { mode: "number" }).notNull(),
+    accountId: uuid("account_id").notNull(),
+    method: text("method", { enum: ["cash", "bank_transfer", "cheque", "mobile_money"] }).notNull(),
+    reference: text("reference"),
+    status: text("status", { enum: ["pending", "approved", "rejected", "voided"] }).notNull(),
+    recordedByUserId: uuid("recorded_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    decidedByUserId: uuid("decided_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+    voidedByUserId: uuid("voided_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidReason: text("void_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("expenses_tenant_id_unique").on(t.tenantId, t.id),
+    unique("expenses_number_unique").on(t.tenantId, t.expenseNumber),
+    foreignKey({
+      name: "expenses_account_fk",
+      columns: [t.tenantId, t.accountId],
+      foreignColumns: [financeAccounts.tenantId, financeAccounts.id],
+    }),
+    index("expenses_spent_idx").on(t.tenantId, t.spentOn),
+    check("expenses_amount", sql`${t.amountPesewas} between 1 and 100000000000`),
+    check(
+      "expenses_lengths",
+      sql`char_length(${t.category}) between 2 and 60 and char_length(${t.payee}) between 2 and 120
+        and (${t.description} is null or char_length(${t.description}) between 1 and 500)
+        and (${t.reference} is null or char_length(${t.reference}) between 1 and 60)
+        and (${t.decisionNote} is null or char_length(${t.decisionNote}) between 1 and 200)
+        and (${t.voidReason} is null or char_length(${t.voidReason}) between 3 and 200)`,
+    ),
+    check(
+      "expenses_void",
+      sql`(${t.status} = 'voided') = (${t.voidedAt} is not null) and (${t.voidedAt} is null) = (${t.voidReason} is null)`,
+    ),
+    check("expenses_decided", sql`(${t.status} = 'pending') = (${t.decidedAt} is null)`),
+  ],
+);
+
+/** A bank statement file imported for one account. */
+export const bankStatementImports = pgTable(
+  "bank_statement_imports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    accountId: uuid("account_id").notNull(),
+    fileName: text("file_name").notNull(),
+    linesAdded: integer("lines_added").notNull(),
+    linesSkipped: integer("lines_skipped").notNull(),
+    importedByUserId: uuid("imported_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("bank_statement_imports_tenant_id_unique").on(t.tenantId, t.id),
+    foreignKey({
+      name: "bank_statement_imports_account_fk",
+      columns: [t.tenantId, t.accountId],
+      foreignColumns: [financeAccounts.tenantId, financeAccounts.id],
+    }),
+    check("bank_statement_imports_name", sql`char_length(${t.fileName}) between 1 and 200`),
+  ],
+);
+
+/**
+ * One line of a bank statement: money in (positive) or out (negative). It is matched to what EduBridge recorded: a
+ * deposit, a bank payment from a family, or an expense; or explained (bank charges, interest). Unmatched lines are
+ * what someone must look into.
+ */
+export const bankStatementLines = pgTable(
+  "bank_statement_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    importId: uuid("import_id").notNull(),
+    accountId: uuid("account_id").notNull(),
+    lineOn: date("line_on", { mode: "string" }).notNull(),
+    description: text("description").notNull(),
+    reference: text("reference"),
+    amountPesewas: bigint("amount_pesewas", { mode: "number" }).notNull(),
+    /** Date, amount, reference, description and the line's place among identical lines: a re-import adds nothing. */
+    lineKey: text("line_key").notNull(),
+    matchedKind: text("matched_kind", { enum: ["deposit", "payment", "expense", "other"] }),
+    matchedId: uuid("matched_id"),
+    /** Why a line matches nothing in EduBridge (bank charges, interest), when someone explains it. */
+    matchNote: text("match_note"),
+    matchedByUserId: uuid("matched_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    matchedAt: timestamp("matched_at", { withTimezone: true }),
+  },
+  (t) => [
+    foreignKey({
+      name: "bank_statement_lines_import_fk",
+      columns: [t.tenantId, t.importId],
+      foreignColumns: [bankStatementImports.tenantId, bankStatementImports.id],
+    }),
+    foreignKey({
+      name: "bank_statement_lines_account_fk",
+      columns: [t.tenantId, t.accountId],
+      foreignColumns: [financeAccounts.tenantId, financeAccounts.id],
+    }),
+    unique("bank_statement_lines_key_unique").on(t.accountId, t.lineKey),
+    uniqueIndex("bank_statement_lines_one_match")
+      .on(t.matchedKind, t.matchedId)
+      .where(sql`${t.matchedId} is not null`),
+    index("bank_statement_lines_account_idx").on(t.tenantId, t.accountId, t.lineOn),
+    check("bank_statement_lines_amount", sql`${t.amountPesewas} <> 0`),
+    check(
+      "bank_statement_lines_match",
+      sql`(${t.matchedKind} is null) = (${t.matchedAt} is null)
+        and ((${t.matchedKind} = 'other') = (${t.matchNote} is not null))
+        and ((${t.matchedKind} is null or ${t.matchedKind} = 'other') = (${t.matchedId} is null))`,
+    ),
+    check(
+      "bank_statement_lines_lengths",
+      sql`char_length(${t.description}) between 1 and 300
+        and (${t.reference} is null or char_length(${t.reference}) between 1 and 120)
+        and (${t.matchNote} is null or char_length(${t.matchNote}) between 3 and 200)`,
+    ),
   ],
 );

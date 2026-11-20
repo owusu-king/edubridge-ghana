@@ -72,7 +72,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
           you are signed in as {user.email}. Sign out, then open this link again.
         </p>
         <form action={signOut}>
-          <Button type="submit" variant="secondary" className="w-full">
+          <Button type="submit" variant="danger-outline" className="w-full">
             Sign out
           </Button>
         </form>

@@ -574,16 +574,21 @@ function SetupPanel({
     >
       <div className="min-w-0 space-y-1">
         <h2 id="setup-heading" className="text-md font-semibold text-ink">
-          Finish setting up: {progress.done} of {progress.applicable.length} steps done
+          Finish setting up: {progress.done} of {progress.required} steps done
         </h2>
         <p className="text-base text-ink-2">
           Next: {STEP_INFO[next].title.charAt(0).toLowerCase() + STEP_INFO[next].title.slice(1)}.{" "}
           <span className="text-ink-3">{progress.steps[next].detail}</span>
         </p>
       </div>
-      <Link href={schoolPath(slug, "setup")} className={buttonStyles("primary")}>
-        Continue setup
-      </Link>
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <Link href={`${schoolPath(slug, "setup")}?path=switch` as Route} className={buttonStyles("ghost")}>
+          Moving from another system?
+        </Link>
+        <Link href={schoolPath(slug, "setup")} className={buttonStyles("primary")}>
+          Continue setup
+        </Link>
+      </div>
     </section>
   );
 }

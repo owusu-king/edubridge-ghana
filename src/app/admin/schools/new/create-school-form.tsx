@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useFormAction } from "@/components/ui/use-form-action";
 import { Alert } from "@/components/ui/alert";
+import { FormError } from "@/components/ui/toast";
 import { Button, buttonStyles } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
 import { Section } from "@/components/ui/layout";
@@ -60,7 +61,7 @@ export function CreateSchoolForm({ countries, currencies, timezones, presets }: 
 
   return (
     <form onSubmit={onSubmit} className="max-w-2xl space-y-10" noValidate>
-      {state.status === "error" && state.message && <Alert tone="critical">{state.message}</Alert>}
+      <FormError state={state} />
 
       <Section title="School">
         <div className="grid gap-5 sm:grid-cols-2">

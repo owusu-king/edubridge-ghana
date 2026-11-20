@@ -4,10 +4,13 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { EmptyState } from "@/components/ui/layout";
 import { getScoreSheet } from "@/server/assessment/scores";
+import { getElectiveTakers } from "@/server/assessment/electives";
+import { allowed } from "@/server/authz/permissions";
+import { ElectiveTakersForm } from "../../../assessment-controls";
 import { db } from "@/server/db/client";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
-import { saveScoresAction } from "../../../actions";
+import { saveScoresAction, setTakersAction } from "../../../actions";
 import { chooseTerm, termQuery } from "@/web/terms";
 import { syncOperationsAction } from "../../../../sync-actions";
 import { ScoreSheet } from "./score-sheet";
@@ -28,6 +31,10 @@ export default async function ScoreSheetPage({
   if (!term) notFound();
   const sheet = await getScoreSheet(db(), ctx, term.id, classId, subjectId);
   if (!sheet) notFound();
+  const takers =
+    sheet.subject.elective && allowed(ctx, "academics.manage")
+      ? await getElectiveTakers(db(), ctx, term.id, classId, subjectId)
+      : null;
   const lockedCount = sheet.students.filter((s) => s.locked).length;
 
   return (
@@ -58,10 +65,21 @@ export default async function ScoreSheetPage({
           Comments for report cards
         </Link>
       </div>
+      {takers && (
+        <ElectiveTakersForm
+          action={setTakersAction.bind(null, slug, term.id, sheet.cls.id, sheet.subject.id)}
+          subjectName={sheet.subject.name}
+          students={takers.students}
+        />
+      )}
       {sheet.students.length === 0 ? (
         <EmptyState
-          title="No students in this class"
-          description="Students placed in this class for the term appear here."
+          title={sheet.subject.elective ? "Nobody takes this elective yet" : "No students in this class"}
+          description={
+            sheet.subject.elective
+              ? "Choose the students who take it; their marks are entered here."
+              : "Students placed in this class for the term appear here."
+          }
         />
       ) : (
         <ScoreSheet

@@ -12,7 +12,29 @@ export const SETUP_STEPS = [
   "fees",
   "assessment",
 ] as const;
-export type SetupStep = (typeof SETUP_STEPS)[number];
+
+/**
+ * Moving from another system (2026-11-19): the same steps in the order an import needs (classes before the student
+ * list, so every row finds its class; balances owed before the first bill), with the balances from before.
+ */
+export const SWITCH_STEPS = [
+  "calendar",
+  "classes",
+  "students",
+  "guardians",
+  "balances",
+  "fees",
+  "teachers",
+  "assessment",
+] as const;
+export type SetupStep = (typeof SWITCH_STEPS)[number];
+
+/** Which guide: a school starting from nothing, or one bringing its records from another system. */
+export type SetupPath = "fresh" | "switch";
+export const isSetupPath = (v: unknown): v is SetupPath => v === "fresh" || v === "switch";
+
+/** Steps the school may not need (not every school has balances to bring); they never hold the guide open. */
+export const OPTIONAL_STEPS: readonly SetupStep[] = ["balances"];
 
 export type StepStatus = "done" | "started" | "todo";
 
@@ -37,6 +59,8 @@ export interface SetupCounts {
   /** Active levels with at least one active class. */
   levelsInUse: number;
   levelsInUseWithSubjects: number;
+  /** Students with a balance brought in from before EduBridge. */
+  openingBalances: number;
 }
 
 export interface StepState {
@@ -110,6 +134,19 @@ export function setupState(c: SetupCounts): Record<SetupStep, StepState> {
           : c.feeItems > 0
             ? { status: "started", detail: "Fee items added, but no fees set for this term." }
             : { status: "todo", detail: "No fee items yet." },
+    balances:
+      c.openingBalances > 0
+        ? {
+            status: "done",
+            detail: `${plural(c.openingBalances, "student")} with a balance brought in from your old records.`,
+          }
+        : {
+            status: "todo",
+            detail:
+              placed > 0
+                ? "No balances brought in yet. Skip this if no family owed anything or paid ahead."
+                : "Import your students first.",
+          },
     assessment:
       c.levelsInUse > 0 && c.levelsInUseWithSubjects === c.levelsInUse
         ? { status: "done", detail: "Every level with classes has its subjects." }

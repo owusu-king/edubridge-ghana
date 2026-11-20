@@ -15,6 +15,7 @@ import { withTenant } from "../db/context";
 import {
   ledgerEntries,
   mobileMoneyRequests,
+  mobileMoneyRequestShares,
   payments,
   students,
   tenantEntitlements,
@@ -233,6 +234,35 @@ function replay(
 
 type RequestData = z.infer<ReturnType<typeof requestSchemaFor>>;
 type PromptStudent = { id: string; firstName: string; lastName: string };
+/** One child's part of a family payment, in minor units. */
+export interface FamilyShare {
+  studentId: string;
+  amount: number;
+}
+
+/**
+ * A family is never sent two prompts for the same child at once: not two for one child, and not a family prompt
+ * while one of its children has a prompt waiting (or the other way round).
+ */
+async function assertNoPromptWaiting(tx: Transaction, tenantId: string, studentIds: readonly string[]) {
+  const ids = sql.join(
+    studentIds.map((id) => sql`${id}::uuid`),
+    sql`, `,
+  );
+  const waiting = await tx.execute(sql`
+    select 1 from mobile_money_requests r
+    where r.tenant_id = ${tenantId} and r.status = 'pending'
+      and (r.student_id in (${ids})
+        or exists (select 1 from mobile_money_request_shares s where s.request_id = r.id and s.student_id in (${ids})))
+    limit 1`);
+  if (waiting.rows.length > 0)
+    throw new DomainError(
+      "prompt_pending",
+      studentIds.length > 1
+        ? "A Mobile Money prompt for one of these children is still waiting. Check its status before sending another."
+        : "A Mobile Money prompt for this student is still waiting. Check its status before sending another.",
+    );
+}
 
 /**
  * Records the request and sends the prompt. `loadStudent` (inside the tenant transaction) decides whether
@@ -245,6 +275,8 @@ async function sendPrompt(
   provider: MobileMoneyProvider,
   deps: MobileMoneyDeps,
   loadStudent: (tx: Transaction) => Promise<PromptStudent | null>,
+  /** A family payment: each child's part (the first is `data.studentId`), adding up to `data.amount`. */
+  family?: { shares: readonly FamilyShare[]; payerMessage: string },
 ): Promise<RequestOutcome> {
   const existing = await findByKey(database, origin, data.idempotencyKey);
   if (existing) return replay(existing, data);
@@ -254,6 +286,11 @@ async function sendPrompt(
     created = await withTenant(database, actorScope(origin), async (tx) => {
       const student = await loadStudent(tx);
       if (!student) throw new DomainError("student_not_found", "Student not found.");
+      await assertNoPromptWaiting(
+        tx,
+        origin.tenantId,
+        family ? family.shares.map((sh) => sh.studentId) : [student.id],
+      );
       const [row] = await tx
         .insert(mobileMoneyRequests)
         .values({
@@ -268,6 +305,15 @@ async function sendPrompt(
           requestedByUserId: origin.userId,
         })
         .returning({ id: mobileMoneyRequests.id });
+      if (family)
+        await tx.insert(mobileMoneyRequestShares).values(
+          family.shares.map((sh) => ({
+            tenantId: origin.tenantId,
+            requestId: row!.id,
+            studentId: sh.studentId,
+            amountPesewas: sh.amount,
+          })),
+        );
       await recordAudit(tx, {
         tenantId: origin.tenantId,
         actorUserId: origin.userId,
@@ -280,6 +326,7 @@ async function sendPrompt(
           phone: maskPhone(data.phone),
           provider: provider.name,
           by: origin.by,
+          ...(family ? { children: family.shares.length } : {}),
         },
       });
       const [plan] = await tx
@@ -313,7 +360,7 @@ async function sendPrompt(
       currency: origin.currency,
       msisdn: data.phone,
       network: data.network,
-      payerMessage: `School fees for ${created.studentName}, ${origin.tenantName}`,
+      payerMessage: family?.payerMessage ?? `School fees for ${created.studentName}, ${origin.tenantName}`,
       callbackUrl: callbackUrlFor(provider.name, origin.tenantId, deps.callbackBaseUrl),
       settlementAccount: created.settlementAccount,
     });
@@ -446,6 +493,112 @@ export async function requestParentMobileMoneyPayment(
   });
 }
 
+/** A family payment: the children and their amounts (blank or 0 leaves a child out), and the payer's phone. */
+function familySchemaFor(school: { countryCode: string; currencyCode: string }) {
+  const single = requestSchemaFor(school);
+  return z.object({
+    shares: z
+      .array(z.object({ studentId: z.string().uuid(), amount: z.string() }))
+      .min(1)
+      .max(20)
+      .transform((rows, ctx) => {
+        const out: FamilyShare[] = [];
+        for (const r of rows) {
+          if (r.amount.trim() === "" || parseMoney(r.amount, school.currencyCode) === 0) continue;
+          const minor = parseMoney(r.amount, school.currencyCode);
+          if (minor === null) {
+            ctx.addIssue({
+              code: "custom",
+              message: "Enter each amount like 450 or 450.50.",
+              path: ["amount"],
+            });
+            return z.NEVER;
+          }
+          if (out.some((o) => o.studentId === r.studentId)) continue;
+          out.push({ studentId: r.studentId, amount: minor });
+        }
+        if (out.length === 0) {
+          ctx.addIssue({
+            code: "custom",
+            message: "Enter an amount for at least one child.",
+            path: ["amount"],
+          });
+          return z.NEVER;
+        }
+        return out;
+      }),
+    phone: single.shape.phone,
+    network: single.shape.network,
+    idempotencyKey: single.shape.idempotencyKey,
+  });
+}
+
+/**
+ * A parent pays several children's fees with one Mobile Money prompt (2026-11-18). Each child must be linked to the
+ * parent's number and owe at least their share. The provider is asked for the total; once it confirms, each child gets
+ * their own receipt (settled exactly as other prompts).
+ */
+export async function requestParentFamilyPayment(
+  database: Database,
+  parentPhone: string,
+  slug: string,
+  input: unknown,
+  deps: MobileMoneyDeps = {},
+): Promise<RequestOutcome> {
+  const school = await schoolBySlug(database, slug);
+  if (!school) throw new DomainError("student_not_found", "Student not found.");
+  const setup = await parentPaymentSetup(database, school, deps);
+  const provider = await parentSchoolProvider(database, school, deps);
+  if (!setup.enabled || !provider)
+    throw new DomainError("mobile_money_off", "This school does not take payments online yet.");
+  const data = familySchemaFor(school).parse(input);
+  const total = data.shares.reduce((sum, sh) => sum + sh.amount, 0);
+  if (!Number.isSafeInteger(total) || total > 1_000_000_000)
+    throw new DomainError("amount_too_large", "That total is too large for one prompt.", "amount");
+  const origin: Origin = {
+    tenantId: school.id,
+    tenantName: school.name,
+    currency: school.currencyCode,
+    timezone: school.timezone,
+    userId: null,
+    by: "parent",
+  };
+  const first = data.shares[0]!;
+  const request: RequestData = {
+    studentId: first.studentId,
+    amount: total,
+    phone: data.phone,
+    network: data.network,
+    idempotencyKey: data.idempotencyKey,
+  };
+  const loadChildren = async (tx: Transaction): Promise<PromptStudent | null> => {
+    const linked = new Map((await linkedStudents(tx, school.id, parentPhone)).map((st) => [st.id, st]));
+    for (const share of data.shares) {
+      const child = linked.get(share.studentId);
+      if (!child) return null;
+      const [owed] = await tx
+        .select({ total: sql<string>`coalesce(sum(${ledgerEntries.amountPesewas}), 0)` })
+        .from(ledgerEntries)
+        .where(and(eq(ledgerEntries.tenantId, school.id), eq(ledgerEntries.studentId, child.id)));
+      const balance = Number(owed?.total ?? 0);
+      const name = `${child.firstName} ${child.lastName}`;
+      if (balance <= 0) throw new DomainError("nothing_owed", `Nothing is owed for ${name}.`, "amount");
+      if (share.amount > balance)
+        throw new DomainError(
+          "amount_over_balance",
+          `Pay at most ${formatMoney(balance, school.currencyCode)} for ${name}, the amount owed.`,
+          "amount",
+        );
+    }
+    return linked.get(first.studentId) ?? null;
+  };
+  if (data.shares.length === 1) return sendPrompt(database, origin, request, provider, deps, loadChildren);
+  return sendPrompt(database, origin, request, provider, deps, loadChildren, {
+    shares: data.shares,
+    payerMessage: `School fees for ${data.shares.length} children, ${school.name}`,
+  });
+}
+
 /** A parent asks whether their payment went through; the provider is asked, as for staff. */
 export async function checkParentMobileMoneyRequest(
   database: Database,
@@ -483,7 +636,12 @@ export interface ParentPaymentAttempt {
   id: string;
   status: MobileMoneyRequestStatus;
   statusReason: string | null;
+  /** This child's part (the whole amount, unless it was a family payment). */
   amountPesewas: number;
+  /** What the payer approved: more than this child's part for a family payment. */
+  totalPesewas: number;
+  /** Paid with one prompt for several children. */
+  family: boolean;
   msisdn: string;
   createdAt: Date;
   receiptNumber: string | null;
@@ -512,22 +670,34 @@ export async function readParentPaymentAttempts(
   studentId: string,
   limit = 5,
 ): Promise<ParentPaymentAttempt[]> {
-  return tx
+  // A family payment shows on each child's page with that child's share and receipt.
+  const share = alias(mobileMoneyRequestShares, "share");
+  const rows = await tx
     .select({
       id: mobileMoneyRequests.id,
       status: mobileMoneyRequests.status,
       statusReason: mobileMoneyRequests.statusReason,
-      amountPesewas: mobileMoneyRequests.amountPesewas,
+      amountPesewas:
+        sql<number>`coalesce(${share.amountPesewas}, ${mobileMoneyRequests.amountPesewas})`.mapWith(Number),
+      totalPesewas: mobileMoneyRequests.amountPesewas,
+      family: sql<boolean>`${share.id} is not null`,
       msisdn: mobileMoneyRequests.msisdn,
       createdAt: mobileMoneyRequests.createdAt,
       receiptNumber: payments.receiptNumber,
-      paymentId: mobileMoneyRequests.paymentId,
+      paymentId: sql<string | null>`coalesce(${share.paymentId}, ${mobileMoneyRequests.paymentId})`,
     })
     .from(mobileMoneyRequests)
-    .leftJoin(payments, eq(payments.id, mobileMoneyRequests.paymentId))
-    .where(and(eq(mobileMoneyRequests.tenantId, tenantId), eq(mobileMoneyRequests.studentId, studentId)))
+    .leftJoin(share, and(eq(share.requestId, mobileMoneyRequests.id), eq(share.studentId, studentId)))
+    .leftJoin(payments, sql`${payments.id} = coalesce(${share.paymentId}, ${mobileMoneyRequests.paymentId})`)
+    .where(
+      and(
+        eq(mobileMoneyRequests.tenantId, tenantId),
+        sql`(${mobileMoneyRequests.studentId} = ${studentId} or ${share.id} is not null)`,
+      ),
+    )
     .orderBy(desc(mobileMoneyRequests.createdAt))
     .limit(limit);
+  return rows;
 }
 
 export interface CheckOutcome {
@@ -650,17 +820,52 @@ async function applyStatus(
           });
         }
         const completed = status.completedAt && status.completedAt < now ? status.completedAt : now;
-        const { paymentId } = await insertPayment(tx, {
-          tenantId: actor.tenantId,
-          studentId: row.studentId,
-          amountPesewas: row.amountPesewas,
-          method: "mobile_money",
-          reference: status.transactionId,
-          payerName: null,
-          paidOn: todayIn(actor.timezone, completed),
-          idempotencyKey: `mobile_money:${row.id}`,
-          recordedByUserId: actor.userId,
-        });
+        const paidOn = todayIn(actor.timezone, completed);
+        const shares = await tx
+          .select()
+          .from(mobileMoneyRequestShares)
+          .where(
+            and(
+              eq(mobileMoneyRequestShares.tenantId, actor.tenantId),
+              eq(mobileMoneyRequestShares.requestId, row.id),
+            ),
+          );
+        let paymentId: string;
+        if (shares.length === 0) {
+          ({ paymentId } = await insertPayment(tx, {
+            tenantId: actor.tenantId,
+            studentId: row.studentId,
+            amountPesewas: row.amountPesewas,
+            method: "mobile_money",
+            reference: status.transactionId,
+            payerName: null,
+            paidOn,
+            idempotencyKey: `mobile_money:${row.id}`,
+            recordedByUserId: actor.userId,
+          }));
+        } else {
+          // A family payment: one receipt per child, in this transaction, for exactly each child's share.
+          const paid = new Map<string, string>();
+          for (const share of shares) {
+            const receipt = await insertPayment(tx, {
+              tenantId: actor.tenantId,
+              studentId: share.studentId,
+              amountPesewas: share.amountPesewas,
+              method: "mobile_money",
+              reference: status.transactionId,
+              payerName: null,
+              paidOn,
+              idempotencyKey: `mobile_money:${row.id}:${share.studentId}`,
+              recordedByUserId: actor.userId,
+            });
+            await tx
+              .update(mobileMoneyRequestShares)
+              .set({ paymentId: receipt.paymentId })
+              .where(eq(mobileMoneyRequestShares.id, share.id));
+            paid.set(share.studentId, receipt.paymentId);
+          }
+          paymentId = paid.get(row.studentId)!;
+        }
         return finish(tx, actor, row.id, {
           status: "successful",
           paymentId,

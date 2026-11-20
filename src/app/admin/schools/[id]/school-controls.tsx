@@ -92,7 +92,7 @@ export function ReissueInvitationForm({
             />
           )}
         </Field>
-        <Button type="submit" variant="secondary" pending={pending} className="sm:mt-6">
+        <Button type="submit" variant="secondary" pending={pending} className="sm:mt-6.5">
           Create new proprietor link
         </Button>
       </form>

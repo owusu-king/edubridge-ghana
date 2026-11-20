@@ -11,6 +11,11 @@ export const menuItem =
   "flex h-9 cursor-default items-center gap-2.5 rounded-md px-2.5 text-ink-2 transition-colors outline-none select-none " +
   "data-[highlighted]:bg-subtle data-[highlighted]:text-ink";
 
+/** A menu item that ends or removes something (Sign out): red, with a pale red highlight. */
+export const menuItemDanger =
+  "flex h-9 cursor-default items-center gap-2.5 rounded-md px-2.5 text-critical transition-colors outline-none select-none " +
+  "data-[highlighted]:bg-critical-soft data-[highlighted]:text-critical";
+
 /**
  * A menu opened or closed with the mouse does not hand focus back to its button: the browser would show the
  * keyboard focus ring there after a plain click. Keyboard use (Enter to open, Escape to close) still returns

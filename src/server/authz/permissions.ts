@@ -11,7 +11,22 @@ import { DomainError } from "../errors";
  * Role keys are stable identifiers stored in the database; labels are what people see.
  * "owner" is shown as Proprietor and "bursar" as Accountant (Ghanaian school usage).
  */
-export const ROLES = ["owner", "headteacher", "admin", "bursar", "teacher", "parent", "student"] as const;
+export const ROLES = [
+  "owner",
+  "headteacher",
+  "admin",
+  "bursar",
+  "teacher",
+  "parent",
+  "student",
+  "cashier",
+  "librarian",
+  "storekeeper",
+  "transport_officer",
+  "front_desk",
+  "nurse",
+  "admissions_officer",
+] as const;
 export type Role = (typeof ROLES)[number];
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -22,18 +37,43 @@ export const ROLE_LABELS: Record<Role, string> = {
   teacher: "Teacher",
   parent: "Parent",
   student: "Student",
+  cashier: "Cashier",
+  librarian: "Librarian",
+  storekeeper: "Storekeeper",
+  transport_officer: "Transport officer",
+  front_desk: "Front desk",
+  nurse: "School nurse",
+  admissions_officer: "Admissions officer",
 };
 
+/**
+ * Operational roles (2026-11-18): staff who run one part of the school and nothing else. Before them, a librarian
+ * or storekeeper had to be made an Administrator, which also manages members and settings. Each sees only its own
+ * module, plus what every member of staff can do (ask for leave, see their payslips, report a concern).
+ */
+export const OPERATIONAL_ROLES = [
+  "cashier",
+  "librarian",
+  "storekeeper",
+  "transport_officer",
+  "front_desk",
+  "nurse",
+  "admissions_officer",
+] as const satisfies readonly Role[];
+
+/** Leaders, the office, finance and teachers: the roles that see classes and students. */
 const STAFF: readonly Role[] = ["owner", "headteacher", "admin", "bursar", "teacher"];
+/** Everyone on staff, including the operational roles: for what any employee may do. */
+const ALL_STAFF: readonly Role[] = [...STAFF, ...OPERATIONAL_ROLES];
 
 const GRANTS = {
-  "school.view": [...STAFF, "parent", "student"],
+  "school.view": [...ALL_STAFF, "parent", "student"],
   "classes.view": STAFF,
   // Teachers see only students in their own classes; these roles see every student.
-  "students.view": STAFF,
-  "students.view_all": ["owner", "headteacher", "admin", "bursar"],
+  "students.view": [...STAFF, "nurse"],
+  "students.view_all": ["owner", "headteacher", "admin", "bursar", "nurse"],
   "students.manage": ["owner", "headteacher", "admin"],
-  "students.medical": ["owner", "headteacher", "admin"],
+  "students.medical": ["owner", "headteacher", "admin", "nurse"],
   "school.settings.manage": ["owner", "admin"],
   "academics.manage": ["owner", "headteacher", "admin"],
   // Timetables: academic staff see every class's (and plan them with academics.manage); teachers see their
@@ -57,9 +97,9 @@ const GRANTS = {
   "audit.view": ["owner", "admin"],
   "security.manage": ["owner"],
   // Finance: the Proprietor and Accountant run fees; the Head teacher can look but not change anything.
-  "fees.view": ["owner", "headteacher", "bursar"],
+  "fees.view": ["owner", "headteacher", "bursar", "cashier"],
   "fees.manage": ["owner", "bursar"],
-  "payments.record": ["owner", "bursar"],
+  "payments.record": ["owner", "bursar", "cashier"],
   // Fee reminders cost the school an SMS each, so only finance staff send them.
   "fees.remind": ["owner", "bursar"],
   // Stopping a guardian using the parent view (e.g. a custody change) is a safeguarding decision.
@@ -76,16 +116,23 @@ const GRANTS = {
   "fees.close_periods": ["owner", "bursar"],
   "fees.reopen_periods": ["owner"],
   "fees.refund": ["owner", "bursar"],
+  // School money beyond fees (2026-11-18): accounts, deposits, bank statements, income against spending. The Head
+  // teacher sees them; the Proprietor and Accountant keep them. Expenses at or above the school's amount wait for the
+  // Proprietor's approval.
+  "finance.view": ["owner", "headteacher", "bursar"],
+  "finance.manage": ["owner", "bursar"],
+  "expenses.record": ["owner", "bursar"],
+  "expenses.approve": ["owner"],
   "support.manage": ["owner"],
   "transfers.manage": ["owner", "headteacher", "admin"],
   "insights.view": ["owner", "headteacher", "admin", "bursar"],
   "assistant.use": ["owner", "headteacher", "admin", "bursar"],
   "assistant.manage": ["owner"],
   // Admissions (R3-4): academic and office staff run the pipeline; the Accountant sees it (fees on enrolment).
-  "admissions.view": ["owner", "headteacher", "admin", "bursar"],
-  "admissions.manage": ["owner", "headteacher", "admin"],
+  "admissions.view": ["owner", "headteacher", "admin", "bursar", "admissions_officer"],
+  "admissions.manage": ["owner", "headteacher", "admin", "admissions_officer"],
   // Events and consent forms (R3-3): every member sees the calendar; leaders and the office run it.
-  "events.view": STAFF,
+  "events.view": ALL_STAFF,
   "events.manage": ["owner", "headteacher", "admin"],
   // Consent answers: teachers see those of their own classes' students (checked per class).
   "consent.view": ["owner", "headteacher", "admin", "teacher"],
@@ -99,41 +146,41 @@ const GRANTS = {
   // Approving leave, and recording leave for anyone; never one's own.
   "leave.approve": ["owner", "headteacher", "admin"],
   // Asking for one's own leave (members with a staff record).
-  "leave.request": STAFF,
+  "leave.request": ALL_STAFF,
   // Payroll records (R4-2): salaries are confidential, so the Proprietor and Accountant only; the
   // Proprietor approves each month. Everyone with a staff record sees their own payslips.
   "payroll.view": ["owner", "bursar"],
   "payroll.manage": ["owner", "bursar"],
   "payroll.approve": ["owner"],
-  "payroll.own": STAFF,
+  "payroll.own": ALL_STAFF,
   // Safeguarding (R4-3): anyone on staff reports a concern; only the school's designated leads, appointed by
   // the Proprietor, handle cases (a school grant, never a role). The database enforces the same rule.
-  "safeguarding.report": STAFF,
+  "safeguarding.report": ALL_STAFF,
   "safeguarding.manage": [],
   "safeguarding.appoint": ["owner"],
   // Visitors and pickup (R4-4): the office signs visitors in and out; anyone on gate duty releases a child
   // (teachers for every class at their campuses); the office decides who may collect each child.
-  "visitors.view": ["owner", "headteacher", "admin"],
-  "visitors.manage": ["owner", "headteacher", "admin"],
-  "pickup.view": ["owner", "headteacher", "admin", "teacher"],
-  "pickup.record": ["owner", "headteacher", "admin", "teacher"],
+  "visitors.view": ["owner", "headteacher", "admin", "front_desk"],
+  "visitors.manage": ["owner", "headteacher", "admin", "front_desk"],
+  "pickup.view": ["owner", "headteacher", "admin", "teacher", "front_desk"],
+  "pickup.record": ["owner", "headteacher", "admin", "teacher", "front_desk"],
   "pickup.manage": ["owner", "headteacher", "admin"],
   // Transport (R4-5): the office runs routes; the Accountant sees them (transport fees); staff on the bus,
   // teachers too, mark trips. Fares are fees: set with fees.manage.
-  "transport.view": ["owner", "headteacher", "admin", "bursar"],
-  "transport.manage": ["owner", "headteacher", "admin"],
-  "transport.trips": ["owner", "headteacher", "admin", "teacher"],
+  "transport.view": ["owner", "headteacher", "admin", "bursar", "transport_officer"],
+  "transport.manage": ["owner", "headteacher", "admin", "transport_officer"],
+  "transport.trips": ["owner", "headteacher", "admin", "teacher", "transport_officer"],
   // Inventory, assets and procurement (R4-6): the office and the Accountant keep stock and the register; the
   // Proprietor approves purchases; anyone on staff reports what needs fixing.
-  "inventory.view": ["owner", "headteacher", "admin", "bursar"],
-  "inventory.manage": ["owner", "admin", "bursar"],
-  "purchases.request": ["owner", "headteacher", "admin", "bursar"],
+  "inventory.view": ["owner", "headteacher", "admin", "bursar", "storekeeper"],
+  "inventory.manage": ["owner", "admin", "bursar", "storekeeper"],
+  "purchases.request": ["owner", "headteacher", "admin", "bursar", "storekeeper"],
   "purchases.approve": ["owner"],
-  "maintenance.report": STAFF,
+  "maintenance.report": ALL_STAFF,
   "maintenance.manage": ["owner", "headteacher", "admin"],
   // Library (R4-7): every member of staff sees the catalogue; the office runs loans. Fines are fees.
-  "library.view": STAFF,
-  "library.manage": ["owner", "headteacher", "admin"],
+  "library.view": [...STAFF, "librarian"],
+  "library.manage": ["owner", "headteacher", "admin", "librarian"],
   // Boarding (R4-8): the office runs houses and places boarders; house staff (a school grant, like safeguarding
   // leads) see their house and sign its boarders out and in on exeat.
   "boarding.view": ["owner", "headteacher", "admin", "bursar"],
@@ -217,6 +264,10 @@ export const PERMISSION_MODULES: Record<Permission, ModuleId> = {
   "fees.close_periods": "fees",
   "fees.reopen_periods": "fees",
   "fees.refund": "fees",
+  "finance.view": "finance",
+  "finance.manage": "finance",
+  "expenses.record": "finance",
+  "expenses.approve": "finance",
   "support.manage": "school_core",
   "transfers.manage": "transfer_passport",
   "insights.view": "insights",
@@ -286,6 +337,7 @@ export const READ_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "boarding.view",
   "forecasting.view",
   "early_warning.view",
+  "finance.view",
 ]);
 
 /** The plan module a permission needs, or null when it belongs to a core module (in every school). */

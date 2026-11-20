@@ -32,6 +32,7 @@ const LABELS: Record<string, string> = {
   "report_cards.print_requested": "Report cards printed",
   "student.created": "Student added",
   "students.imported": "Students imported",
+  "staff.imported": "Staff imported",
   "student.updated": "Student details changed",
   "student.enrolled": "Student placed in a class",
   "student.class_changed": "Student moved to another class",

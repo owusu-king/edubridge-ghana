@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { Alert } from "@/components/ui/alert";
+import { FormError } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import type { FormState } from "@/web/forms";
@@ -13,7 +13,7 @@ export function RequestCodeForm({ next }: { next?: string }) {
   });
   return (
     <form action={action} className="space-y-5" noValidate>
-      {state.status === "error" && !state.fieldErrors && <Alert tone="critical">{state.message}</Alert>}
+      <FormError state={state} />
       {next && <input type="hidden" name="next" value={next} />}
       <Field label="Mobile number" error={state.fieldErrors?.phone}>
         {(p) => (

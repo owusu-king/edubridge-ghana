@@ -1,10 +1,9 @@
 "use client";
 
 import { useId, useState, type ReactNode } from "react";
-import { Alert } from "./alert";
 import { Button, type ButtonSize, type ButtonVariant } from "./button";
 import { Dialog } from "./dialog";
-import { toast } from "./toast";
+import { FormError, toast } from "./toast";
 import { useFormAction } from "./use-form-action";
 import type { FormState } from "@/web/forms";
 
@@ -48,7 +47,13 @@ export function FormDialog<T = undefined>({
   return (
     <>
       <Button
-        variant={triggerVariant}
+        // A dialog that ends in a red confirmation is opened by a red-outlined button, unless it is already red
+        // (or the page's main action).
+        variant={
+          danger && (triggerVariant === "secondary" || triggerVariant === "ghost")
+            ? "danger-outline"
+            : triggerVariant
+        }
         size={triggerSize}
         onClick={() => setOpen(true)}
         aria-label={triggerLabel}
@@ -102,8 +107,6 @@ function DialogForm<T>({
     return result;
   });
   const formId = useId();
-  const showGeneralError =
-    state.status === "error" && state.message && !Object.keys(state.fieldErrors ?? {}).length;
   return (
     <Dialog
       open
@@ -123,7 +126,7 @@ function DialogForm<T>({
       }
     >
       <form id={formId} onSubmit={onSubmit} className="space-y-5" noValidate>
-        {showGeneralError && <Alert tone="critical">{state.message}</Alert>}
+        <FormError state={state} />
         {children?.(state)}
       </form>
     </Dialog>

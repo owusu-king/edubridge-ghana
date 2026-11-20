@@ -15,7 +15,10 @@ const control =
   "focus-visible:border-accent focus-visible:shadow-[inset_0_0_0_1px_var(--color-accent)] focus-visible:outline-hidden " +
   "disabled:cursor-not-allowed disabled:bg-subtle disabled:text-ink-3 " +
   "aria-invalid:border-critical aria-invalid:focus-visible:border-critical " +
-  "aria-invalid:focus-visible:shadow-[inset_0_0_0_1px_var(--color-critical)] sm:text-base";
+  "aria-invalid:focus-visible:shadow-[inset_0_0_0_1px_var(--color-critical)] sm:text-base " +
+  // A browser's saved-password fill keeps the field's own colours instead of its yellow wash.
+  "autofill:shadow-[inset_0_0_0_100px_var(--color-surface)] autofill:[-webkit-text-fill-color:var(--color-ink)] " +
+  "autofill:focus-visible:shadow-[inset_0_0_0_1px_var(--color-accent),inset_0_0_0_100px_var(--color-surface)]";
 
 /*
  * A file picker in the same frame as other inputs. The browser draws its own "Choose file" button inside;
@@ -79,6 +82,21 @@ interface FieldProps {
   optional?: boolean;
   className?: string;
 }
+
+/*
+ * A button (or swatch, or note) placed beside fields in a row. The row aligns its items to the top
+ * (`items-start`), and this drops the button by the height of a field's label (one text-sm line plus the 1.5
+ * gap), so it lines up with the inputs whatever help text or error appears below them. Aligning the row to the
+ * bottom instead puts the button level with the help text.
+ */
+export const besideField = "mt-6.5";
+
+/*
+ * For fields side by side in a grid whose labels or help text differ in length: each field takes three rows of
+ * the parent grid (label, control, help), so the inputs share one line and the labels sit just above them.
+ */
+export const fieldInGrid =
+  "sm:grid sm:row-span-3 sm:grid-rows-subgrid sm:gap-y-1.5 sm:space-y-0 sm:[&>label]:self-end";
 
 /** Label, control, help text and error, wired together for assistive technology. */
 export function Field({ label, description, error, optional = false, className, children }: FieldProps) {

@@ -1,9 +1,8 @@
 "use client";
 
 import { useActionState } from "react";
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select, Textarea } from "@/components/ui/field";
+import { besideField, Field, Input, Select, Textarea } from "@/components/ui/field";
 import { FormDialog } from "@/components/ui/form-dialog";
 import {
   CONCERN_CATEGORIES,
@@ -12,7 +11,7 @@ import {
   WRITTEN_ENTRY_KINDS,
 } from "@/lib/safeguarding";
 import type { FormState } from "@/web/forms";
-import { SuccessToast } from "@/components/ui/toast";
+import { FormError, SuccessToast } from "@/components/ui/toast";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
 
@@ -38,7 +37,7 @@ export function ReportForm({
       key={state.status === "success" ? state.message : "form"}
     >
       <SuccessToast state={state} />
-      {state.status === "error" && !Object.keys(e).length && <Alert tone="critical">{state.message}</Alert>}
+      <FormError state={state} />
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label="Child" error={e.studentId}>
           {(p) => (
@@ -195,7 +194,7 @@ export function AssignLeadForm({
 }) {
   const [state, formAction, pending] = useActionState(action, { status: "idle" } as FormState);
   return (
-    <form action={formAction} className="flex flex-wrap items-end gap-2" noValidate>
+    <form action={formAction} className="flex flex-wrap items-start gap-2" noValidate>
       <Field label="Lead responsible" error={state.fieldErrors?.membershipId}>
         {(p) => (
           <Select {...p} name="membershipId" defaultValue={current ?? ""}>
@@ -208,7 +207,7 @@ export function AssignLeadForm({
           </Select>
         )}
       </Field>
-      <Button type="submit" variant="secondary" pending={pending}>
+      <Button type="submit" variant="secondary" className={besideField} pending={pending}>
         Save
       </Button>
     </form>
@@ -226,7 +225,7 @@ export function AppointLeadForm({
   if (!members.length)
     return <p className="text-base text-ink-3">Every active member of staff is already a lead.</p>;
   return (
-    <form action={formAction} className="flex flex-wrap items-end gap-3" noValidate>
+    <form action={formAction} className="flex flex-wrap items-start gap-3" noValidate>
       <Field
         label="Appoint a lead"
         error={state.fieldErrors?.membershipId}
@@ -245,7 +244,7 @@ export function AppointLeadForm({
           </Select>
         )}
       </Field>
-      <Button type="submit" variant="secondary" pending={pending}>
+      <Button type="submit" variant="secondary" className={besideField} pending={pending}>
         Appoint
       </Button>
     </form>

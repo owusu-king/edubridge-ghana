@@ -14,8 +14,10 @@ import type { ReportCardStyle } from "./report-styles";
  * Every template is an assumption to verify with schools in that country; none is an official standard.
  */
 
-export const STAGES = ["creche", "nursery", "kindergarten", "primary", "jhs"] as const;
+export const STAGES = ["creche", "nursery", "kindergarten", "primary", "jhs", "shs"] as const;
 export type Stage = (typeof STAGES)[number];
+/** The stages every template defines itself; senior secondary ("shs") is optional (2026-11-18). */
+type BaseStage = Exclude<Stage, "shs">;
 
 export interface CurriculumTemplate {
   id: string;
@@ -29,6 +31,41 @@ export interface CurriculumTemplate {
   components: AssessmentComponent[];
   /** The report-card layout schools on this curriculum usually print (a school can choose another). */
   reportStyle: ReportCardStyle;
+  /**
+   * Subjects of a stage that only some students take (SHS electives): set up as electives, so each student takes
+   * the ones chosen for them (2026-11-18).
+   */
+  electives: Partial<Record<Stage, string[]>>;
+}
+
+/** A template as written: the five base stages, and senior secondary only where the curriculum has one here. */
+type BaseTemplate = Omit<
+  CurriculumTemplate,
+  "stageLabels" | "levels" | "subjects" | "bands" | "electives"
+> & {
+  stageLabels: Record<BaseStage, string>;
+  levels: Record<BaseStage, string[]>;
+  subjects: Record<BaseStage, string[]>;
+  bands: Record<BaseStage, GradeBand[]>;
+  secondary?: {
+    label: string;
+    levels: string[];
+    subjects: string[];
+    electives: string[];
+    bands: GradeBand[];
+  };
+};
+
+/** Templates without a senior secondary stage offer none (no levels, no subjects); their bands are the JHS ones. */
+function complete({ secondary, ...t }: BaseTemplate): CurriculumTemplate {
+  return {
+    ...t,
+    stageLabels: { ...t.stageLabels, shs: secondary?.label ?? "Senior secondary" },
+    levels: { ...t.levels, shs: secondary?.levels ?? [] },
+    subjects: { ...t.subjects, shs: secondary ? [...secondary.subjects, ...secondary.electives] : [] },
+    bands: { ...t.bands, shs: secondary?.bands ?? t.bands.jhs },
+    electives: secondary ? { shs: secondary.electives } : {},
+  };
 }
 
 const PROFICIENCY: GradeBand[] = [
@@ -53,11 +90,28 @@ const GH_JHS: GradeBand[] = [
 
 const GH_EARLY = ["Language and Literacy", "Numeracy", "Creative Arts", "Our World Our People"];
 
+/**
+ * WASSCE grades as Ghanaian senior high schools use them for school assessment: A1 to F9 (assumption to verify with
+ * pilot schools; WAEC grades the examination itself).
+ */
+const GH_WASSCE: GradeBand[] = [
+  { min: 80, grade: "A1", remark: "Excellent" },
+  { min: 70, grade: "B2", remark: "Very good" },
+  { min: 65, grade: "B3", remark: "Good" },
+  { min: 60, grade: "C4", remark: "Credit" },
+  { min: 55, grade: "C5", remark: "Credit" },
+  { min: 50, grade: "C6", remark: "Credit" },
+  { min: 45, grade: "D7", remark: "Pass" },
+  { min: 40, grade: "E8", remark: "Pass" },
+  { min: 0, grade: "F9", remark: "Fail" },
+];
+
 /** Ghana: GES/NaCCA Standards-Based Curriculum (KG–Basic 6) and Common Core Programme (JHS). */
-const GHANA: CurriculumTemplate = {
+const GHANA: BaseTemplate = {
   id: "ghana_ges",
-  name: "Ghana (GES basic school)",
-  description: "Creche to JHS 3, NaCCA subjects, proficiency levels and the JHS 1–9 scale.",
+  name: "Ghana (GES)",
+  description:
+    "Creche to SHS 3: NaCCA subjects, proficiency levels, the JHS 1–9 scale and BECE aggregate, and WASSCE grades with electives at SHS.",
   stageLabels: {
     creche: "Creche",
     nursery: "Nursery",
@@ -115,6 +169,29 @@ const GHANA: CurriculumTemplate = {
     { key: "class", name: "Class score", weight: 50, outOf: 50 },
     { key: "exam", name: "Exam", weight: 50, outOf: 100 },
   ],
+  secondary: {
+    label: "Senior High School",
+    levels: ["SHS 1", "SHS 2", "SHS 3"],
+    subjects: ["English Language", "Core Mathematics", "Integrated Science", "Social Studies"],
+    electives: [
+      "Elective Mathematics",
+      "Physics",
+      "Chemistry",
+      "Biology",
+      "Economics",
+      "Geography",
+      "Government",
+      "History",
+      "Literature-in-English",
+      "Christian Religious Studies",
+      "Business Management",
+      "Financial Accounting",
+      "Cost Accounting",
+      "French",
+      "Information and Communication Technology",
+    ],
+    bands: GH_WASSCE,
+  },
 };
 
 /** Kenya's competency-based rubric (four levels), and the eight-level scale used in Junior School. */
@@ -136,7 +213,7 @@ const KE_EIGHT: GradeBand[] = [
 ];
 
 /** Kenya: Competency-Based Education (pre-primary, primary and Junior School). */
-const KENYA: CurriculumTemplate = {
+const KENYA: BaseTemplate = {
   id: "kenya_cbe",
   name: "Kenya (Competency-Based Education)",
   description: "Playgroup to Grade 9, CBE learning areas and the EE/ME/AE/BE rubric.",
@@ -212,7 +289,7 @@ const NG_BANDS: GradeBand[] = [
 ];
 
 /** Nigeria: Universal Basic Education (nursery, primary and junior secondary). */
-const NIGERIA: CurriculumTemplate = {
+const NIGERIA: BaseTemplate = {
   id: "nigeria_ube",
   name: "Nigeria (Universal Basic Education)",
   description: "Pre-nursery to JSS 3, basic education subjects and the A–F scale.",
@@ -274,7 +351,7 @@ const FR_BANDS: GradeBand[] = [
 ];
 
 /** French-system schools (Côte d'Ivoire, Senegal, Cameroon's francophone sub-system). */
-const FRANCOPHONE: CurriculumTemplate = {
+const FRANCOPHONE: BaseTemplate = {
   id: "francophone",
   name: "Système francophone",
   description: "Crèche à la 3e, matières en français, notes sur 20.",
@@ -336,7 +413,7 @@ const INTL_BANDS: GradeBand[] = [
 ];
 
 /** English-medium international schools (British-style years), and countries without their own template. */
-const INTERNATIONAL: CurriculumTemplate = {
+const INTERNATIONAL: BaseTemplate = {
   id: "international",
   name: "International (British-style years)",
   description: "Early years to Year 9, core subjects and an A*–U scale.",
@@ -425,7 +502,7 @@ const IB_PYP: GradeBand[] = [
 ];
 
 /** IB World Schools: Primary Years Programme (descriptors) and Middle Years Programme (criteria A–D, 1–7). */
-const IB: CurriculumTemplate = {
+const IB: BaseTemplate = {
   id: "ib",
   name: "International Baccalaureate (PYP and MYP)",
   description: "Early years to MYP 5, MYP subject groups, criteria A to D marked out of 8 and the 1–7 scale.",
@@ -507,7 +584,7 @@ const US_STANDARDS: GradeBand[] = [
 ];
 
 /** American-curriculum schools: Pre-K to Grade 8, letter grades and a GPA from Grade 1. */
-const AMERICAN: CurriculumTemplate = {
+const AMERICAN: BaseTemplate = {
   id: "american",
   name: "American (Pre-K to Grade 8)",
   description:
@@ -573,7 +650,7 @@ const AMERICAN: CurriculumTemplate = {
   ],
 };
 
-export const CURRICULUM_TEMPLATES = [
+export const CURRICULUM_TEMPLATES: readonly CurriculumTemplate[] = [
   GHANA,
   KENYA,
   NIGERIA,
@@ -581,7 +658,7 @@ export const CURRICULUM_TEMPLATES = [
   INTERNATIONAL,
   IB,
   AMERICAN,
-] as const;
+].map(complete);
 export type TemplateId = (typeof CURRICULUM_TEMPLATES)[number]["id"];
 export const TEMPLATE_IDS = CURRICULUM_TEMPLATES.map((t) => t.id) as [TemplateId, ...TemplateId[]];
 

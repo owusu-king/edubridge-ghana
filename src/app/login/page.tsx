@@ -49,7 +49,10 @@ export default async function LoginPage({
         </div>
       </main>
       <footer className="text-xs text-ink-3">
-        EduBridge · School operations for international and private schools
+        EduBridge · School operations for international and private schools ·{" "}
+        <Link href={"/trust" as Route} className="hover:text-ink hover:underline">
+          How we protect school data
+        </Link>
       </footer>
     </div>
   );

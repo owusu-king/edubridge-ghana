@@ -42,6 +42,7 @@ export default async function SafeguardingSettingsPage({ params }: { params: Pro
               <ActionButton
                 action={endLeadAction.bind(null, slug, l.id)}
                 label="End"
+                variant="danger-outline"
                 ariaLabel={`End ${l.name} as a lead`}
               />
             </li>

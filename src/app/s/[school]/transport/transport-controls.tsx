@@ -1,13 +1,12 @@
 "use client";
 
 import { useActionState } from "react";
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/field";
+import { besideField, Field, Input, Select } from "@/components/ui/field";
 import { FormDialog } from "@/components/ui/form-dialog";
 import { RIDE_DIRECTIONS, RIDE_DIRECTION_LABELS } from "@/lib/transport";
 import type { FormState } from "@/web/forms";
-import { SuccessToast } from "@/components/ui/toast";
+import { FormError, FormMessage, SuccessToast } from "@/components/ui/toast";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
 
@@ -277,7 +276,7 @@ export function FaresForm({
   return (
     <form action={formAction} className="max-w-2xl space-y-5" noValidate>
       <SuccessToast state={state} />
-      {state.status === "error" && !Object.keys(e).length && <Alert tone="critical">{state.message}</Alert>}
+      <FormError state={state} />
       <Field
         label={`Fare per term (${currency})`}
         description="Charged to each student on this route when the term is billed. Blank: no fare."
@@ -412,7 +411,7 @@ export function FeeItemForm({
 }) {
   const [state, formAction, pending] = useActionState(action, { status: "idle" } as FormState);
   return (
-    <form action={formAction} className="flex flex-wrap items-end gap-3" noValidate>
+    <form action={formAction} className="flex flex-wrap items-start gap-3" noValidate>
       <Field
         label="Transport fee item"
         error={state.fieldErrors?.feeItemId}
@@ -429,13 +428,10 @@ export function FeeItemForm({
           </Select>
         )}
       </Field>
-      <Button type="submit" variant="secondary" pending={pending}>
+      <Button type="submit" variant="secondary" className={besideField} pending={pending}>
         Save
       </Button>
-      <SuccessToast state={state} />
-      <span aria-live="polite" className="text-sm text-critical">
-        {!pending && state.status === "error" && !state.fieldErrors ? state.message : ""}
-      </span>
+      <FormMessage state={state} />
     </form>
   );
 }

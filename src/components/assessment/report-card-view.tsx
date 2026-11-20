@@ -34,6 +34,8 @@ export function ReportCardView({ card }: { card: ReportCardSnapshot }) {
         : "Not graded",
     ]);
   if (info.showGpa) facts.push(["Term GPA", gpa !== null ? formatGpa(gpa) : "—"]);
+  if (card.overall.aggregate !== undefined && card.overall.aggregate !== null)
+    facts.push(["Aggregate (best six)", String(card.overall.aggregate)]);
   if (positionsShown)
     facts.push([
       "Position in class",

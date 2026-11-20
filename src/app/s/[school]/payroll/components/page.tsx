@@ -77,6 +77,7 @@ export default async function ComponentsPage({ params }: { params: Promise<{ sch
                       <ActionButton
                         action={setPayComponentArchivedAction.bind(null, slug, c.id, !c.archived)}
                         label={c.archived ? "Restore" : "Archive"}
+                        variant={c.archived ? "secondary" : "danger-outline"}
                         ariaLabel={`${c.archived ? "Restore" : "Archive"} ${c.name}`}
                       />
                     )}

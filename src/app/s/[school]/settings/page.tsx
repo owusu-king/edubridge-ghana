@@ -108,7 +108,11 @@ export default async function SettingsPage({ params }: { params: Promise<{ schoo
                 submitLabel="Upload"
               />
               {preferences.logoFileId && (
-                <ActionButton action={removeLogoAction.bind(null, ctx.tenant.slug)} label="Remove logo" />
+                <ActionButton
+                  action={removeLogoAction.bind(null, ctx.tenant.slug)}
+                  variant="danger-outline"
+                  label="Remove logo"
+                />
               )}
             </div>
           </div>

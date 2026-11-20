@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/field";
+import { besideField, Field, Input, Select } from "@/components/ui/field";
 import { FormDialog } from "@/components/ui/form-dialog";
 import { BILLING_PERIOD_LABELS, BILLING_PERIODS } from "@/lib/plan";
 import type { FormState } from "@/web/forms";
@@ -100,7 +100,7 @@ export function ReadOnlyDaysForm({ action, days }: { action: Action; days: numbe
   return (
     <form action={formAction} className="space-y-3" noValidate>
       {state.status !== "idle" && state.message && !state.fieldErrors && <FormMessage state={state} />}
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="flex flex-wrap items-start gap-3">
         <Field
           label="Days read-only after a module ends"
           description="The school's records stay viewable and exportable, but cannot change. 0 turns the module off at once. Applies to modules from R4 on."
@@ -119,7 +119,7 @@ export function ReadOnlyDaysForm({ action, days }: { action: Action; days: numbe
             />
           )}
         </Field>
-        <Button type="submit" variant="secondary" pending={pending}>
+        <Button type="submit" variant="secondary" className={besideField} pending={pending}>
           Save
         </Button>
       </div>

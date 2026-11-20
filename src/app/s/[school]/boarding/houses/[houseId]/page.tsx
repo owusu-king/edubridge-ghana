@@ -83,6 +83,7 @@ export default async function HousePage({
             <ActionButton
               action={setHouseArchivedAction.bind(null, slug, house.id, house.status === "active")}
               label={house.status === "active" ? "Archive" : "Restore"}
+              variant={house.status === "active" ? "danger-outline" : "secondary"}
               ariaLabel={`${house.status === "active" ? "Archive" : "Restore"} ${house.name}`}
             />
           )}
@@ -139,12 +140,14 @@ export default async function HousePage({
                         <ActionButton
                           action={endPlacementAction.bind(null, slug, house.id, b.boarder.assignmentId)}
                           label="Take out"
+                          variant="danger-outline"
                           ariaLabel={`Take ${b.boarder.name} out of boarding`}
                         />
                       ) : (
                         <ActionButton
                           action={archiveBedAction.bind(null, slug, house.id, b.id)}
                           label="Out of use"
+                          variant="danger-outline"
                           ariaLabel={`Take ${room.name}, ${b.label} out of use`}
                         />
                       ))}
@@ -172,6 +175,7 @@ export default async function HousePage({
                   <ActionButton
                     action={endStaffAction.bind(null, slug, house.id, s.id)}
                     label="End"
+                    variant="danger-outline"
                     ariaLabel={`End ${s.name} as house staff`}
                   />
                 )}

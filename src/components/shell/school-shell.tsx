@@ -7,6 +7,7 @@ import { isPlatformAdmin } from "@/server/platform/service";
 import { getLiveSupportGrant } from "@/server/support/access";
 import { getBranding } from "@/server/tenancy/branding";
 import { listUserSchools, type TenantContext } from "@/server/tenancy/service";
+import { leaveDemo } from "@/app/actions/leave-demo";
 import { signOut } from "@/app/actions/sign-out";
 import { AppShell } from "./app-shell";
 
@@ -43,6 +44,25 @@ export async function SchoolShell({
       <strong className="font-semibold">EduBridge support can open this school</strong> until{" "}
       {until(supportGrant.expiresAt)}. You can end it at any time under Settings, Support access.
     </>
+  ) : ctx.demoVisitor ? (
+    <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+      <span>
+        <strong className="font-semibold">You are looking round a demo school.</strong> Every name and figure
+        is made up, and changes are switched off.
+      </span>
+      <span className="flex items-center gap-4">
+        <form action={leaveDemo.bind(null, true)}>
+          <button type="submit" className="font-medium underline underline-offset-2 hover:no-underline">
+            Book a demo
+          </button>
+        </form>
+        <form action={leaveDemo.bind(null, false)}>
+          <button type="submit" className="font-medium underline underline-offset-2 hover:no-underline">
+            Leave the demo
+          </button>
+        </form>
+      </span>
+    </span>
   ) : ctx.tenant.isDemo ? (
     <>
       <strong className="font-semibold">Demo school.</strong> Every name, number and figure here is made up.

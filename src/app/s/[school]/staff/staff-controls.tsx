@@ -2,9 +2,10 @@
 
 import { useActionState, useState, useTransition } from "react";
 import { Alert } from "@/components/ui/alert";
+import { FormMessage } from "@/components/ui/toast";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select, Textarea } from "@/components/ui/field";
+import { besideField, Field, Input, Select, Textarea } from "@/components/ui/field";
 import { Disclosure } from "@/components/ui/disclosure";
 import { FormDialog } from "@/components/ui/form-dialog";
 import {
@@ -489,7 +490,7 @@ export function LeaveFields({
 export function AddNameForm({ action, label }: { action: Action; label: string }) {
   const [state, formAction, pending] = useActionState(action, { status: "idle" } as FormState);
   return (
-    <form action={formAction} className="flex flex-wrap items-end gap-3" noValidate>
+    <form action={formAction} className="flex flex-wrap items-start gap-3" noValidate>
       <Field label={label} error={state.fieldErrors?.name} className="min-w-0 grow basis-56 sm:max-w-xs">
         {(p) => (
           <Input
@@ -501,7 +502,7 @@ export function AddNameForm({ action, label }: { action: Action; label: string }
           />
         )}
       </Field>
-      <Button type="submit" variant="secondary" pending={pending}>
+      <Button type="submit" variant="secondary" className={besideField} pending={pending}>
         Add
       </Button>
     </form>
@@ -622,13 +623,9 @@ export function StaffAttendanceSheet({
 
   return (
     <div className="space-y-4">
-      {result && result.status !== "idle" && (
-        <Alert
-          tone={result.status === "error" ? "critical" : result.data?.conflicts.length ? "info" : "positive"}
-        >
-          {result.message}
-        </Alert>
-      )}
+      {/* A plain save or an error is a toast; marks changed meanwhile stay here to be reviewed. */}
+      {result && !result.data?.conflicts.length && <FormMessage state={result} />}
+      {result?.data?.conflicts.length ? <Alert tone="info">{result.message}</Alert> : null}
       {result?.data?.conflicts.length ? (
         <ul className="space-y-1 text-sm text-ink-2" aria-label="Changed meanwhile">
           {result.data.conflicts.map((c) => (

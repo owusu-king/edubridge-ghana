@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { Alert } from "@/components/ui/alert";
+import { FormError } from "@/components/ui/toast";
 import type { FormState } from "@/web/forms";
 
 const buttonClass =
@@ -23,7 +24,7 @@ export function ConsentButtons({
   if (state.status === "success") return <Alert tone="positive">{state.message}</Alert>;
   return (
     <div className="space-y-2">
-      {state.status === "error" && <Alert tone="critical">{state.message}</Alert>}
+      <FormError state={state} />
       <div className="flex flex-wrap gap-2">
         <form action={allowAction}>
           <button
@@ -64,7 +65,7 @@ export function MoveSchoolForm({
   if (state.status === "success") return <Alert tone="positive">{state.message}</Alert>;
   return (
     <form action={formAction} className="space-y-3">
-      {state.status === "error" && <Alert tone="critical">{state.message}</Alert>}
+      <FormError state={state} />
       <label className="block space-y-1.5">
         <span className="text-sm font-medium text-ink">New school</span>
         <select

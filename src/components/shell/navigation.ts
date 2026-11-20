@@ -17,7 +17,9 @@ import {
   LifeBuoy,
   GraduationCap,
   IdCard,
+  Inbox,
   KeyRound,
+  Landmark,
   Layers,
   Megaphone,
   MessageSquareText,
@@ -156,6 +158,7 @@ const SCHOOL_NAV: readonly {
   },
 
   { label: "Fees", segment: "fees", icon: Wallet, permission: "fees.view", section: "Finance" },
+  { label: "Finances", segment: "finance", icon: Landmark, permission: "finance.view", section: "Finance" },
   { label: "Payroll", segment: "payroll", icon: Banknote, permission: "payroll.view", section: "Finance" },
   {
     label: "Payslips",
@@ -255,6 +258,7 @@ export function navLinks(area: ShellArea): NavLink[] {
       { label: "Modules", href: "/admin/modules" as Route, icon: Blocks },
       { label: "Billing", href: "/admin/billing" as Route, icon: Receipt },
       { label: "Integrations", href: "/admin/integrations" as Route, icon: KeyRound },
+      { label: "Enquiries", href: "/admin/enquiries" as Route, icon: Inbox },
     ];
   }
   const links: NavLink[] = SCHOOL_NAV.filter(

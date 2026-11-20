@@ -190,3 +190,334 @@
     }
   }
 }
+
+/*
+ * Sidebar icon motion (nav-icon-motion.ts). When a row has been hovered, or reached by keyboard, for a moment
+ * (--icon-wait), one part of its icon makes a small gesture of what the link is for, then rests: the wallet
+ * opens, the tassel swings, the check is drawn. The icon itself never moves; only a part of it does. Played once,
+ * about half a second, eased out. Passing the pointer over the sidebar on the way elsewhere sets nothing moving.
+ * Parts are the icon's SVG children in Lucide's order; transform origins are in the icon's 24-unit grid. Nothing
+ * moves for people who ask for reduced motion.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  [data-motion] {
+    --icon-wait: 300ms;
+  }
+  [data-motion] > * {
+    transform-box: view-box;
+  }
+
+  .group:is(:hover, :focus-visible) {
+    /* Command Center: the needle sweeps back and settles. */
+    & [data-motion="needle"] > :nth-child(1) {
+      transform-origin: 12px 14px;
+      animation: icon-needle 680ms var(--ease-out) var(--icon-wait);
+    }
+    /* Insights: the trend line is drawn left to right (its path runs right to left). */
+    & [data-motion="trace"] > :nth-child(2) {
+      --length: 20px;
+      --draw-from: -20px;
+      animation: icon-draw 620ms var(--ease-out) var(--icon-wait);
+    }
+    /* Assistant: the lines of the message are written again, one after another. */
+    & [data-motion="type"] > :nth-child(n + 2) {
+      --length: 11px;
+      animation: icon-draw 300ms var(--ease-out) var(--icon-wait);
+    }
+    & [data-motion="type"] > :nth-child(2) {
+      animation-delay: calc(var(--icon-wait) + 90ms);
+    }
+    & [data-motion="type"] > :nth-child(3) {
+      animation-delay: calc(var(--icon-wait) + 180ms);
+    }
+    /* Students: the tassel swings. */
+    & [data-motion="tassel"] > :nth-child(2) {
+      transform-origin: 22px 10px;
+      animation: icon-swing 760ms var(--ease-out) var(--icon-wait);
+    }
+    /* Admissions: the plus turns in. */
+    & [data-motion="plus"] > :nth-child(n + 3) {
+      transform-origin: 19px 11px;
+      animation: icon-plus 520ms var(--ease-out) var(--icon-wait);
+    }
+    /* Classes: the door is drawn and the window lights. */
+    & [data-motion="school"] > :nth-child(1) {
+      --length: 13px;
+      animation: icon-draw 520ms var(--ease-out) var(--icon-wait);
+    }
+    & [data-motion="school"] > :nth-child(6) {
+      transform-box: fill-box;
+      transform-origin: center;
+      animation: icon-pop 420ms var(--ease-out) calc(var(--icon-wait) + 160ms);
+    }
+    /* Timetable: the clock hand goes round. */
+    & [data-motion="clock"] > :nth-child(1) {
+      --turn: 360deg;
+      transform-origin: 16px 16px;
+      animation: icon-turn 720ms var(--ease-out) var(--icon-wait);
+    }
+    /* Attendance, Safeguarding, Pickup: the check is drawn again. */
+    & [data-motion="check-last"] > :last-child,
+    & [data-motion="check-first"] > :first-child {
+      --length: 10px;
+      animation: icon-draw 480ms var(--ease-out) var(--icon-wait);
+    }
+    /* Assessment: the lines are filled in. */
+    & [data-motion="list"] > :nth-child(3),
+    & [data-motion="list"] > :nth-child(4) {
+      --length: 5px;
+      animation: icon-draw 320ms var(--ease-out) var(--icon-wait);
+    }
+    & [data-motion="list"] > :nth-child(4) {
+      animation-delay: calc(var(--icon-wait) + 120ms);
+    }
+    /* Early warning: the spokes of the buoy turn; its rings stay. */
+    & [data-motion="buoy"] > :nth-child(n + 2):nth-child(-n + 5) {
+      --turn: 90deg;
+      transform-origin: 12px 12px;
+      animation: icon-turn 640ms var(--ease-out) var(--icon-wait);
+    }
+    /* Fees: the wallet opens on its hinge and closes again. */
+    & [data-motion="wallet"] > :nth-child(1) {
+      transform-origin: 3px 7px;
+      animation: icon-open 720ms var(--ease-out) var(--icon-wait);
+    }
+    /* Finances: the columns rise in turn. */
+    & [data-motion="columns"] > :is(:nth-child(1), :nth-child(3), :nth-child(4), :nth-child(6)) {
+      transform-origin: 12px 18px;
+      animation: icon-rise 460ms var(--ease-out) var(--icon-wait);
+    }
+    & [data-motion="columns"] > :nth-child(1) {
+      animation-delay: calc(var(--icon-wait) + 60ms);
+    }
+    & [data-motion="columns"] > :nth-child(3) {
+      animation-delay: calc(var(--icon-wait) + 120ms);
+    }
+    & [data-motion="columns"] > :nth-child(4) {
+      animation-delay: calc(var(--icon-wait) + 180ms);
+    }
+    /* Payroll: the coin on the note spins. */
+    & [data-motion="coin"] > :nth-child(2) {
+      transform-box: fill-box;
+      transform-origin: center;
+      animation: icon-spin 700ms var(--ease-out) var(--icon-wait);
+    }
+    /* Staff: the lines on the card are written in. */
+    & [data-motion="card"] > :is(:nth-child(2), :nth-child(3)) {
+      --length: 3px;
+      animation: icon-draw 300ms var(--ease-out) var(--icon-wait);
+    }
+    & [data-motion="card"] > :nth-child(3) {
+      animation-delay: calc(var(--icon-wait) + 120ms);
+    }
+    /* Announcements: the horn flares from its handle. */
+    & [data-motion="horn"] > :nth-child(1) {
+      transform-origin: 8px 10px;
+      animation: icon-flare 560ms var(--ease-out) var(--icon-wait);
+    }
+    /* Events: the days appear one after another. */
+    & [data-motion="dots"] > :nth-child(n + 5) {
+      animation: icon-appear 240ms var(--ease-out) var(--icon-wait);
+    }
+    & [data-motion="dots"] > :nth-child(6) {
+      animation-delay: calc(var(--icon-wait) + 50ms);
+    }
+    & [data-motion="dots"] > :nth-child(7) {
+      animation-delay: calc(var(--icon-wait) + 100ms);
+    }
+    & [data-motion="dots"] > :nth-child(8) {
+      animation-delay: calc(var(--icon-wait) + 150ms);
+    }
+    & [data-motion="dots"] > :nth-child(9) {
+      animation-delay: calc(var(--icon-wait) + 200ms);
+    }
+    & [data-motion="dots"] > :nth-child(10) {
+      animation-delay: calc(var(--icon-wait) + 250ms);
+    }
+    /* Visitors: the door swings on its hinge. */
+    & [data-motion="door"] > :nth-child(4) {
+      transform-origin: 10px 12px;
+      animation: icon-door 640ms var(--ease-out) var(--icon-wait);
+    }
+    /* Transport: the bus bobs on its wheels; the wheels stay on the road. */
+    & [data-motion="bus"] > :not(circle) {
+      animation: icon-bob 620ms var(--ease-out) var(--icon-wait);
+    }
+    /* Inventory: the top box is lifted off the stack. */
+    & [data-motion="lift"] > :nth-child(n + 9) {
+      animation: icon-lift 560ms var(--ease-out) var(--icon-wait);
+    }
+    /* Maintenance, and the platform's Integrations: the tool is drawn again. */
+    & [data-motion="redraw"] > :nth-child(1) {
+      --length: 64px;
+      animation: icon-draw 760ms var(--ease-out) var(--icon-wait);
+    }
+    /* Library: the book opens from its spine. */
+    & [data-motion="book"] > :nth-child(2) {
+      transform-origin: 12px 12px;
+      animation: icon-unfold 560ms var(--ease-out) var(--icon-wait);
+    }
+    /* Boarding: the pillows are pressed down. */
+    & [data-motion="bed"] > :is(:nth-child(2), :nth-child(3)) {
+      animation: icon-press 560ms var(--ease-out) var(--icon-wait);
+    }
+    /* Members: the second person steps forward. */
+    & [data-motion="nudge"] > :is(:nth-child(2), :nth-child(3)) {
+      animation: icon-nudge 520ms var(--ease-out) var(--icon-wait);
+    }
+    /* Settings: the teeth of the gear turn. */
+    & [data-motion="gear"] > :nth-child(1) {
+      --turn: 180deg;
+      transform-origin: 12px 12px;
+      animation: icon-turn 720ms var(--ease-out) var(--icon-wait);
+    }
+    /* Platform. Schools: the windows are drawn. Plans: the top layer lifts. Modules: the block clicks into
+       place. Billing: the amount is written. */
+    & [data-motion="windows"] > :is(:nth-child(1), :nth-child(2)) {
+      --length: 5px;
+      animation: icon-draw 320ms var(--ease-out) var(--icon-wait);
+    }
+    & [data-motion="windows"] > :nth-child(1) {
+      animation-delay: calc(var(--icon-wait) + 120ms);
+    }
+    & [data-motion="layers"] > :nth-child(1) {
+      animation: icon-lift 560ms var(--ease-out) var(--icon-wait);
+    }
+    & [data-motion="block"] > :nth-child(2) {
+      animation: icon-snap 520ms var(--ease-out) var(--icon-wait);
+    }
+    /* Enquiries: the tray takes in a letter. */
+    & [data-motion="inbox"] > :nth-child(1) {
+      animation: icon-press 560ms var(--ease-out) var(--icon-wait);
+    }
+    & [data-motion="receipt"] > :nth-child(2) {
+      --length: 26px;
+      animation: icon-draw 620ms var(--ease-out) var(--icon-wait);
+    }
+  }
+}
+
+@keyframes icon-swing {
+  25% {
+    transform: rotate(28deg);
+  }
+  55% {
+    transform: rotate(-16deg);
+  }
+  80% {
+    transform: rotate(6deg);
+  }
+}
+@keyframes icon-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+}
+@keyframes icon-open {
+  35%,
+  60% {
+    transform: rotate(-16deg);
+  }
+}
+/* A coin turning on its edge, twice. */
+@keyframes icon-spin {
+  25%,
+  75% {
+    transform: scaleX(0.1);
+  }
+  50% {
+    transform: scaleX(1);
+  }
+}
+@keyframes icon-flare {
+  35% {
+    transform: scale(1.12);
+  }
+  70% {
+    transform: scale(0.97);
+  }
+}
+@keyframes icon-bob {
+  25%,
+  70% {
+    transform: translateY(-1.2px);
+  }
+  50% {
+    transform: translateY(0);
+  }
+}
+@keyframes icon-unfold {
+  from {
+    transform: scaleX(0.45);
+  }
+}
+@keyframes icon-press {
+  40% {
+    transform: translateY(1.2px);
+  }
+}
+@keyframes icon-snap {
+  from {
+    transform: translate(3px, -3px);
+    opacity: 0;
+  }
+}
+
+@keyframes icon-turn {
+  from {
+    transform: rotate(0);
+  }
+  to {
+    transform: rotate(var(--turn));
+  }
+}
+@keyframes icon-needle {
+  35% {
+    transform: rotate(-80deg);
+  }
+  70% {
+    transform: rotate(14deg);
+  }
+}
+/* A stroke drawn from its start; --draw-from: calc(-1 * length) draws it from its end instead. */
+@keyframes icon-draw {
+  from {
+    stroke-dasharray: var(--length);
+    stroke-dashoffset: var(--draw-from, var(--length));
+  }
+  to {
+    stroke-dasharray: var(--length);
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes icon-plus {
+  from {
+    transform: rotate(-90deg) scale(0.4);
+  }
+}
+@keyframes icon-rise {
+  from {
+    transform: scaleY(0.2);
+  }
+}
+@keyframes icon-appear {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes icon-door {
+  45% {
+    transform: scaleX(0.5);
+  }
+}
+@keyframes icon-lift {
+  40% {
+    transform: translateY(-3px);
+  }
+}
+@keyframes icon-nudge {
+  40% {
+    transform: translateX(2px);
+  }
+}

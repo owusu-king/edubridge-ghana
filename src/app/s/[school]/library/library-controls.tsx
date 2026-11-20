@@ -1,11 +1,10 @@
 "use client";
 
 import { useActionState } from "react";
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select, Textarea } from "@/components/ui/field";
+import { besideField, Field, Input, Select, Textarea } from "@/components/ui/field";
 import { FormDialog } from "@/components/ui/form-dialog";
-import { SuccessToast } from "@/components/ui/toast";
+import { FormError, SuccessToast } from "@/components/ui/toast";
 import type { FormState } from "@/web/forms";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
@@ -246,9 +245,7 @@ export function DeskForms({
     <div className="grid gap-8 lg:grid-cols-2">
       <form action={lendAction} className="space-y-4" noValidate aria-label="Lend a book">
         <h3 className="text-base font-semibold text-ink">Lend</h3>
-        {lent.status === "error" && !Object.keys(err(lent)).length && (
-          <Alert tone="critical">{lent.message}</Alert>
-        )}
+        <FormError state={lent} />
         <SuccessToast state={lent} />
         <Field label="Copy number" error={err(lent).copy}>
           {(p) => (
@@ -270,10 +267,8 @@ export function DeskForms({
       </form>
       <form action={backAction} className="space-y-4" noValidate aria-label="Return a book">
         <h3 className="text-base font-semibold text-ink">Return</h3>
-        {back.status === "success" && <Alert tone="positive">{back.message}</Alert>}
-        {back.status === "error" && !Object.keys(err(back)).length && (
-          <Alert tone="critical">{back.message}</Alert>
-        )}
+        <SuccessToast state={back} />
+        <FormError state={back} />
         <Field label="Copy number" error={err(back).copy}>
           {(p) => <Input {...p} name="copy" maxLength={20} placeholder="B0012" autoComplete="off" required />}
         </Field>
@@ -326,7 +321,7 @@ export function LoanRulesForm({
   const [state, formAction, pending] = useActionState(action, { status: "idle" } as FormState);
   const e = err(state);
   return (
-    <form action={formAction} className="flex flex-wrap items-end gap-4" noValidate aria-label="Loan rules">
+    <form action={formAction} className="flex flex-wrap items-start gap-4" noValidate aria-label="Loan rules">
       <SuccessToast state={state} />
       <Field label="Loan period (days)" error={e.loanDays} className="w-40">
         {(p) => (
@@ -348,7 +343,7 @@ export function LoanRulesForm({
           />
         )}
       </Field>
-      <Button type="submit" variant="secondary" pending={pending}>
+      <Button type="submit" variant="secondary" className={besideField} pending={pending}>
         Save
       </Button>
     </form>
@@ -374,7 +369,7 @@ export function FineRulesForm({
   return (
     <form action={formAction} className="max-w-2xl space-y-4" noValidate aria-label="Fines">
       <SuccessToast state={state} />
-      {state.status === "error" && !Object.keys(e).length && <Alert tone="critical">{state.message}</Alert>}
+      <FormError state={state} />
       <label className="flex items-start gap-3 text-base text-ink">
         <input
           type="checkbox"

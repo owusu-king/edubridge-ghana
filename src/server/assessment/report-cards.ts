@@ -32,12 +32,15 @@ export interface ClassOverview {
     teacher: string | null;
     /** Whether this member enters this subject's marks here. */
     canEnter: boolean;
+    /** Students who take it: the whole class, or for an elective only those chosen. */
+    takers: number;
   }[];
   students: {
     id: string;
     name: string;
     admissionNumber: string;
-    result: Omit<StudentResult, "subjects" | "studentId">;
+    /** subjectCount: the subjects this student takes (electives make it differ between students). */
+    result: Omit<StudentResult, "subjects" | "studentId"> & { subjectCount: number };
     status: "none" | "draft" | "published";
     hasClassTeacherRemark: boolean;
     hasHeadTeacherRemark: boolean;
@@ -76,7 +79,11 @@ export async function getClassOverview(
       showPositions: data.showPositions,
       componentsLabel: data.components.map((c) => `${c.name} ${c.weight}%`).join(" · "),
       subjects: data.subjects.map((subject) => {
-        const counts = data.students.map(
+        // An elective counts only the students who take it.
+        const takers = subject.elective
+          ? data.students.filter((s) => data.choices.get(s.id)?.has(subject.id))
+          : data.students;
+        const counts = takers.map(
           (s) =>
             data.components.filter((c) => data.scores.get(s.id)?.get(subject.id)?.[c.key] !== undefined)
               .length,
@@ -87,6 +94,7 @@ export async function getClassOverview(
           canEnter: mine.has(subject.id),
           complete: counts.filter((n) => n === data.components.length).length,
           entered: counts.filter((n) => n > 0).length,
+          takers: takers.length,
         };
       }),
       students: data.students.map((s) => {
@@ -96,7 +104,7 @@ export async function getClassOverview(
           id: s.id,
           name: s.name,
           admissionNumber: s.admissionNumber,
-          result,
+          result: { ...result, subjectCount: _subjects.length },
           status: card?.status ?? "none",
           hasClassTeacherRemark: Boolean(card?.classTeacherRemark),
           hasHeadTeacherRemark: Boolean(card?.headTeacherRemark),

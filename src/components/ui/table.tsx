@@ -63,9 +63,11 @@ export function RowActions({ className, children }: { className?: string; childr
       className={cn(
         "flex items-center justify-end gap-0.5 transition-opacity",
         "group-focus-within/row:opacity-100 group-hover/row:opacity-100 [@media(hover:hover)]:opacity-0",
-        // An error inside (e.g. a failed "Make current") keeps the actions in view.
-        "has-[.text-critical]:opacity-100",
-        "[&_button]:text-ink-2 [&_button:hover]:bg-subtle [&_button:hover]:text-ink",
+        // An error inside (e.g. a failed "Make current") keeps the actions in view; a red button is not an error.
+        "has-[.text-critical:not(button)]:opacity-100",
+        // Neutral, except buttons that remove, cancel or end something, which keep their red outline.
+        "[&_button:not([data-variant^=danger])]:text-ink-2 [&_button:not([data-variant^=danger]):hover]:bg-subtle",
+        "[&_button:not([data-variant^=danger]):hover]:text-ink",
         className,
       )}
     >

@@ -174,6 +174,7 @@ export function ReleaseAccessButton({
     <ActionButton
       action={action}
       label={on ? "Give release access" : "End release access"}
+      variant={on ? "secondary" : "danger-outline"}
       ariaLabel={`${on ? "Give" : "End"} release access to ${moduleName}`}
     />
   );

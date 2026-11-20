@@ -1,14 +1,13 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { Alert } from "@/components/ui/alert";
 import { StatusText } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/field";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import type { FormState } from "@/web/forms";
-import { FormMessage } from "@/components/ui/toast";
+import { FormError, FormMessage } from "@/components/ui/toast";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
 
@@ -42,7 +41,7 @@ export function AddCampusForm({ action, disabledReason }: { action: Action; disa
             />
           )}
         </Field>
-        <Button type="submit" pending={pending} disabled={Boolean(disabledReason)} className="sm:mt-6">
+        <Button type="submit" pending={pending} disabled={Boolean(disabledReason)} className="sm:mt-6.5">
           Add campus
         </Button>
       </div>
@@ -68,7 +67,7 @@ function RenameDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange} title="Rename campus">
       <form action={formAction} className="space-y-5" noValidate>
-        {state.status === "error" && !state.fieldErrors && <Alert tone="critical">{state.message}</Alert>}
+        <FormError state={state} />
         <Field label="Campus name" error={state.fieldErrors?.name}>
           {(props) => (
             <Input
@@ -121,7 +120,7 @@ function StatusDialog({
       }
     >
       <form action={formAction} className="space-y-5">
-        {state.status === "error" && <Alert tone="critical">{state.message}</Alert>}
+        <FormError state={state} />
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
@@ -174,7 +173,7 @@ export function CampusTable({ campuses }: { campuses: CampusRow[] }) {
                   Rename
                 </Button>
                 <Button
-                  variant="ghost"
+                  variant={campus.status === "active" ? "danger-outline" : "ghost"}
                   size="sm"
                   onClick={() => setToggling(campus.id)}
                   aria-label={`${campus.status === "active" ? "Archive" : "Restore"} ${campus.name}`}

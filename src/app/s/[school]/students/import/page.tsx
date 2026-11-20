@@ -8,7 +8,7 @@ import { IMPORT_FIELDS } from "@/server/imports/students";
 import { schoolPath } from "@/lib/routes";
 import { requireTenant } from "@/web/auth";
 import { checkAction, importAction, uploadAction } from "./actions";
-import { ImportWizard } from "./import-wizard";
+import { ImportWizard } from "@/components/imports/import-wizard";
 
 export const metadata: Metadata = { title: "Import students" };
 
@@ -34,7 +34,16 @@ export default async function ImportPage({ params }: { params: Promise<{ school:
       </div>
       <ImportWizard
         fields={IMPORT_FIELDS.map(({ key, label, required }) => ({ key, label, required }))}
-        studentsHref={schoolPath(slug, "students")}
+        noun={{ one: "student", many: "students" }}
+        tips={[
+          "One student per row, with a heading row at the top.",
+          "First name, surname and sex are needed. Sex can be F or M.",
+          "Class names must match the names on your Classes page.",
+          "Write dates as day/month/year, e.g. 14/03/2018.",
+          "Brothers and sisters with the same guardian phone number are linked automatically.",
+        ]}
+        templateHref="/templates/students-import.csv"
+        done={{ href: schoolPath(slug, "students"), label: "View students" }}
         upload={uploadAction.bind(null, slug)}
         check={checkAction.bind(null, slug)}
         runImport={importAction.bind(null, slug)}

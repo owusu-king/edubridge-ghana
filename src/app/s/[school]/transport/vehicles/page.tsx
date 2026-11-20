@@ -79,6 +79,7 @@ export default async function TransportVehiclesPage({ params }: { params: Promis
                         <ActionButton
                           action={setVehicleArchivedAction.bind(null, slug, v.id, v.status === "active")}
                           label={v.status === "active" ? "Archive" : "Restore"}
+                          variant={v.status === "active" ? "danger-outline" : "secondary"}
                           ariaLabel={`${v.status === "active" ? "Archive" : "Restore"} ${v.name}`}
                         />
                       </div>

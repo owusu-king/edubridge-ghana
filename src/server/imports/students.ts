@@ -1,6 +1,5 @@
 import "server-only";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { readSheet } from "read-excel-file/node";
 import { recordAudit } from "../audit/record";
 import { assertAllowed } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
@@ -10,17 +9,28 @@ import { assertStudentCapacity, nextAdmissionNumber } from "../students/service"
 import { DomainError } from "../errors";
 import { linkGuardianInTx, type AddGuardianInput } from "../students/guardian-links";
 import type { TenantContext } from "../tenancy/service";
-import { parseCsv } from "@/lib/csv";
-import { countryProfile } from "@/lib/countries";
-import { normalizePhone } from "@/lib/phone";
+import {
+  assertMappingComplete,
+  getter,
+  mapColumns,
+  MAX_FILE_BYTES,
+  MAX_ROWS,
+  parseDate,
+  parseImportFile,
+  parseImportPhone,
+  parseSex,
+  type ColumnMapping as SharedMapping,
+  type ImportCheck,
+  type ParsedFile,
+  type RowProblem,
+} from "./files";
 
 /**
  * Importing students (with their class this term and primary guardian) from a spreadsheet.
  * Steps: parse the file → match columns → check every row → import the rows that passed.
  */
 
-export const MAX_ROWS = 2000;
-export const MAX_FILE_BYTES = 2 * 1024 * 1024;
+export { MAX_FILE_BYTES, MAX_ROWS };
 
 export const IMPORT_FIELDS = [
   {
@@ -109,102 +119,13 @@ export const IMPORT_FIELDS = [
 
 export type FieldKey = (typeof IMPORT_FIELDS)[number]["key"];
 /** Field → column index in the file (null when the file has no such column). */
-export type ColumnMapping = Partial<Record<FieldKey, number | null>>;
+export type ColumnMapping = SharedMapping<FieldKey>;
+export type { ImportCheck, ParsedFile, RowProblem };
+export { parseDate, parseImportFile, parseSex };
 
-export interface ParsedFile {
-  headers: string[];
-  rows: string[][];
-}
-
-const normaliseHeader = (h: string) => h.toLowerCase().replace(/[_*]+/g, " ").replace(/\s+/g, " ").trim();
-
-function cellToText(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
-  return String(value).trim();
-}
-
-/** Reads a .csv or .xlsx file into a header row and data rows of text. */
-export async function parseImportFile(file: {
-  name: string;
-  size: number;
-  bytes: Buffer;
-}): Promise<ParsedFile> {
-  if (file.size > MAX_FILE_BYTES)
-    throw new DomainError(
-      "file_too_large",
-      "The file is larger than 2 MB. Split it into smaller files.",
-      "file",
-    );
-  const name = file.name.toLowerCase();
-  let table: string[][];
-  if (name.endsWith(".csv")) {
-    table = parseCsv(file.bytes.toString("utf8"));
-  } else if (name.endsWith(".xlsx")) {
-    try {
-      const sheet = await readSheet(file.bytes);
-      table = sheet.map((row) => row.map(cellToText)).filter((r) => r.some((c) => c !== ""));
-    } catch {
-      throw new DomainError(
-        "file_unreadable",
-        "We could not read this Excel file. Save it again as .xlsx or .csv and retry.",
-        "file",
-      );
-    }
-  } else {
-    throw new DomainError("file_type", "Choose an Excel (.xlsx) or CSV (.csv) file.", "file");
-  }
-  const [headers, ...rows] = table;
-  if (!headers || rows.length === 0)
-    throw new DomainError("file_empty", "The file has no student rows below the header row.", "file");
-  if (rows.length > MAX_ROWS)
-    throw new DomainError(
-      "file_too_many_rows",
-      `The file has ${rows.length} rows. Import up to ${MAX_ROWS} at a time.`,
-      "file",
-    );
-  const width = headers.length;
-  return {
-    headers: headers.map((h) => h.trim()),
-    rows: rows.map((r) => Array.from({ length: width }, (_, i) => (r[i] ?? "").trim())),
-  };
-}
-
-/** Matches file columns to fields by their header names. Each column is used at most once. */
+/** Matches file columns to student fields by their header names. Each column is used at most once. */
 export function autoMapColumns(headers: string[]): ColumnMapping {
-  const normalised = headers.map(normaliseHeader);
-  const used = new Set<number>();
-  const mapping: ColumnMapping = {};
-  for (const field of IMPORT_FIELDS) {
-    const index = normalised.findIndex(
-      (h, i) => !used.has(i) && (field.aliases as readonly string[]).includes(h),
-    );
-    mapping[field.key] = index >= 0 ? index : null;
-    if (index >= 0) used.add(index);
-  }
-  return mapping;
-}
-
-/** Accepts F/M, Female/Male, Girl/Boy (any case). */
-export function parseSex(value: string): "female" | "male" | null {
-  const v = value.trim().toLowerCase();
-  if (["f", "female", "girl", "g"].includes(v)) return "female";
-  if (["m", "male", "boy", "b"].includes(v)) return "male";
-  return null;
-}
-
-/** Accepts YYYY-MM-DD and day-first dates as written in Ghana: 14/03/2018, 14-3-2018, 14.03.2018. */
-export function parseDate(value: string): string | null {
-  const v = value.trim();
-  let y: number, m: number, d: number;
-  const iso = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  const dayFirst = v.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
-  if (iso) [y, m, d] = [Number(iso[1]), Number(iso[2]), Number(iso[3])];
-  else if (dayFirst) [d, m, y] = [Number(dayFirst[1]), Number(dayFirst[2]), Number(dayFirst[3])];
-  else return null;
-  const date = new Date(Date.UTC(y, m - 1, d));
-  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d) return null;
-  return date.toISOString().slice(0, 10);
+  return mapColumns(headers, IMPORT_FIELDS);
 }
 
 const RELATIONSHIP_ALIASES: Record<string, AddGuardianInput["relationship"]> = {
@@ -229,22 +150,6 @@ const RELATIONSHIP_ALIASES: Record<string, AddGuardianInput["relationship"]> = {
   sibling: "sibling",
 };
 
-/** Phone numbers saved as numbers in Excel lose their leading 0 (e.g. 241234567); restore it, in the school's country. */
-function parseImportPhone(value: string, country: string): string | null {
-  const v = value.replace(/\.0$/, "").trim();
-  // Restoring the lost 0 only where national numbers start with one.
-  if (countryProfile(country).trunkZero && countryProfile(country).mobile.test(v))
-    return normalizePhone(`0${v}`, country);
-  return normalizePhone(v, country);
-}
-
-export interface RowProblem {
-  /** Row number as shown in the spreadsheet (the header is row 1). */
-  row: number;
-  field: string;
-  message: string;
-}
-
 interface ValidRow {
   row: number;
   admissionNumber: string | null;
@@ -257,34 +162,13 @@ interface ValidRow {
   guardian: AddGuardianInput | null;
 }
 
-export interface ImportCheck {
-  total: number;
-  valid: number;
-  problems: RowProblem[];
-}
-
-function getter(row: string[], mapping: ColumnMapping) {
-  return (key: FieldKey) => {
-    const index = mapping[key];
-    return index === null || index === undefined ? "" : (row[index] ?? "").trim();
-  };
-}
-
 async function checkRows(
   tx: Transaction,
   ctx: TenantContext,
   parsed: ParsedFile,
   mapping: ColumnMapping,
 ): Promise<{ valid: ValidRow[]; problems: RowProblem[] }> {
-  const missing = IMPORT_FIELDS.filter(
-    (f) => f.required && (mapping[f.key] === null || mapping[f.key] === undefined),
-  );
-  if (missing.length) {
-    throw new DomainError(
-      "mapping_incomplete",
-      `Choose a column for: ${missing.map((f) => f.label).join(", ")}.`,
-    );
-  }
+  assertMappingComplete(IMPORT_FIELDS, mapping);
   const classRows = await tx
     .select({ id: classes.id, name: classes.name, campusId: classes.campusId })
     .from(classes)

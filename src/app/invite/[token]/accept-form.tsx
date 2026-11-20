@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { Alert } from "@/components/ui/alert";
+import { FormError } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import type { FormState } from "@/web/forms";
@@ -21,7 +21,7 @@ export function NewAccountForm({
   const errors = state.fieldErrors ?? {};
   return (
     <form action={formAction} className="space-y-5" noValidate>
-      {state.status === "error" && state.message && <Alert tone="critical">{state.message}</Alert>}
+      <FormError state={state} />
       <Field label="Email">
         {(p) => <Input {...p} value={email} readOnly disabled autoComplete="username" />}
       </Field>
@@ -61,7 +61,7 @@ export function AcceptForm({ action }: { action: Action }) {
   const [state, formAction, pending] = useActionState(action, { status: "idle" });
   return (
     <form action={formAction} className="space-y-5">
-      {state.status === "error" && state.message && <Alert tone="critical">{state.message}</Alert>}
+      <FormError state={state} />
       <Button type="submit" pending={pending} className="w-full">
         Accept invitation
       </Button>

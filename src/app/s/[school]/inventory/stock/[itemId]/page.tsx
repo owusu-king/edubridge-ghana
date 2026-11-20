@@ -94,6 +94,7 @@ export default async function StockItemPage({
             <ActionButton
               action={setStockItemArchivedAction.bind(null, slug, item.id, item.status === "active")}
               label={item.status === "active" ? "Archive" : "Restore"}
+              variant={item.status === "active" ? "danger-outline" : "secondary"}
               ariaLabel={`${item.status === "active" ? "Archive" : "Restore"} ${item.name}`}
             />
           </div>

@@ -3,6 +3,7 @@
 import { CalendarPlus } from "lucide-react";
 import { useActionState, useState } from "react";
 import { Alert } from "@/components/ui/alert";
+import { FormError } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/field";
@@ -94,7 +95,7 @@ export function TermActions({
   const [state, currentAction, pending] = useActionState<FormState, FormData>(makeCurrent, idle);
   return (
     <div className="flex items-center justify-end gap-1">
-      {state.status === "error" && <span className="text-sm text-critical">{state.message}</span>}
+      <FormError state={state} />
       {!term.isCurrent && (
         <form action={currentAction}>
           <Button
@@ -133,7 +134,7 @@ function EditTermForm({
   const v = state.values;
   return (
     <form action={formAction} className="space-y-5" noValidate>
-      {state.status === "error" && !state.fieldErrors && <Alert tone="critical">{state.message}</Alert>}
+      <FormError state={state} />
       <Field label="Name" error={state.fieldErrors?.name}>
         {(p) => <Input {...p} name="name" defaultValue={v?.name ?? term.name} required />}
       </Field>

@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import { Alert } from "@/components/ui/alert";
+import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
 import { METHOD_OPTIONS } from "@/components/fees/finance-forms";
@@ -67,7 +68,6 @@ export function OfflinePayments({
   const [query, setQuery] = useState("");
   const [studentId, setStudentId] = useState("");
   const [method, setMethod] = useState("cash");
-  const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<{ payload: Payload; student: Student } | null>(null);
   const byId = useMemo(() => new Map(students.map((s) => [s.id, s])), [students]);
   const matches = useMemo(() => {
@@ -84,11 +84,11 @@ export function OfflinePayments({
     const data = new FormData(event.currentTarget);
     const amount = String(data.get("amount") ?? "").trim();
     const reference = String(data.get("reference") ?? "").trim();
-    if (!chosen) return setError("Choose the student.");
+    if (!chosen) return void toast("Choose the student.", "critical");
     if (!/^\d+(\.\d{1,2})?$/.test(amount.replace(/,/g, "")) || Number(amount.replace(/,/g, "")) <= 0)
-      return setError("Enter the amount received, like 450 or 450.50.");
-    if (method !== "cash" && !reference) return setError("Enter the transaction, slip or cheque number.");
-    setError(null);
+      return void toast("Enter the amount received, like 450 or 450.50.", "critical");
+    if (method !== "cash" && !reference)
+      return void toast("Enter the transaction, slip or cheque number.", "critical");
     const payload: Payload = {
       studentId: chosen.id,
       amount: amount.replace(/,/g, ""),
@@ -130,7 +130,6 @@ export function OfflinePayments({
           className="max-w-xl space-y-5 print:hidden"
           aria-label="Take a payment"
         >
-          {error && <Alert tone="critical">{error}</Alert>}
           <Field label="Student">
             {(p) => (
               <Input

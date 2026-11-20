@@ -1,5 +1,15 @@
 # EduBridge — status and handoff (2026-10-31, status updated 2026-11-18)
 
+> **2026-11-19 (later):** a public landing page at `/` for visitors who are not signed in, with "Book a visit" (Admin,
+> Enquiries) and "Try the demo school" (a two-hour, view-only visit: set `DEMO_SCHOOL_SLUG` after
+> `npm run demo:visitor`). Copy lives in `src/components/landing/content.ts`. Roadmap: "Landing page". Demo schools
+> include the school's own finances (`npm run demo:finance` for an existing one).
+>
+> **2026-11-19:** the Ghana gaps from the product assessment are built (roadmap, "Ghana gaps and competitive basics"):
+> operational roles, one Mobile Money payment for several children, the School finances module (`src/server/finance`,
+> paid: Standard, Premium or add-on), SHS with WASSCE grades and electives, the BECE-style aggregate, and the public
+> `/trust` page. Migrations 0128–0135.
+
 > **2026-11-18:** the founder released every module: all are at stage `general` (`src/lib/modules.ts`), so the
 > stages named below are history. A school has a module when its plan, an add-on, a trial or a promotion includes
 > it. Plans are priced per term by school size and invoiced automatically each period (roadmap, "Plans and billing"). The demo school (`npm run demo:school`) now

@@ -13,11 +13,14 @@ import { listParentConsentForms } from "@/server/events/consent";
 import { formatCalendarDate } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
 import { requireParent } from "@/web/parent-auth";
+import { InstallNote } from "@/components/parents/install-note";
 import { PushToggle } from "@/components/parents/push-toggle";
 import { pushPublicKey } from "@/server/parents/push";
 import { removePushAction, savePushAction, setWhatsAppAction } from "./actions";
 import { WhatsAppToggle } from "@/components/parents/whatsapp-toggle";
 import { getWhatsAppChoice } from "@/server/parents/whatsapp";
+import { parentPaymentSetup } from "@/server/mobile-money/requests";
+import { schoolBySlug } from "@/server/parents/schools";
 
 export const metadata: Metadata = { title: { absolute: "Your children · EduBridge for parents" } };
 
@@ -34,6 +37,14 @@ export default async function ParentHome() {
     getWhatsAppChoice(db(), phone),
   ]);
   const unread = new Map(news.map((n) => [n.slug, n.unread]));
+  // One payment for several children (2026-11-18): offered where two or more owe and the school takes payments.
+  const familyPay = new Set<string>();
+  for (const school of schools) {
+    if (school.children.filter((c) => c.balancePesewas > 0 && c.status !== "transferred").length < 2)
+      continue;
+    const ref = await schoolBySlug(db(), school.slug);
+    if (ref && (await parentPaymentSetup(db(), ref)).enabled) familyPay.add(school.slug);
+  }
   const publicKey = pushPublicKey();
   return (
     <div className="space-y-8">
@@ -41,6 +52,7 @@ export default async function ParentHome() {
         <h1 className="font-display text-2xl font-medium tracking-tight">Your children</h1>
         <p className="mt-1 text-sm text-ink-3">Signed in with {formatPhone(phone)}</p>
       </header>
+      <InstallNote />
       {publicKey && <PushToggle publicKey={publicKey} save={savePushAction} remove={removePushAction} />}
       {whatsapp.offered && (
         <WhatsAppToggle
@@ -167,12 +179,22 @@ export default async function ParentHome() {
               ))}
             </ul>
             {school.children.length > 1 && (
-              <a
-                href={`/p/${school.slug}/family-statement`}
-                className="-ml-2 inline-flex h-11 items-center gap-2 rounded-lg px-2 text-sm font-medium text-accent hover:bg-accent-soft"
-              >
-                Family statement (PDF)
-              </a>
+              <div className="-ml-2 flex flex-wrap gap-x-2">
+                {familyPay.has(school.slug) && (
+                  <Link
+                    href={`/p/${school.slug}/pay` as Route}
+                    className="inline-flex h-11 items-center gap-2 rounded-lg px-2 text-sm font-medium text-accent hover:bg-accent-soft"
+                  >
+                    Pay for all children at once
+                  </Link>
+                )}
+                <a
+                  href={`/p/${school.slug}/family-statement`}
+                  className="inline-flex h-11 items-center gap-2 rounded-lg px-2 text-sm font-medium text-accent hover:bg-accent-soft"
+                >
+                  Family statement (PDF)
+                </a>
+              </div>
             )}
           </section>
         ))

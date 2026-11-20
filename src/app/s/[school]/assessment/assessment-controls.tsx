@@ -3,6 +3,7 @@
 import { Plus, Trash2 } from "lucide-react";
 import { useState, useTransition } from "react";
 import { Alert } from "@/components/ui/alert";
+import { FormMessage, toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Textarea } from "@/components/ui/field";
 import { FormDialog } from "@/components/ui/form-dialog";
@@ -123,7 +124,7 @@ export function SubjectDialog({
 }: {
   action: Action;
   levels: LevelOption[];
-  subject?: { name: string; levelIds: string[] };
+  subject?: { name: string; levelIds: string[]; electiveLevelIds?: string[] };
 }) {
   return (
     <FormDialog
@@ -155,6 +156,27 @@ export function SubjectDialog({
             )}
           </Field>
           <LevelChecks levels={levels} checked={subject?.levelIds ?? levels.map((l) => l.id)} />
+          <fieldset>
+            <legend className="mb-1 text-sm font-medium text-ink">Elective in</legend>
+            <p className="mb-1.5 text-sm text-ink-3">
+              At these levels only the students chosen for it take it (SHS electives). Choose them on its
+              score sheet.
+            </p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+              {levels.map((level) => (
+                <label key={level.id} className="flex items-center gap-2.5 text-base text-ink">
+                  <input
+                    type="checkbox"
+                    name="electiveLevelIds"
+                    value={level.id}
+                    defaultChecked={subject?.electiveLevelIds?.includes(level.id) ?? false}
+                    className="size-4 accent-ink"
+                  />
+                  {level.name}
+                </label>
+              ))}
+            </div>
+          </fieldset>
         </>
       )}
     </FormDialog>
@@ -197,9 +219,7 @@ export function SchemeForm({
     setRows((current) => current.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   return (
     <form onSubmit={onSubmit} className="space-y-4" noValidate aria-label="Assessment parts">
-      {state.status !== "idle" && state.message && (
-        <Alert tone={state.status === "error" ? "critical" : "positive"}>{state.message}</Alert>
-      )}
+      <FormMessage state={state} />
       <fieldset disabled={locked} className="space-y-3">
         <div className="hidden grid-cols-[1fr_6rem_6rem_2.5rem] gap-3 text-sm font-medium text-ink-3 sm:grid">
           <span>Part</span>
@@ -329,9 +349,7 @@ export function ScaleForm({
   return (
     <div className="space-y-3">
       <form onSubmit={onSubmit} className="space-y-3" noValidate aria-label={`${stageLabel} grades`}>
-        {state.status !== "idle" && state.message && (
-          <Alert tone={state.status === "error" ? "critical" : "positive"}>{state.message}</Alert>
-        )}
+        <FormMessage state={state} />
         <div className="grid grid-cols-[4rem_5rem_1fr_4.5rem_2.5rem] gap-3 text-sm font-medium text-ink-3">
           <span>Grade</span>
           <span>From mark</span>
@@ -446,7 +464,6 @@ function RemarkSuggestions({
 }) {
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<{ draftId: string; suggestions: string[] } | null>(null);
-  const [error, setError] = useState<string | null>(null);
   if (!suggest.available)
     return <p className="text-sm text-ink-3">Suggested remarks are not available: {suggest.message}</p>;
   return (
@@ -458,16 +475,14 @@ function RemarkSuggestions({
         pending={pending}
         onClick={() =>
           startTransition(async () => {
-            setError(null);
             const r = await suggest.draft();
             if (r.ok) setResult({ draftId: r.draftId, suggestions: r.suggestions });
-            else setError(r.message);
+            else toast(r.message, "critical");
           })
         }
       >
         Suggest remarks
       </Button>
-      {error && <p className="text-sm text-critical">{error}</p>}
       {result && (
         <div className="space-y-2 rounded-lg border border-line bg-subtle/50 p-3">
           <p className="text-sm text-ink-3">
@@ -523,9 +538,7 @@ export function RemarksForm({
   const [draftId, setDraftId] = useState("");
   return (
     <form onSubmit={onSubmit} className="space-y-5" noValidate aria-label="Report card remarks">
-      {state.status !== "idle" && state.message && (
-        <Alert tone={state.status === "error" ? "critical" : "positive"}>{state.message}</Alert>
-      )}
+      <FormMessage state={state} />
       <div className="grid gap-4 sm:grid-cols-3">
         {(["attitude", "conduct", "interest"] as const).map((name) => (
           <Field key={name} label={name[0]!.toUpperCase() + name.slice(1)} error={state.fieldErrors?.[name]}>
@@ -599,6 +612,48 @@ export function RemarksForm({
       )}
       <Button type="submit" pending={pending}>
         Save report card
+      </Button>
+    </form>
+  );
+}
+
+/** Choosing which of a class's students take an elective subject (2026-11-18). */
+export function ElectiveTakersForm({
+  action,
+  subjectName,
+  students,
+}: {
+  action: Action;
+  subjectName: string;
+  students: { id: string; name: string; takes: boolean }[];
+}) {
+  const { state, pending, onSubmit } = useFormAction(action);
+  return (
+    <form onSubmit={onSubmit} className="space-y-3 rounded-lg border border-line bg-surface p-5">
+      <fieldset>
+        <legend className="text-md font-semibold text-ink">Who takes {subjectName}</legend>
+        <p className="mb-3 text-sm text-ink-3">
+          An elective: only these students have marks and a grade for it, and it counts only on their report
+          cards.
+        </p>
+        <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+          {students.map((s) => (
+            <label key={s.id} className="flex items-center gap-2.5 text-base text-ink">
+              <input
+                type="checkbox"
+                name="studentIds"
+                value={s.id}
+                defaultChecked={s.takes}
+                className="size-4 accent-ink"
+              />
+              {s.name}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <FormMessage state={state} />
+      <Button type="submit" variant="secondary" pending={pending}>
+        Save who takes it
       </Button>
     </form>
   );

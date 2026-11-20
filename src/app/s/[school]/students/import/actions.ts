@@ -22,6 +22,9 @@ export interface Uploaded extends ParsedFile {
   mapping: ColumnMapping;
 }
 
+/** The wizard sends a mapping by field name; the server checks it against the student fields. */
+type Mapping = Partial<Record<string, number | null>>;
+
 export async function uploadAction(
   slug: string,
   _prev: FormState<Uploaded>,
@@ -64,11 +67,11 @@ function failure(error: unknown): { ok: false; message: string } {
 export async function checkAction(
   slug: string,
   parsed: ParsedFile,
-  mapping: ColumnMapping,
+  mapping: Mapping,
 ): Promise<ActionResult<ImportCheck>> {
   const { ctx } = await requireTenant(slug);
   try {
-    return { ok: true, data: await checkStudentImport(db(), ctx, parsed, mapping) };
+    return { ok: true, data: await checkStudentImport(db(), ctx, parsed, mapping as ColumnMapping) };
   } catch (error) {
     return failure(error);
   }
@@ -77,11 +80,11 @@ export async function checkAction(
 export async function importAction(
   slug: string,
   parsed: ParsedFile,
-  mapping: ColumnMapping,
+  mapping: Mapping,
 ): Promise<ActionResult<{ imported: number; skipped: number; problems: RowProblem[] }>> {
   const { ctx } = await requireTenant(slug);
   try {
-    const result = await importStudents(db(), ctx, parsed, mapping);
+    const result = await importStudents(db(), ctx, parsed, mapping as ColumnMapping);
     revalidatePath(schoolPath(slug, "students"));
     return { ok: true, data: result };
   } catch (error) {

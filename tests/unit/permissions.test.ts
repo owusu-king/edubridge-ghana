@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { assertCan, can, ForbiddenError, isRole, ROLE_LABELS } from "@/server/authz/permissions";
+import {
+  assertCan,
+  can,
+  ForbiddenError,
+  isRole,
+  OPERATIONAL_ROLES,
+  PERMISSIONS,
+  ROLE_LABELS,
+  type Permission,
+} from "@/server/authz/permissions";
 
 describe("permissions", () => {
   it("lets every role view its school", () => {
@@ -39,6 +48,37 @@ describe("permissions", () => {
   it("throws ForbiddenError when asserting a missing permission", () => {
     expect(() => assertCan(["teacher"], "audit.view")).toThrow(ForbiddenError);
     expect(() => assertCan(["owner"], "audit.view")).not.toThrow();
+  });
+
+  it("keeps each operational role to its own area", () => {
+    const own: Record<(typeof OPERATIONAL_ROLES)[number], Permission[]> = {
+      cashier: ["fees.view", "payments.record"],
+      librarian: ["library.view", "library.manage"],
+      storekeeper: ["inventory.view", "inventory.manage", "purchases.request"],
+      transport_officer: ["transport.view", "transport.manage", "transport.trips"],
+      front_desk: ["visitors.view", "visitors.manage", "pickup.view", "pickup.record"],
+      nurse: ["students.view", "students.view_all", "students.medical"],
+      admissions_officer: ["admissions.view", "admissions.manage"],
+    };
+    const everyone: Permission[] = [
+      "school.view",
+      "events.view",
+      "leave.request",
+      "payroll.own",
+      "safeguarding.report",
+      "maintenance.report",
+    ];
+    for (const role of OPERATIONAL_ROLES) {
+      const granted = PERMISSIONS.filter((p) => can([role], p)).sort();
+      expect(granted, role).toEqual([...own[role], ...everyone].sort());
+    }
+  });
+
+  it("never lets an operational role void receipts, manage members or change settings", () => {
+    for (const role of OPERATIONAL_ROLES) {
+      for (const p of ["payments.void", "fees.manage", "members.manage", "school.settings.manage"] as const)
+        expect(can([role], p), `${role} ${p}`).toBe(false);
+    }
   });
 
   it("recognises only known roles", () => {

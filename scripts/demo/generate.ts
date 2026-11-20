@@ -24,6 +24,8 @@ import { getScoreSheet, saveScores } from "../../src/server/assessment/scores";
 import { setupDefaultSubjects } from "../../src/server/assessment/setup";
 import { syncRegister } from "../../src/server/attendance/registers";
 import { hashPassword } from "../../src/server/auth/password";
+import { generateDemoFinance } from "./finance";
+import { addDemoVisitor } from "./visitor";
 import type { Role } from "../../src/server/authz/permissions";
 import { createCampus } from "../../src/server/campuses/service";
 import type { Database } from "../../src/server/db/client";
@@ -159,6 +161,7 @@ const FEES: Record<Stage, Partial<Record<string, number>>> = {
   kindergarten: { Tuition: 850, "PTA dues": 50, "Books and stationery": 120, "Examination fees": 40 },
   primary: { Tuition: 1100, "PTA dues": 50, "Books and stationery": 180, "Examination fees": 60, ICT: 80 },
   jhs: { Tuition: 1350, "PTA dues": 50, "Books and stationery": 220, "Examination fees": 80, ICT: 100 },
+  shs: { Tuition: 1800, "PTA dues": 60, "Books and stationery": 260, "Examination fees": 120, ICT: 120 },
 };
 
 /** Age in years at the start of the school year, by level. */
@@ -234,6 +237,8 @@ export async function generateDemoSchool(
     { role: "Administrator", email: `admin@${domain}` },
     { role: "Accountant", email: `accountant@${domain}` },
   );
+  // The shared, view-only account behind the landing page's "Try the demo school".
+  await addDemoVisitor(owner, options.slug);
   const teacherFor = new Map<string, string>();
   const teacherPeople: { level: string; userId: string; membershipId: string; name: string }[] = [];
   let n = 0;
@@ -825,6 +830,17 @@ export async function generateDemoSchool(
       });
     },
     asTenant: (fn) => asTenant(owner, tenantId, fn),
+    log,
+  });
+
+  // The school's own money: accounts, expenses, cash taken to the bank and the bank's statement.
+  await generateDemoFinance({
+    app,
+    proprietor: await ctxOf(ownerPerson.userId),
+    bursar: await ctxOf(bursarPerson.userId),
+    rng,
+    today,
+    termStart: term.startsOn,
     log,
   });
 

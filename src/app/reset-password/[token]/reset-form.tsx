@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { Alert } from "@/components/ui/alert";
+import { FormError } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import type { FormState } from "@/web/forms";
@@ -16,7 +16,7 @@ export function ResetForm({
   const [state, formAction, pending] = useActionState<FormState, FormData>(action, { status: "idle" });
   return (
     <form action={formAction} className="space-y-5" noValidate>
-      {state.status === "error" && !state.fieldErrors && <Alert tone="critical">{state.message}</Alert>}
+      <FormError state={state} />
       <Field
         label="New password"
         description={`At least ${minLength} characters.`}

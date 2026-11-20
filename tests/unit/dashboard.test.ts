@@ -142,6 +142,7 @@ describe("setup guide", () => {
     feeLines: 0,
     billedStudents: 0,
     levelsInUse: 0,
+    openingBalances: 0,
     levelsInUseWithSubjects: 0,
   };
   const statuses = (c: SetupCounts) =>
@@ -169,6 +170,7 @@ describe("setup guide", () => {
       students: "started",
       guardians: "todo",
       fees: "started",
+      balances: "todo",
       assessment: "todo",
     });
     expect(setupState(partly).students.detail).toBe(
@@ -192,6 +194,7 @@ describe("setup guide", () => {
       feeLines: 6,
       billedStudents: 40,
       levelsInUse: 1,
+      openingBalances: 12,
       levelsInUseWithSubjects: 1,
     };
     expect(new Set(Object.values(statuses(done)))).toEqual(new Set(["done"]));

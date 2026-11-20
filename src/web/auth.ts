@@ -47,13 +47,28 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
 export async function requireSession(): Promise<ValidatedSession> {
   const session = await getCurrentSession();
   if (!session) redirect("/login");
+  await keepDemoVisitorInDemo(session.user);
   return session;
 }
 
 export async function requireUser(): Promise<SessionUser> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  await keepDemoVisitorInDemo(user);
   return user;
+}
+
+/**
+ * The demo visitor account is shared by everyone who presses "Try the demo school", so it stays inside its school:
+ * its own account settings, invitations, the school picker and the platform area all lead back to the school.
+ * (Inside the school the database refuses every change: db/context.ts.) The path comes from the proxy, which
+ * always overwrites it, so a page cannot be reached by claiming another path.
+ */
+async function keepDemoVisitorInDemo(user: SessionUser): Promise<void> {
+  if (!user.demoVisitor) return;
+  const path = (await headers()).get("x-edubridge-path") ?? "";
+  if (path === "/" || path.startsWith("/s/")) return;
+  redirect("/");
 }
 
 /**

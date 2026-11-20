@@ -1,7 +1,8 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, type FormEvent } from "react";
 import { Alert } from "@/components/ui/alert";
+import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
 import { useSyncQueue, type SyncAction } from "@/components/sync/use-sync-queue";
@@ -47,8 +48,6 @@ export function OfflineRegistration({
   action: SyncAction;
 }) {
   const queue = useSyncQueue({ school, userId, scope: "students:register", action });
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const form = useRef<HTMLFormElement>(null);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -56,16 +55,15 @@ export function OfflineRegistration({
     const data = new FormData(event.currentTarget);
     const text = (name: string) => String(data.get(name) ?? "").trim();
     if (!text("firstName") || !text("lastName") || !text("sex")) {
-      setError("Enter the first name and surname, and choose female or male.");
+      toast("Enter the first name and surname, and choose female or male.", "critical");
       return;
     }
     const guardianName = text("guardianName");
     const guardianPhone = text("guardianPhone");
     if ((guardianName || guardianPhone) && !(guardianName && guardianPhone)) {
-      setError("Enter both the guardian's name and phone number, or neither.");
+      toast("Enter both the guardian's name and phone number, or neither.", "critical");
       return;
     }
-    setError(null);
     const payload: Payload = {
       firstName: text("firstName"),
       otherNames: text("otherNames"),
@@ -84,7 +82,7 @@ export function OfflineRegistration({
         : {}),
     };
     await queue.add({ kind: "student.register", payload, label: `${payload.firstName} ${payload.lastName}` });
-    setMessage(
+    toast(
       navigator.onLine
         ? `${payload.firstName} ${payload.lastName} is being registered.`
         : `${payload.firstName} ${payload.lastName} is kept on this device and will be registered when you are back online.`,
@@ -112,8 +110,6 @@ export function OfflineRegistration({
         className="max-w-2xl space-y-5"
         aria-label="Register a student"
       >
-        {message && <Alert tone="positive">{message}</Alert>}
-        {error && <Alert tone="critical">{error}</Alert>}
         <div className="grid gap-5 sm:grid-cols-3">
           <Field label="First name">{(p) => <Input {...p} name="firstName" maxLength={60} required />}</Field>
           <Field label="Other names" optional>

@@ -80,7 +80,12 @@ export default async function ClassesPage({
     id: t.id,
     name: t.name,
     description: t.description,
-    stages: STAGES.map((s) => ({ value: s, label: t.stageLabels[s], levels: t.levels[s] })),
+    // A template without a senior secondary stage (most outside Ghana here) offers none.
+    stages: STAGES.filter((s) => t.levels[s].length > 0).map((s) => ({
+      value: s,
+      label: t.stageLabels[s],
+      levels: t.levels[s],
+    })),
   }));
   const levelOptions = levels.map((l) => ({ value: l.id, label: l.name }));
   const campusOptions = campuses

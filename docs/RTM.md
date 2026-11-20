@@ -1,4 +1,4 @@
-# Requirements traceability matrix (all releases) — 2026-11-17
+# Requirements traceability matrix (all releases) — 2026-11-19
 
 ✓ built and tested · ◐ built with a recorded limitation (note) · ○ built early, off until approved · – not started.
 Requirement IDs and release scope from `01-PRODUCT-REQUIREMENTS.md` §4–6. Tests: `tests/integration`, `tests/unit`, `tests/e2e`.
@@ -35,6 +35,8 @@ Requirement IDs and release scope from `01-PRODUCT-REQUIREMENTS.md` §4–6. Tes
 | | AI gateway (R5-4, first part, D-R5-10) | AIG-01 ✓ · AIG-02 ✓ · AIG-03 ✓ · AIG-04 ✓ · AIG-05 ✓ | ai-gateway (unit, integration), integrations and assistant (integration), ai-gateway.spec |
 | | Assistant made dependable (R5-4, second part) | AST-01a ✓ · AST-01b ✓ · AST-01c ✓ · AST-02 ✓ · AIP-04 ✓ (runner built and tested; not yet scored on a real model) | answer-check (unit), assistant-checked and assistant (integration) |
 | | AI drafting (R5-5, released) | DRF-01 ✓ · DRF-02 ✓ · DRF-03 ✓ · DRF-04 ✓ · DRF-05 ✓ (announcement and board drafts tried on a local model) | drafting (unit, integration), drafting.spec |
+| **Landing** (2026-11-19) | Public landing page | Landing page at `/` ✓ · Book a visit, kept for Admin ✓ · Try the demo school, view-only and confined ✓ · intro video slot (video to come) | landing-demo (integration); landing (unit, e2e) |
+| **Gaps** (2026-11-19) | Ghana gaps and competitive basics | Operational roles ✓ · family payment ✓ · school finances module (accounts, expenses with approval, cash to bank, bank statements, income against spending) ✓ · SHS stage and WASSCE grades ✓ · electives per student ✓ · BECE-style aggregate ✓ · trust page ✓ | operational-roles, family-payments, school-finance, electives (integration); permissions, school-finance, electives-aggregate (unit) |
 
 1. Access is re-checked on every request, so a deactivated member loses access on their next request (equivalent to revoking sessions).
 2. Manual billing in R1, as the requirement allows; no online payment of EduBridge invoices.

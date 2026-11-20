@@ -2,6 +2,7 @@
 
 import { Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FormMessage } from "@/components/ui/toast";
 import { FormDialog } from "@/components/ui/form-dialog";
 import { useFormAction } from "@/components/ui/use-form-action";
 import { MobileMoneyFields, type PayerPhone } from "@/components/fees/mobile-money-fields";
@@ -69,9 +70,7 @@ export function CheckStatusButton({ action, label }: { action: Action; label: st
       <Button type="submit" variant="secondary" size="sm" pending={pending} aria-label={label}>
         Check status
       </Button>
-      <p aria-live="polite" className="text-right text-sm text-ink-2 empty:hidden">
-        {!pending && state.status !== "idle" ? state.message : ""}
-      </p>
+      <FormMessage state={state} />
     </form>
   );
 }

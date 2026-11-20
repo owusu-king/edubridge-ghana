@@ -102,9 +102,9 @@ export async function readLevelSubjects(
   tx: Transaction,
   tenantId: string,
   levelId: string,
-): Promise<{ id: string; name: string }[]> {
+): Promise<{ id: string; name: string; elective: boolean }[]> {
   return tx
-    .select({ id: subjects.id, name: subjects.name })
+    .select({ id: subjects.id, name: subjects.name, elective: levelSubjects.elective })
     .from(levelSubjects)
     .innerJoin(subjects, eq(subjects.id, levelSubjects.subjectId))
     .where(
@@ -139,7 +139,7 @@ export interface AssessmentSetup {
   term: { id: string; name: string };
   scheme: Scheme & { publishedCount: number };
   levels: { id: string; name: string; stage: Stage; subjects: { id: string; name: string }[] }[];
-  subjects: { id: string; name: string; levelIds: string[] }[];
+  subjects: { id: string; name: string; levelIds: string[]; electiveLevelIds: string[] }[];
   scales: { stage: Stage; bands: GradeBand[]; custom: boolean }[];
 }
 
@@ -162,6 +162,7 @@ export async function getAssessmentSetup(
         levelId: levelSubjects.levelId,
         subjectId: levelSubjects.subjectId,
         sequence: levelSubjects.sequence,
+        elective: levelSubjects.elective,
       })
       .from(levelSubjects)
       .where(eq(levelSubjects.tenantId, ctx.tenant.id))
@@ -201,6 +202,9 @@ export async function getAssessmentSetup(
         levelIds: levelRows
           .filter((l) => links.some((link) => link.subjectId === s.id && link.levelId === l.id))
           .map((l) => l.id),
+        electiveLevelIds: links
+          .filter((link) => link.subjectId === s.id && link.elective)
+          .map((link) => link.levelId),
       })),
       scales: stagesInUse.map((stage) => {
         const custom = customScales.find((c) => c.stage === stage);
@@ -227,6 +231,11 @@ export async function setupDefaultSubjects(database: Database, ctx: TenantContex
     if (levelRows.length === 0) throw new DomainError("no_levels", "Set up your levels under Classes first.");
     const template = await readTemplate(tx, ctx.tenant.id);
     const names = [...new Set(levelRows.flatMap((l) => template.subjects[l.stage]))];
+    if (names.length === 0)
+      throw new DomainError(
+        "no_template_subjects",
+        "The template suggests no subjects for these levels. Add them yourself.",
+      );
     const created = await tx
       .insert(subjects)
       .values(names.map((name) => ({ tenantId: ctx.tenant.id, name })))
@@ -239,6 +248,8 @@ export async function setupDefaultSubjects(database: Database, ctx: TenantContex
           levelId: level.id,
           subjectId: idOf.get(name)!,
           sequence: (i + 1) * 10,
+          // SHS electives: taken only by the students chosen for them.
+          elective: template.electives[level.stage]?.includes(name) ?? false,
         })),
       ),
     );
@@ -256,7 +267,28 @@ export async function setupDefaultSubjects(database: Database, ctx: TenantContex
 const subjectSchema = z.object({
   name: z.string().trim().min(1, "Enter a name.").max(60, "Use 60 characters or fewer."),
   levelIds: z.array(z.string().uuid()).max(100),
+  /** Levels where it is an elective (2026-11-18); absent leaves them as they are. */
+  electiveLevelIds: z.array(z.string().uuid()).max(100).optional(),
 });
+
+/** Marks the subject elective at exactly these of its levels, and taken by the whole level at the others. */
+async function setSubjectElectives(
+  tx: Transaction,
+  ctx: TenantContext,
+  subjectId: string,
+  electiveLevelIds: readonly string[] | undefined,
+): Promise<void> {
+  if (!electiveLevelIds) return;
+  await tx
+    .update(levelSubjects)
+    .set({
+      elective: sql`${levelSubjects.levelId} in (${sql.join(
+        [...electiveLevelIds, "00000000-0000-0000-0000-000000000000"].map((id) => sql`${id}::uuid`),
+        sql`, `,
+      )})`,
+    })
+    .where(and(eq(levelSubjects.tenantId, ctx.tenant.id), eq(levelSubjects.subjectId, subjectId)));
+}
 
 async function setSubjectLevels(
   tx: Transaction,
@@ -316,6 +348,7 @@ export async function createSubject(database: Database, ctx: TenantContext, inpu
       .values({ tenantId: ctx.tenant.id, name: data.name })
       .returning({ id: subjects.id });
     await setSubjectLevels(tx, ctx, subject!.id, data.levelIds);
+    await setSubjectElectives(tx, ctx, subject!.id, data.electiveLevelIds);
     await recordAudit(tx, {
       tenantId: ctx.tenant.id,
       actorUserId: ctx.userId,
@@ -354,6 +387,7 @@ export async function updateSubject(
       .set({ name: data.name, updatedAt: new Date() })
       .where(eq(subjects.id, subject.id));
     await setSubjectLevels(tx, ctx, subject.id, data.levelIds);
+    await setSubjectElectives(tx, ctx, subject.id, data.electiveLevelIds);
     await recordAudit(tx, {
       tenantId: ctx.tenant.id,
       actorUserId: ctx.userId,

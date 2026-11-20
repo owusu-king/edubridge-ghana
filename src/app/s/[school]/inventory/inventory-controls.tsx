@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { Alert } from "@/components/ui/alert";
+import { FormError } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { FormDialog } from "@/components/ui/form-dialog";
@@ -752,7 +752,7 @@ export function ReceiveForm({
   const e = err(state);
   return (
     <form action={formAction} className="max-w-2xl space-y-4" noValidate>
-      {state.status === "error" && !Object.keys(e).length && <Alert tone="critical">{state.message}</Alert>}
+      <FormError state={state} />
       {lines.map((l) => (
         <Field
           key={l.id}

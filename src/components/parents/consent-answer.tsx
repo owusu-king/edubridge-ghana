@@ -1,9 +1,8 @@
 "use client";
 
 import { useActionState } from "react";
-import { Alert } from "@/components/ui/alert";
 import type { FormState } from "@/web/forms";
-import { SuccessToast } from "@/components/ui/toast";
+import { FormError, SuccessToast } from "@/components/ui/toast";
 
 const buttonClass =
   "inline-flex h-11 min-w-24 items-center justify-center rounded-lg px-4 text-base font-medium disabled:opacity-60";
@@ -24,7 +23,7 @@ export function ConsentAnswer({
   const [state, formAction, pending] = useActionState(action, { status: "idle" } as FormState);
   return (
     <form action={formAction} className="space-y-3">
-      {state.status === "error" && <Alert tone="critical">{state.message}</Alert>}
+      <FormError state={state} />
       <SuccessToast state={state} />
       <label className="block space-y-1.5">
         <span className="text-sm font-medium text-ink">Note for the school (optional)</span>

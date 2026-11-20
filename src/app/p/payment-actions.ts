@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/server/db/client";
 import {
   checkParentMobileMoneyRequest,
+  requestParentFamilyPayment,
   requestParentMobileMoneyPayment,
 } from "@/server/mobile-money/requests";
 import { requireParent } from "@/web/parent-auth";
@@ -31,6 +32,40 @@ export async function payOnlineAction(
       message: outcome.unconfirmed
         ? "We could not confirm the prompt was sent. Check below in a minute before trying again."
         : "Approve the payment on your phone with your Mobile Money PIN. The receipt appears here once the network confirms it.",
+    };
+  } catch (error) {
+    return toFormError(error, formData);
+  }
+}
+
+/** One prompt for several children (2026-11-18): each child's amount comes as shares.<n>.studentId and .amount. */
+export async function payFamilyAction(
+  slug: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const { phone } = await requireParent();
+  const shares: { studentId: string; amount: string }[] = [];
+  for (let i = 0; i < 20; i++) {
+    const studentId = formData.get(`shares.${i}.studentId`);
+    if (typeof studentId !== "string") break;
+    const amount = formData.get(`shares.${i}.amount`);
+    shares.push({ studentId, amount: typeof amount === "string" ? amount : "" });
+  }
+  try {
+    const outcome = await requestParentFamilyPayment(db(), phone, slug, {
+      shares,
+      phone: formData.get("phone") ?? "",
+      network: formData.get("network") ?? "",
+      idempotencyKey: formData.get("idempotencyKey") ?? "",
+    });
+    revalidatePath("/p");
+    for (const s of shares) revalidatePath(`/p/${slug}/${s.studentId}`);
+    return {
+      status: "success",
+      message: outcome.unconfirmed
+        ? "We could not confirm the prompt was sent. Check on a child's page in a minute before trying again."
+        : "Approve the payment on your phone with your Mobile Money PIN. Each child's receipt appears on their page once the network confirms it.",
     };
   } catch (error) {
     return toFormError(error, formData);

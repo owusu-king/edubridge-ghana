@@ -310,6 +310,7 @@ export default async function StaffMemberPage({
                     <ActionButton
                       action={removeStaffDocumentAction.bind(null, slug, id, d.id)}
                       label="Remove"
+                      variant="danger-outline"
                       ariaLabel={`Remove ${d.filename}`}
                     />
                   )}

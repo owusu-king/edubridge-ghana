@@ -93,6 +93,7 @@ describe("staff permissions and read-only access (HR-05, ENT-08)", () => {
       "boarding.view",
       "forecasting.view",
       "early_warning.view",
+      "finance.view",
     ]);
     expect(allowed(readOnly, "staff.view")).toBe(true);
     expect(allowed(readOnly, "staff.documents")).toBe(true);

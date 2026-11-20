@@ -41,7 +41,9 @@ export default async function ClassAssessmentPage({
   const q = termQuery(term.id);
   const base = schoolPath(slug, `assessment/${cls.id}`);
   const drafts = students.filter((s) => s.status !== "published");
-  const incomplete = drafts.filter((s) => s.result.graded < subjects.length).length;
+  const incomplete = drafts.filter((s) => s.result.graded < s.result.subjectCount).length;
+  // JHS on the 1–9 scale: the BECE-style aggregate (best six), lower is better.
+  const showAggregate = students.some((s) => s.result.aggregate !== null);
   const published = students.length - drafts.length;
   const canPublish = allowed(ctx, "reports.publish");
 
@@ -120,14 +122,14 @@ export default async function ClassAssessmentPage({
                       ) : (
                         <StatusText
                           tone={
-                            subject.complete === students.length
+                            subject.complete === subject.takers
                               ? "positive"
                               : subject.entered
                                 ? "caution"
                                 : "neutral"
                           }
                         >
-                          {subject.complete} of {students.length} students
+                          {subject.complete} of {subject.takers} students
                         </StatusText>
                       )}
                     </TD>
@@ -175,6 +177,7 @@ export default async function ClassAssessmentPage({
                 <tr>
                   <TH>Student</TH>
                   <TH numeric>Average</TH>
+                  {showAggregate && <TH numeric>Aggregate</TH>}
                   {showPositions && (
                     <TH numeric className="hidden sm:table-cell">
                       Position
@@ -204,6 +207,15 @@ export default async function ClassAssessmentPage({
                         <span className="text-ink-3">—</span>
                       )}
                     </TD>
+                    {showAggregate && (
+                      <TD numeric>
+                        {s.result.aggregate !== null ? (
+                          s.result.aggregate
+                        ) : (
+                          <span className="text-ink-3">—</span>
+                        )}
+                      </TD>
+                    )}
                     {showPositions && (
                       <TD numeric className="hidden sm:table-cell">
                         {s.result.position !== null ? (
@@ -214,8 +226,8 @@ export default async function ClassAssessmentPage({
                       </TD>
                     )}
                     <TD className="hidden md:table-cell">
-                      <span className={s.result.graded < subjects.length ? "text-caution" : undefined}>
-                        {s.result.graded} of {subjects.length}
+                      <span className={s.result.graded < s.result.subjectCount ? "text-caution" : undefined}>
+                        {s.result.graded} of {s.result.subjectCount}
                       </span>
                     </TD>
                     <TD className="hidden md:table-cell">

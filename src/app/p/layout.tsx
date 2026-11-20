@@ -28,7 +28,7 @@ export default async function ParentLayout({ children }: { children: ReactNode }
             <form action={signOutParentAction}>
               <button
                 type="submit"
-                className="-mr-2 inline-flex h-11 items-center rounded-lg px-3 text-sm font-medium text-ink-2 hover:bg-subtle hover:text-ink"
+                className="-mr-2 inline-flex h-11 items-center rounded-lg px-3 text-sm font-medium text-critical hover:bg-critical-soft"
               >
                 Sign out
               </button>

@@ -214,6 +214,7 @@ export default async function TimetablePage({
                           <ActionButton
                             action={removePeriodAction.bind(null, slug, p.id)}
                             label="Remove"
+                            variant="danger-outline"
                             ariaLabel={`Remove ${p.name}`}
                           />
                         </span>

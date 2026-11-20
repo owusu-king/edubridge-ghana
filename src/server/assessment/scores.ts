@@ -10,7 +10,7 @@ import { assessmentScores, enrolments, reportCards } from "../db/schema";
 import { DomainError } from "../errors";
 import type { TenantContext } from "../tenancy/service";
 import { loadTerm, type AssessableClass, type TermRef } from "./access";
-import { classStudents, loadClassTermData } from "./class-data";
+import { classStudents, loadClassTermData, readSubjectChoices } from "./class-data";
 import { ensureScheme, readLevelSubjects, readScheme } from "./setup";
 import { listScoreSheetAccess, loadScoreSheetClass } from "./teaching";
 
@@ -85,7 +85,7 @@ export async function listAssessmentClasses(
 export interface ScoreSheet {
   term: TermRef;
   cls: AssessableClass;
-  subject: { id: string; name: string };
+  subject: { id: string; name: string; elective: boolean };
   components: AssessmentComponent[];
   bands: GradeBand[];
   students: {
@@ -116,13 +116,17 @@ export async function getScoreSheet(
     const subject = (await readLevelSubjects(tx, ctx.tenant.id, cls.levelId)).find((s) => s.id === subjectId);
     if (!subject) return null;
     const data = await loadClassTermData(tx, ctx.tenant.id, term, cls);
+    // An elective's sheet lists only the students who take it.
+    const takers = subject.elective
+      ? data.students.filter((s) => data.choices.get(s.id)?.has(subject.id))
+      : data.students;
     return {
       term,
       cls,
       subject,
       components: data.components,
       bands: data.bands,
-      students: data.students.map((s) => {
+      students: takers.map((s) => {
         const entered = data.scores.get(s.id)?.get(subject.id) ?? {};
         return {
           id: s.id,
@@ -211,7 +215,11 @@ export async function saveScores(
         fieldErrors[0],
       );
 
-    const roster = new Set((await classStudents(tx, ctx.tenant.id, term.id, cls.id)).map((s) => s.id));
+    let roster = new Set((await classStudents(tx, ctx.tenant.id, term.id, cls.id)).map((s) => s.id));
+    if (subject.elective) {
+      const choices = await readSubjectChoices(tx, ctx.tenant.id, [...roster], [subject.id]);
+      roster = new Set([...roster].filter((id) => choices.get(id)?.has(subject.id)));
+    }
     if (parsed.some((p) => !roster.has(p.studentId)))
       throw new DomainError("roster_changed", "The class list has changed. Reload the sheet.");
     await ensureScheme(tx, ctx, term.id);

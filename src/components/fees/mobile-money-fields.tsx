@@ -22,11 +22,14 @@ export function MobileMoneyFields({
   testMode,
   testHint,
   networks,
+  withAmount = true,
 }: {
   /** The school's currency (ISO 4217). */
   currency: string;
   state: FormState;
   defaultAmount: string;
+  /** False when the form asks for amounts itself (a family payment, one per child). */
+  withAmount?: boolean;
   phones: PayerPhone[];
   testMode: boolean;
   testHint?: string | null;
@@ -55,19 +58,21 @@ export function MobileMoneyFields({
     <>
       {testMode && <Alert>{testHint ?? "Test mode: no money moves."}</Alert>}
       <input type="hidden" name="idempotencyKey" value={key} />
-      <Field label={`Amount (${currencySymbol(currency)})`} error={state.fieldErrors?.amount}>
-        {(p) => (
-          <Input
-            {...p}
-            name="amount"
-            inputMode="decimal"
-            autoComplete="off"
-            defaultValue={state.values?.amount ?? defaultAmount}
-            required
-            className="tabular-nums"
-          />
-        )}
-      </Field>
+      {withAmount && (
+        <Field label={`Amount (${currencySymbol(currency)})`} error={state.fieldErrors?.amount}>
+          {(p) => (
+            <Input
+              {...p}
+              name="amount"
+              inputMode="decimal"
+              autoComplete="off"
+              defaultValue={state.values?.amount ?? defaultAmount}
+              required
+              className="tabular-nums"
+            />
+          )}
+        </Field>
+      )}
       <Field
         label="Payer's Mobile Money number"
         description={phones.length > 0 ? "A guardian's number, or type another." : undefined}

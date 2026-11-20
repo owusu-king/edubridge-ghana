@@ -11,6 +11,7 @@ export const FINANCE_CHECK_RULES = [
   "momo_unmatched",
   "large_refund",
   "period_reopened",
+  "cash_not_banked",
 ] as const;
 export type FinanceCheckRule = (typeof FINANCE_CHECK_RULES)[number];
 
@@ -38,6 +39,10 @@ export const FINANCE_CHECK_LABELS: Record<FinanceCheckRule, { title: string; why
   period_reopened: {
     title: "A closed period reopened",
     why: "Days the accounts were closed to were opened again for changes.",
+  },
+  cash_not_banked: {
+    title: "Cash and cheques not banked",
+    why: "Cash or cheques received more than three days ago are not in a deposit yet: someone is still holding them.",
   },
 };
 

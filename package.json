@@ -22,6 +22,8 @@
     "db:seed": "tsx scripts/seed.ts",
     "platform:admin": "tsx scripts/platform-admin.ts",
     "demo:school": "tsx --conditions=react-server scripts/demo-school.ts",
+    "demo:visitor": "tsx --conditions=react-server scripts/demo-visitor.ts",
+    "demo:finance": "tsx --conditions=react-server scripts/demo-finance.ts",
     "worker": "tsx --conditions=react-server scripts/worker.ts",
     "keys:rotate": "tsx scripts/rotate-encryption-key.ts",
     "check:parent-bundle": "tsx scripts/check-parent-bundle.ts",

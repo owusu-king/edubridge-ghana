@@ -27,7 +27,7 @@ export default async function SchoolsPage() {
       <header className="flex items-center justify-between">
         <Wordmark />
         <form action={signOut}>
-          <Button type="submit" variant="ghost" size="sm">
+          <Button type="submit" variant="danger-outline" size="sm">
             Sign out
           </Button>
         </form>

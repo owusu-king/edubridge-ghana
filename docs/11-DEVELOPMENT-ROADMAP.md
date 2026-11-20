@@ -841,6 +841,108 @@ Plans has "Add the suggested plans". The seed adds the plans; the demo school is
 add-ons. Not yet: prorating, tax lines (VAT to be confirmed by EduBridge's accountant), per-message SMS on automatic
 invoices for schools without an allowance (staff invoice those by hand), and self-service plan changes.
 
+## Ghana gaps and competitive basics (founder, 2026-11-18 and 2026-11-19)
+
+From the product assessment and the global benchmarking supplement (Claude Docs). The founder asked for the six Ghana
+gaps and the four additions from the benchmarking to be built, and chose the recommendations below.
+
+| Item | As built | Evidence |
+| --- | --- | --- |
+| Operational roles | Seven roles that see only their own area: Cashier (take payments), Librarian, Storekeeper, Transport officer, Front desk (visitors and pickup), School nurse (students and medical), Admissions officer. None voids receipts, changes fees, manages members or settings. Assigned on Members like other roles (migration 0128) | permissions (unit), operational-roles (integration) |
+| Family payment | A parent with two or more children owing approves one Mobile Money prompt (parent view, "Pay for all children at once"); each child gets their own receipt for their share, in one transaction. Shares are fixed by database triggers and must add up to the total; finance checks and reconciliation treat the shared transaction as one payment (0129, 0130) | family-payments (integration) |
+| School finances module (`finance`) | Accounts (bank, cash, Mobile Money; last digits only); expenses, approved by the Proprietor from a school-set amount (default GH₵1,000; 0 = every expense); cash to bank: cash and cheque receipts not yet banked, by who recorded them, into deposits with the slip number; bank statements imported as CSV (date, description, reference, amount or debit and credit), matched automatically when one record fits, by hand otherwise, or explained (bank charges); income against spending by month. Deposits and expenses are never deleted (cancelled or voided with a reason) and respect closed periods. New finance check: cash and cheques not banked after three days, once the school has a bank account (0131, 0132) | school-finance (unit, integration) |
+| Commercial | The founder chose the recommendation: School finances is a paid module, in Standard and Premium, and an add-on at GH₵400 a term (0133). Plans already in the database need the module added on Admin, Plans | |
+| SHS and WASSCE | The Ghana template now runs Creche to SHS 3: SHS levels, core subjects and 15 electives, WASSCE grades A1 to F9 (assumption: the bands schools use for school assessment). Templates without a senior secondary stage offer none | electives-aggregate (unit) |
+| Electives | A level's subject can be an elective (Assessment setup, "Elective in"); its score sheet lists only the students chosen for it (chosen on the score sheet). Totals, averages, positions and report cards count only each student's own subjects (0134, 0135) | electives (unit, integration) |
+| BECE aggregate | JHS classes on the 1–9 scale show the BECE-style aggregate: the four core subjects (English, Mathematics, Science, Social Studies) plus the best two others, on the class page and report cards (assumption: the core four and best-two rule; confirm with a JHS head) | electives-aggregate (unit) |
+| Trust page | `/trust`, public, linked from sign-in: only what the product enforces today. Hosting and backup lines appear when `TRUST_HOSTING` and `TRUST_BACKUPS` are set on the deployment | |
+| Pilot free term | Already possible: a trial ending on the term's last day (no invoice is issued for a period the trial covers) or a 100% discount with an end date (Admin, school) | auto-invoices (integration) |
+
+Not yet: documents and photos in the data export; a promise-to-pay record on the owing list; an accounting export; a
+student-facing view of electives; a whole-class remark draft.
+
+### Interface conventions (founder, 2026-11-19)
+
+- A form's outcome is never left as a message on the page: confirmations and general errors are toasts at the
+  bottom right (`FormMessage`, `FormError`; errors stay six seconds). What is wrong with a field stays under it.
+  Inside a dialog the general error stays at the top of the dialog, because a modal hides the rest of the page
+  from screen readers and closes on a click outside it. Panels that replace a finished form (a prompt sent, a
+  request received) and the offline queue's own status are content, not messages, and stay.
+- Actions that remove, cancel or end something have a thin red outline (`danger-outline`); the final
+  confirmation is filled red. Sign out is red. Signing out of other devices is confirmed in the same dialog as
+  other destructive actions.
+- A button beside fields lines up with the inputs (`besideField`), whatever help text or error is below them.
+- Sidebar icons: after a 0.3-second hover, one part of the icon moves (the wallet opens, the tassel swings); the
+  icon itself never moves. Leave's plane keeps its own flight.
+
+## Landing page (founder, 2026-11-19)
+
+`/` is the public landing page for visitors who are not signed in (signed-in staff still go to their school; a
+parent with a live parent session to their children). The founder chose: no AI avatar; a short video they will
+record; "Try the demo school". Copy lives in `src/components/landing/content.ts` and says only what the product
+does today: no statistics, testimonials or stock photographs. The picture in the hero is drawn with the app's own
+type and colours and labelled as an example (made-up names and figures). The landing page is indexed; the app is not.
+
+| Item | As built | Evidence |
+| --- | --- | --- |
+| Book a visit | Name, role, school, town, mobile (E.164), optional email and note, school size; checked by the app and the database, five per connection an hour, a hidden field turns robots away. Kept in `sales_enquiries` (0136, 0137), read and marked handled once on Admin, Enquiries; never deleted | landing-demo (integration), landing (unit) |
+| Try the demo school | Shown only when `DEMO_SCHOOL_SLUG` names a demo school with its visitor (`npm run demo:visitor`; new demos get one). Opens a two-hour session, never extended, twenty per connection an hour, for a shared visitor account with the Proprietor's view. Every school transaction of that account is read-only in the database (`setTenantContext`), so any change is refused with a plain message; AI never runs for it (cost); it is kept inside the demo school (account pages, invitations, Admin lead back); triggers refuse its membership in any school that is not a demo. A banner offers "Book a visit" and "Leave the demo" | landing-demo (integration); 81 demo-school pages opened as the visitor without error (browser) |
+| Video | Self-hosted (the security policy allows no outside media): `LANDING_VIDEO`, `LANDING_VIDEO_POSTER`. A labelled placeholder while developing; nothing in production until set | landing (unit) |
+| Contact | `LANDING_PHONE`, `LANDING_WHATSAPP`, `LANDING_EMAIL` beside the form when set | |
+
+To confirm with the founder: the commercial lines (first term free; Starter, Standard and Premium named without
+prices) and "we will be in touch soon" after a request. Not yet: the founder's video; email to EduBridge when an
+enquiry arrives.
+
+Positioning (founder's brand brief, 2026-11-19, replacing the money-first copy): "The complete operating system for
+schools. Built for Africa. Ready for the world.", for school owners in Ghana and beyond. The page runs: hero with the
+Command Center; the owner's questions and how EduBridge answers them; one platform on one set of records; student
+intelligence (early warning); management insight (Command Center, Insights, forecast, board summary, assistant);
+finance and accountability; academics and the Student Passport; operations; trust; international readiness (11
+country settings, 5 curriculum templates; Mobile Money collection in Ghana only); plans from `src/lib/pricing.ts`
+without prices; the demo school and video; questions; "Book a demo". Every claim was checked against the code.
+Left out until true: a student portal, behaviour indicators, languages other than English, Mobile Money outside
+Ghana, backups or uptime guarantees, certifications, customer numbers, testimonials.
+
+Demo schools now have a term of the school's own money (`scripts/demo/finance.ts`; `npm run demo:finance` adds it to
+an existing demo): a bank account, cash box and Mobile Money wallet; expenses (most approved, two waiting, one
+rejected, one voided); cash and cheques banked in deposits, the last week's not yet (the "cash not banked" check);
+and the bank's statement, imported and matched, with its monthly charges left to explain.
+
+## Moving from another system (founder, 2026-11-19)
+
+The setup guide (Command Center, Setup) has a second path, "Moving from another system" (`?path=switch`, also linked
+from the Command Center's setup panel). It starts with what to export from the old system (the student list and
+each family's balance, with both import templates) and then takes the steps in the order an import needs: calendar,
+classes named as in the old system, the student list (Students, Import), guardians' phones, balances owed from before
+(Fees, Opening balances: a new step, done once any balance is brought in, optional so it never holds the guide
+open), fees and the first bill, staff, subjects. Each step still ticks itself off from the school's records.
+Staff import (Staff, Import from a spreadsheet; also in the guide): staff records, not accounts, for those who
+manage staff with the whole school in view. Headings from other systems are matched; staff numbers from the file are
+kept, the rest numbered; positions and departments not on the school's lists are added and named before importing;
+someone already on the list (by name with phone or email, or by name alone when the row has nothing else) is held
+back. The student and staff imports share their file reading and wizard (`src/server/imports/files.ts`,
+`src/components/imports/import-wizard.tsx`). Not built: a second guardian per student, or past marks and payments.
+
+## Installing on a computer (founder, 2026-11-19)
+
+EduBridge installs as an app on computers as well as phones: in Chrome and Edge it opens in its own window from the
+Start menu, taskbar or Dock, with no store and no download. The profile menu offers "Install EduBridge" only where the
+browser can install it and EduBridge is not installed yet (`src/components/shell/install.ts`); Safari is pointed to
+File, Add to Dock (Mac) or Share, Add to Home Screen (iPhone, iPad), Firefox on Android to its menu, Add to Home
+screen, and Chrome, Edge and Firefox on iPhone and iPad (iOS 16.4 and later) to Share, Add to Home Screen; in-app
+browsers are offered nothing; Firefox on a computer cannot install web apps and
+is offered nothing. The manifest brings an open window forward instead of starting another. The installed app
+never shows the landing page: it opens at `/app` (staff signed in to their school, parents to the parent view, a
+parent whose sign-in ended to the parent sign-in, everyone else to staff sign-in), and an installed window that
+reaches `/` is sent on to `/app`. Parents, who have no profile menu, see a note on the parent view's home ("Add EduBridge to your
+home screen"), only where the phone can install it and EduBridge is not installed; "Not now" hides it on that phone
+(`src/components/parents/install-note.tsx`). On "System", an installed window's title bar takes the device's light or dark setting:
+the proxy asks Chrome and Edge for it (the `Sec-CH-Prefers-Color-Scheme` client hint) and the layout writes one
+theme colour (some installed windows take the first of a light and a dark colour); a change of the device's setting
+while EduBridge is open refreshes it (`src/components/system-theme-watcher.tsx`). The service worker is
+registered when the app loads (production only), not only on the offline register pages.
+
 ## Later releases
 
 R1 pilot (students, guardians, fees, ledger, receipts, parent portal, one payment provider, finance SMS/email),

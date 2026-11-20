@@ -7,6 +7,7 @@ import {
   ChevronsUpDown,
   LogOut,
   Monitor,
+  MonitorDown,
   Moon,
   Sun,
   UserRound,
@@ -17,14 +18,16 @@ import { usePathname, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { Avatar } from "@/components/ui/layout";
 import { SchoolMonogram } from "@/components/ui/monogram";
-import { menuContent, menuItem, useFocusReturn } from "@/components/ui/menu";
+import { menuContent, menuItem, menuItemDanger, useFocusReturn } from "@/components/ui/menu";
 import { cn } from "@/lib/cn";
 import { initials } from "@/lib/format";
-import { THEME_COOKIE, type ThemeChoice } from "@/lib/theme";
+import { THEME_CANVAS, THEME_COOKIE, type ThemeChoice } from "@/lib/theme";
 import { Wordmark } from "@/components/ui/wordmark";
 import type { SchoolOption, ShellArea } from "./navigation";
 import { schoolPath } from "@/lib/routes";
 import { clearOfflineData } from "@/components/attendance/offline";
+import { toast } from "@/components/ui/toast";
+import { INSTALL_HELP, promptInstall, useInstall } from "./install";
 
 export function SchoolSwitcher({ current, schools }: { current: SchoolOption; schools: SchoolOption[] }) {
   const identity = (
@@ -96,9 +99,33 @@ function useThemeChoice(initial: ThemeChoice) {
       document.cookie = `${THEME_COOKIE}=${next}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
       document.documentElement.dataset.theme = next;
     }
+    paintThemeColor(next);
     router.refresh();
   }
   return [theme, choose] as const;
+}
+
+/**
+ * The browser's (and an installed window's) title-bar colour, changed in the same moment as the page. Otherwise it
+ * waits for the server's refresh, which writes the same colour a moment later. Every theme-colour tag gets the new
+ * colour, whichever device setting it was written for.
+ */
+function paintThemeColor(choice: ThemeChoice) {
+  const deviceDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
+    const media = meta.getAttribute("media") ?? "";
+    const scheme =
+      choice !== "system"
+        ? choice
+        : media.includes("dark")
+          ? "dark"
+          : media.includes("light")
+            ? "light"
+            : deviceDark
+              ? "dark"
+              : "light";
+    meta.content = THEME_CANVAS[scheme];
+  }
 }
 
 function ThemeItems({ theme, onChoose }: { theme: ThemeChoice; onChoose: (value: string) => void }) {
@@ -174,6 +201,7 @@ export function UserMenu({
   const signOutForm = useRef<HTMLFormElement>(null);
   const [theme, chooseTheme] = useThemeChoice(initialTheme);
   const focus = useFocusReturn();
+  const install = useInstall();
   // On the account pages the profile button shows as the current place, like a sidebar link.
   const onAccount = usePathname().startsWith("/account");
   return (
@@ -230,9 +258,28 @@ export function UserMenu({
               <ThemeItems theme={theme} onChoose={chooseTheme} />
             </>
           )}
+          {install && (
+            <>
+              <DropdownMenu.Separator className="my-1 h-px bg-line" />
+              <DropdownMenu.Item
+                className={menuItem}
+                onSelect={() => {
+                  if (install === "prompt") {
+                    void promptInstall().then((done) => {
+                      if (done)
+                        toast("EduBridge is installed. Open it from your Start menu, Dock or home screen.");
+                    });
+                  } else toast(INSTALL_HELP[install], "positive", 10_000);
+                }}
+              >
+                <MonitorDown aria-hidden="true" className="size-4" />
+                Install EduBridge
+              </DropdownMenu.Item>
+            </>
+          )}
           <DropdownMenu.Separator className="my-1 h-px bg-line" />
           <DropdownMenu.Item
-            className={menuItem}
+            className={menuItemDanger}
             onSelect={() => void clearOfflineData().finally(() => signOutForm.current?.requestSubmit())}
           >
             <LogOut aria-hidden="true" className="size-4" />

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { IdCard } from "lucide-react";
 import { StatusText } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonStyles } from "@/components/ui/button";
 import { Select } from "@/components/ui/field";
 import { EmptyState } from "@/components/ui/layout";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -80,6 +80,11 @@ export default async function StaffPage({
             label="Search by name or staff number"
             buttonLabel="Look up staff"
           />
+          {canManage && ctx.campusIds === null && (
+            <Link href={schoolPath(slug, "staff/import")} className={buttonStyles("secondary")}>
+              Import from a spreadsheet
+            </Link>
+          )}
           {canManage && (
             <AddStaffDialog
               action={createStaffAction.bind(null, slug)}

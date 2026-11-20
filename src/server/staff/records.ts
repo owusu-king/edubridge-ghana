@@ -337,6 +337,69 @@ async function addEvent(
   });
 }
 
+/** A staff record ready to insert: personal details, employment and start date (checked by the caller). */
+export interface NewStaff {
+  /** Kept from the school's old records when given; otherwise the next staff number. */
+  staffNumber?: string | null;
+  firstName: string;
+  lastName: string;
+  otherNames?: string | null;
+  sex?: "female" | "male" | null;
+  dateOfBirth?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  qualifications?: string | null;
+  emergencyName?: string | null;
+  emergencyRelationship?: string | null;
+  emergencyPhone?: string | null;
+  employmentType: EmploymentType;
+  departmentId?: string | null;
+  positionId?: string | null;
+  campusId?: string | null;
+  startedOn: string;
+}
+
+/**
+ * Inserts a staff record and its "started" employment event in the caller's transaction (used by adding one person
+ * and by the spreadsheet import, so both make the same record). The caller audits.
+ */
+export async function insertStaffInTx(
+  tx: Transaction,
+  ctx: TenantContext,
+  data: NewStaff,
+): Promise<{ id: string; staffNumber: string }> {
+  const employment = {
+    employmentType: data.employmentType,
+    departmentId: data.departmentId ?? null,
+    positionId: data.positionId ?? null,
+    campusId: data.campusId ?? null,
+  };
+  const [row] = await tx
+    .insert(staff)
+    .values({
+      tenantId: ctx.tenant.id,
+      staffNumber: data.staffNumber || (await nextStaffNumber(tx, ctx.tenant.id)),
+      firstName: data.firstName,
+      lastName: data.lastName,
+      otherNames: data.otherNames ?? null,
+      sex: data.sex ?? null,
+      dateOfBirth: data.dateOfBirth ?? null,
+      phone: data.phone ?? null,
+      email: data.email ?? null,
+      address: data.address ?? null,
+      qualifications: data.qualifications ?? null,
+      emergencyName: data.emergencyName ?? null,
+      emergencyRelationship: data.emergencyRelationship ?? null,
+      emergencyPhone: data.emergencyPhone ?? null,
+      ...employment,
+      startedOn: data.startedOn,
+    })
+    .returning({ id: staff.id, staffNumber: staff.staffNumber });
+  await addEvent(tx, ctx, row!.id, "started", data.startedOn, employment, null);
+  return row!;
+}
+
 /** Adds a staff record with the next staff number, and its "started" employment event. */
 export async function createStaff(database: Database, ctx: TenantContext, input: unknown): Promise<string> {
   assertAllowed(ctx, "staff.manage");
@@ -344,43 +407,16 @@ export async function createStaff(database: Database, ctx: TenantContext, input:
   assertCampus(ctx, data.campusId ?? null);
   return withTenant(database, scopeOf(ctx), async (tx) => {
     await assertListItems(tx, ctx.tenant.id, data);
-    const employment = {
-      employmentType: data.employmentType,
-      departmentId: data.departmentId ?? null,
-      positionId: data.positionId ?? null,
-      campusId: data.campusId ?? null,
-    };
-    const [row] = await tx
-      .insert(staff)
-      .values({
-        tenantId: ctx.tenant.id,
-        staffNumber: await nextStaffNumber(tx, ctx.tenant.id),
-        firstName: data.firstName,
-        lastName: data.lastName,
-        otherNames: data.otherNames ?? null,
-        sex: data.sex ?? null,
-        dateOfBirth: data.dateOfBirth ?? null,
-        phone: data.phone ?? null,
-        email: data.email ?? null,
-        address: data.address ?? null,
-        qualifications: data.qualifications ?? null,
-        emergencyName: data.emergencyName ?? null,
-        emergencyRelationship: data.emergencyRelationship ?? null,
-        emergencyPhone: data.emergencyPhone ?? null,
-        ...employment,
-        startedOn: data.startedOn,
-      })
-      .returning({ id: staff.id, staffNumber: staff.staffNumber });
-    await addEvent(tx, ctx, row!.id, "started", data.startedOn, employment, null);
+    const row = await insertStaffInTx(tx, ctx, { ...data, staffNumber: null });
     await recordAudit(tx, {
       tenantId: ctx.tenant.id,
       actorUserId: ctx.userId,
       action: "staff.added",
       entityType: "staff",
-      entityId: row!.id,
-      metadata: { staffNumber: row!.staffNumber, name: `${data.firstName} ${data.lastName}` },
+      entityId: row.id,
+      metadata: { staffNumber: row.staffNumber, name: `${data.firstName} ${data.lastName}` },
     });
-    return row!.id;
+    return row.id;
   });
 }
 

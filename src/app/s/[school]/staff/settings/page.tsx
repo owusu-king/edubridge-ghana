@@ -37,6 +37,7 @@ function NameList({ slug, kind, items }: { slug: string; kind: StaffListKind; it
           <ActionButton
             action={setStaffListItemArchivedAction.bind(null, slug, kind, item.id, !item.archived)}
             label={item.archived ? "Restore" : "Archive"}
+            variant={item.archived ? "secondary" : "danger-outline"}
             ariaLabel={`${item.archived ? "Restore" : "Archive"} ${item.name}`}
           />
         </li>
@@ -103,6 +104,7 @@ export default async function StaffSettingsPage({ params }: { params: Promise<{ 
                         <ActionButton
                           action={setLeaveTypeArchivedAction.bind(null, slug, t.id, !t.archived)}
                           label={t.archived ? "Restore" : "Archive"}
+                          variant={t.archived ? "secondary" : "danger-outline"}
                           ariaLabel={`${t.archived ? "Restore" : "Archive"} ${t.name}`}
                         />
                       </span>

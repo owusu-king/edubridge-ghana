@@ -109,6 +109,7 @@ const STANDARD: PlanModuleId[] = [
   "command_center",
   "forecasting",
   "early_warning",
+  "finance",
 ];
 const PREMIUM: PlanModuleId[] = [...STANDARD, "staff_hr", "payroll", "whatsapp", "assistant", "ai_drafting"];
 
@@ -124,7 +125,7 @@ export const SUGGESTED_PLANS: readonly SuggestedPlan[] = [
   {
     name: "Standard",
     description:
-      "Starter, plus admissions, visitors and pickup, the Command Center, forecasting and early warning.",
+      "Starter, plus admissions, visitors and pickup, school finances, the Command Center, forecasting and early warning.",
     features: STANDARD,
     maxCampuses: 2,
     maxSmsPerMonth: 800,
@@ -144,6 +145,7 @@ export const SUGGESTED_PLANS: readonly SuggestedPlan[] = [
 /** Add-ons on any plan, per term in Ghana cedis. */
 export const SUGGESTED_ADD_ONS: readonly { module: PlanModuleId; termlyCedis: number }[] = [
   { module: "transport", termlyCedis: 450 },
+  { module: "finance", termlyCedis: 400 },
   { module: "boarding", termlyCedis: 750 },
   { module: "library", termlyCedis: 300 },
   { module: "inventory_assets", termlyCedis: 300 },

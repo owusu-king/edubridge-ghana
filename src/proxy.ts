@@ -5,14 +5,20 @@ import { buildCsp } from "@/web/csp";
 import { LAST_SCHOOL_COOKIE, lastSchoolCookieOptions, schoolSlugFromPath } from "@/web/last-school";
 import { PARENT_COOKIE, SESSION_COOKIE, sessionCookieOptions } from "@/web/session-cookie";
 
-/** /verify: anyone can check a learner record (Transfer Passport). */
+/**
+ * /verify: anyone can check a learner record (Transfer Passport). / is the landing page for visitors (page.tsx).
+ * /app is where the installed app opens; it sends each person to their school, their children or sign-in.
+ */
 const PUBLIC_PATHS = [
+  "/",
+  "/app",
   "/login",
   "/login/verify",
   "/forgot-password",
   "/p/login",
   "/p/login/verify",
   "/verify",
+  "/trust",
 ];
 /** Balance links (/b/) are read-only and carry their own secret. */
 /** /logo/: school logos are public, like the sign on a school gate. */
@@ -35,14 +41,8 @@ export function proxy(request: NextRequest) {
   const isPublic = PUBLIC_PATHS.includes(pathname) || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
   if (!token && !isPublic) {
     const url = request.nextUrl.clone();
-    // A parent (signed in to the parent view only) opening the site's home goes to their children.
-    if (pathname === "/" && request.cookies.get(PARENT_COOKIE)) {
-      url.pathname = "/p";
-      return NextResponse.redirect(url);
-    }
     url.pathname = parentArea ? "/p/login" : "/login";
-    url.search =
-      pathname === "/" || pathname === "/p" ? "" : `?next=${encodeURIComponent(pathname + search)}`;
+    url.search = pathname === "/p" ? "" : `?next=${encodeURIComponent(pathname + search)}`;
     return NextResponse.redirect(url);
   }
 
@@ -54,6 +54,10 @@ export function proxy(request: NextRequest) {
   requestHeaders.set("x-edubridge-path", pathname);
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set("content-security-policy", csp);
+  // Ask Chrome and Edge for the device's light or dark setting on every request, so "System" gives an installed
+  // app's title bar the right colour (app/layout.tsx). Critical: the first page is fetched again with it if missing.
+  response.headers.set("accept-ch", "Sec-CH-Prefers-Color-Scheme");
+  response.headers.set("critical-ch", "Sec-CH-Prefers-Color-Scheme");
   if (token && request.method === "GET") {
     const lifetime = parentArea ? PARENT_SESSION_LIFETIME_MS : SESSION_LIFETIME_MS;
     response.cookies.set(cookie, token, sessionCookieOptions(lifetime));

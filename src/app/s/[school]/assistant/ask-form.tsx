@@ -4,6 +4,7 @@ import type { Route } from "next";
 import Link from "next/link";
 import { useActionState } from "react";
 import { Alert } from "@/components/ui/alert";
+import { FormError } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Field, Textarea } from "@/components/ui/field";
 import type { AssistantAnswer } from "@/server/assistant/service";
@@ -54,9 +55,7 @@ export function AskForm({
         </div>
       </form>
       <div aria-live="polite">
-        {state.status === "error" && state.message && !state.fieldErrors?.question && (
-          <Alert tone="critical">{state.message}</Alert>
-        )}
+        <FormError state={state} />
         {answer && (
           <section aria-label="Answer" className="space-y-3 border-l-2 border-accent pl-4">
             <p className="text-base whitespace-pre-line text-ink">{answer.answer}</p>

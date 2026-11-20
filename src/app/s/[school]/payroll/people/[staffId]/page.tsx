@@ -184,6 +184,7 @@ export default async function StaffPayPage({
                         <ActionButton
                           action={cancelAdjustmentAction.bind(null, slug, a.id)}
                           label="Cancel"
+                          variant="danger-outline"
                           ariaLabel={`Cancel ${a.description}`}
                         />
                       )}

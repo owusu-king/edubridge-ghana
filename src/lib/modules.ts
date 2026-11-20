@@ -45,6 +45,7 @@ export const PLAN_MODULE_IDS = [
   "early_warning",
   "command_center",
   "ai_drafting",
+  "finance",
 ] as const;
 
 export type CoreModuleId = (typeof CORE_MODULE_IDS)[number];
@@ -436,6 +437,17 @@ const DEFINITIONS: readonly ModuleDefinition[] = [
     purchasable: false,
     requires: [],
     routes: ["board-report"],
+  }),
+  sold({
+    id: "finance",
+    name: "School finances",
+    description:
+      "Expenses with the Proprietor's approval, cash and cheques followed to the bank, bank statements matched, and income against spending.",
+    category: "finance",
+    release: "R5",
+    stage: "general",
+    requires: [],
+    routes: ["finance"],
   }),
 ];
 

@@ -2,7 +2,7 @@
 
 import { CheckCircle2 } from "lucide-react";
 import { useActionState } from "react";
-import { Alert } from "@/components/ui/alert";
+import { FormError } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import type { ApplyState } from "./actions";
@@ -43,7 +43,7 @@ export function ApplyForm({
   const v = state.values ?? {};
   return (
     <form action={formAction} className="space-y-8" noValidate>
-      {state.status === "error" && state.message && <Alert tone="critical">{state.message}</Alert>}
+      <FormError state={state} />
       <fieldset className="space-y-5">
         <legend className="mb-1 text-md font-semibold text-ink">The child</legend>
         <div className="grid gap-5 sm:grid-cols-2">
@@ -233,9 +233,7 @@ function ConfirmStep({
       <p className="text-base text-ink-2">
         We sent a 6-digit code by SMS. Enter it to send your application.
       </p>
-      {state.status === "error" && state.message && !state.fieldErrors?.code && (
-        <Alert tone="critical">{state.message}</Alert>
-      )}
+      <FormError state={state} />
       <Field label="Code" error={state.fieldErrors?.code}>
         {(p) => (
           <Input

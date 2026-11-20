@@ -251,6 +251,7 @@ export default async function PlanPage({ params }: { params: Promise<{ school: s
               <ActionButton
                 action={withdrawPlanRequestAction.bind(null, slug, options.pending.id)}
                 label="Withdraw"
+                variant="danger-outline"
                 ariaLabel="Withdraw the plan change request"
               />
             )}

@@ -85,6 +85,7 @@ export default async function TransportStudentsPage({ params }: { params: Promis
                       <ActionButton
                         action={endAssignmentAction.bind(null, slug, a.id)}
                         label="Take off"
+                        variant="danger-outline"
                         ariaLabel={`Take ${a.student} off the route`}
                       />
                     </TD>

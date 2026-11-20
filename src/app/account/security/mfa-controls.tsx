@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useActionState, useState } from "react";
 import { Alert } from "@/components/ui/alert";
+import { FormError } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Field, Input } from "@/components/ui/field";
@@ -81,7 +82,7 @@ export function EnableMfa() {
   if (setup.status !== "success" || !setup.data) {
     return (
       <form action={startSetup} className="space-y-4">
-        {setup.status === "error" && <Alert tone="critical">{setup.message}</Alert>}
+        <FormError state={setup} />
         <Button type="submit" pending={starting}>
           Set up two-step verification
         </Button>
@@ -96,48 +97,51 @@ export function EnableMfa() {
         <li>Scan this QR code, or enter the setup key.</li>
         <li>Enter the 6-digit code the app shows.</li>
       </ol>
-      <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
+      {/* The QR code on the left; beside it the setup key at the top and the code field level with its foot. */}
+      <div className="flex flex-col gap-6 sm:flex-row sm:items-stretch">
         {/* eslint-disable-next-line @next/next/no-img-element -- generated SVG data URI */}
         <img
           src={qrDataUri}
           alt="QR code for your authenticator app"
           width={176}
           height={176}
-          className="rounded-md border border-line bg-[#fff] p-3"
+          className="shrink-0 self-start rounded-md border border-line bg-[#fff] p-3"
         />
-        <div className="min-w-0 space-y-1">
-          <p className="text-sm text-ink-3">Setup key</p>
-          <p className="font-mono text-base break-all text-ink" data-testid="mfa-secret">
-            {secret.match(/.{1,4}/g)?.join(" ")}
-          </p>
+        <div className="flex min-w-0 flex-1 flex-col gap-6 sm:justify-between">
+          <div className="space-y-1">
+            <p className="text-sm text-ink-3">Setup key</p>
+            <p className="font-mono text-base break-all text-ink" data-testid="mfa-secret">
+              {secret.match(/.{1,4}/g)?.join(" ")}
+            </p>
+          </div>
+          <form
+            action={confirmAction}
+            className="flex max-w-sm flex-col gap-3 sm:flex-row sm:items-start"
+            noValidate
+          >
+            <Field
+              label="Code from your app"
+              error={confirm.fieldErrors?.code ?? (confirm.status === "error" ? confirm.message : undefined)}
+              className="flex-1"
+            >
+              {(p) => (
+                <Input
+                  {...p}
+                  name="code"
+                  required
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  className="font-mono tracking-widest"
+                />
+              )}
+            </Field>
+            <Button type="submit" pending={confirming} className="sm:mt-6.5">
+              Turn on
+            </Button>
+          </form>
         </div>
       </div>
-      <form
-        action={confirmAction}
-        className="flex max-w-md flex-col gap-3 sm:flex-row sm:items-start"
-        noValidate
-      >
-        <Field
-          label="Code from your app"
-          error={confirm.fieldErrors?.code ?? (confirm.status === "error" ? confirm.message : undefined)}
-          className="flex-1"
-        >
-          {(p) => (
-            <Input
-              {...p}
-              name="code"
-              required
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={6}
-              className="font-mono tracking-widest"
-            />
-          )}
-        </Field>
-        <Button type="submit" pending={confirming} className="sm:mt-6">
-          Turn on
-        </Button>
-      </form>
     </div>
   );
 }
@@ -153,7 +157,7 @@ export function ManageMfa({ remaining }: { remaining: number }) {
         <Button variant="secondary" onClick={() => setDialog("codes")}>
           New recovery codes
         </Button>
-        <Button variant="ghost" onClick={() => setDialog("disable")}>
+        <Button variant="danger-outline" onClick={() => setDialog("disable")}>
           Turn off
         </Button>
       </div>
@@ -219,7 +223,7 @@ function DisableForm({ onDone }: { onDone: () => void }) {
   }, idle);
   return (
     <form action={action} className="space-y-5" noValidate>
-      {state.status === "error" && !state.fieldErrors && <Alert tone="critical">{state.message}</Alert>}
+      <FormError state={state} />
       <Field label="Password" error={state.fieldErrors?.password}>
         {(p) => (
           <Input {...p} name="password" type="password" required autoComplete="current-password" autoFocus />

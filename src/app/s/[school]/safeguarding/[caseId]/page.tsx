@@ -168,6 +168,7 @@ export default async function CasePage({ params }: { params: Promise<{ school: s
                 <ActionButton
                   action={removeCaseDocumentAction.bind(null, slug, c.id, d.id)}
                   label="Remove"
+                  variant="danger-outline"
                   ariaLabel={`Remove ${d.filename}`}
                 />
               </li>

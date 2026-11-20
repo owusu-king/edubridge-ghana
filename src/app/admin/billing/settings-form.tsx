@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Textarea } from "@/components/ui/field";
+import { Field, fieldInGrid, Input, Textarea } from "@/components/ui/field";
 import type { FormState } from "@/web/forms";
 import { FormMessage } from "@/components/ui/toast";
 
@@ -20,8 +20,9 @@ export function PlatformSettingsForm({
   return (
     <form action={formAction} className="space-y-4" noValidate>
       {state.status !== "idle" && state.message && <FormMessage state={state} />}
-      <div className="grid gap-5 sm:grid-cols-3 sm:items-end lg:max-w-3xl">
+      <div className="grid gap-5 sm:grid-cols-3 lg:max-w-3xl">
         <Field
+          className={fieldInGrid}
           label="SMS price for schools billed in cedis (GH₵ per message)"
           description="Used where a school has no price of its own."
           error={errors.smsPrice}
@@ -36,6 +37,7 @@ export function PlatformSettingsForm({
           )}
         </Field>
         <Field
+          className={fieldInGrid}
           label="WhatsApp price for schools billed in cedis (GH₵ per message)"
           description="For schools whose plan includes WhatsApp."
           error={errors.whatsappPrice}
@@ -50,6 +52,7 @@ export function PlatformSettingsForm({
           )}
         </Field>
         <Field
+          className={fieldInGrid}
           label="Grace days"
           description="After an invoice falls due, before SMS pause."
           error={errors.graceDays}
@@ -91,6 +94,7 @@ export function InvoiceDetailsForm({
       {state.status !== "idle" && state.message && <FormMessage state={state} />}
       <div className="grid gap-5 sm:grid-cols-2">
         <Field
+          className={fieldInGrid}
           label="EduBridge on invoices"
           description="Legal name, address and tax number, as they should print."
           error={errors.issuer}
@@ -106,6 +110,7 @@ export function InvoiceDetailsForm({
           )}
         </Field>
         <Field
+          className={fieldInGrid}
           label="How to pay"
           description="Bank or Mobile Money details printed on unpaid invoices."
           error={errors.paymentInstructions}
@@ -165,8 +170,9 @@ export function InvoicingSettingsForm({
           </span>
         </span>
       </label>
-      <div className="grid gap-5 sm:grid-cols-2 sm:items-end lg:max-w-3xl lg:grid-cols-4">
+      <div className="grid gap-5 sm:grid-cols-2 lg:max-w-3xl lg:grid-cols-4">
         <Field
+          className={fieldInGrid}
           label="Census day"
           description="Days after a term starts that students are counted."
           error={errors.censusDays}
@@ -184,7 +190,12 @@ export function InvoicingSettingsForm({
             />
           )}
         </Field>
-        <Field label="Days to pay" description="From the invoice date." error={errors.invoiceDueDays}>
+        <Field
+          className={fieldInGrid}
+          label="Days to pay"
+          description="From the invoice date."
+          error={errors.invoiceDueDays}
+        >
           {(p) => (
             <Input
               {...p}
@@ -199,6 +210,7 @@ export function InvoicingSettingsForm({
           )}
         </Field>
         <Field
+          className={fieldInGrid}
           label="Yearly discount (%)"
           description="Off the terms paid for at once."
           error={errors.annualDiscount}
@@ -214,6 +226,7 @@ export function InvoicingSettingsForm({
           )}
         </Field>
         <Field
+          className={fieldInGrid}
           label="Monthly premium (%)"
           description="On a month's share of the year."
           error={errors.monthlySurcharge}

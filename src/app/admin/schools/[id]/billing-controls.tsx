@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select, Textarea } from "@/components/ui/field";
+import { besideField, Field, Input, Select, Textarea } from "@/components/ui/field";
 import { FormDialog } from "@/components/ui/form-dialog";
 import {
   BILLING_PERIOD_LABELS,
@@ -511,7 +511,7 @@ export function ApplyPresetForm({
   return (
     <form action={formAction} className="space-y-3" noValidate>
       <Message state={state} />
-      <div className="flex flex-wrap items-end gap-2">
+      <div className="flex flex-wrap items-start gap-2">
         <Field label="Set from a plan" error={state.fieldErrors?.presetId} className="min-w-56">
           {(p) => (
             <Select {...p} name="presetId" defaultValue={current ?? ""}>
@@ -526,7 +526,7 @@ export function ApplyPresetForm({
             </Select>
           )}
         </Field>
-        <Button type="submit" variant="secondary" pending={pending}>
+        <Button type="submit" variant="secondary" className={besideField} pending={pending}>
           Set plan
         </Button>
       </div>

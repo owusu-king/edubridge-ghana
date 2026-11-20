@@ -10,6 +10,7 @@ import {
   type FinanceCheckRule,
 } from "../../lib/finance-checks";
 import { formatCalendarDate, todayIn } from "../../lib/format";
+import { UNBANKED_DAYS } from "../../lib/school-finance";
 import { moneyFormatter } from "../../lib/money";
 import { recordAudit } from "../audit/record";
 import { assertAllowed } from "../authz/permissions";
@@ -82,11 +83,14 @@ async function duplicateReferences(tx: Transaction, ctx: TenantContext, from: st
       max(payments.paid_on)::text as last,
       json_agg(json_build_object('id', payments.id, 'receipt', payments.receipt_number) order by payments.paid_on, payments.receipt_number) as receipts
     from payments
+    left join mobile_money_request_shares share on share.payment_id = payments.id
     where payments.tenant_id = ${ctx.tenant.id} and coalesce(btrim(payments.reference), '') <> ''
       and not exists (select 1 from payment_voids v where v.payment_id = payments.id)
       and ${where(campusScopeFilter(ctx, payments.studentId))}
     group by payments.method, lower(btrim(payments.reference))
-    having count(*) > 1 and bool_or(payments.paid_on between ${from} and ${to})`);
+    -- A family payment gives each child a receipt with the same transaction: one payment, not a repeat.
+    having count(distinct coalesce(share.request_id::text, payments.id::text)) > 1
+      and bool_or(payments.paid_on between ${from} and ${to})`);
   return rows.rows.map((r): Omit<FinanceFlag, "review"> => ({
     key: `duplicate_reference:${r.method}:${short(r.ref, 120)}:${r.n}`,
     rule: "duplicate_reference",
@@ -204,6 +208,40 @@ async function largeRefunds(tx: Transaction, ctx: TenantContext, from: string, t
   }));
 }
 
+/**
+ * Cash and cheques held past the limit, by who recorded them (2026-11-18). Only once the school records deposits (it
+ * has a bank account in Finance), so a school that does not bank through EduBridge is not flagged every day.
+ */
+async function cashNotBanked(tx: Transaction, ctx: TenantContext, to: string) {
+  if (ctx.campusIds !== null) return [];
+  const money = moneyFormatter(ctx.tenant.currencyCode);
+  const rows = await tx.execute<{
+    user_id: string | null;
+    name: string | null;
+    n: number;
+    amount: string;
+    oldest: string;
+  }>(sql`
+    select p.recorded_by_user_id as user_id, u.name, count(*)::int as n, sum(p.amount_pesewas)::text as amount,
+      min(p.paid_on)::text as oldest
+    from payments p
+    left join users u on u.id = p.recorded_by_user_id
+    where p.tenant_id = ${ctx.tenant.id} and p.method in ('cash', 'cheque')
+      and p.paid_on <= (${to}::date - ${UNBANKED_DAYS}::int)
+      and exists (select 1 from finance_accounts a where a.tenant_id = ${ctx.tenant.id} and a.kind = 'bank' and a.status = 'active')
+      and not exists (select 1 from payment_voids v where v.payment_id = p.id)
+      and not exists (select 1 from bank_deposit_items i where i.payment_id = p.id and not i.released)
+    group by p.recorded_by_user_id, u.name`);
+  return rows.rows.map((r): Omit<FinanceFlag, "review"> => ({
+    key: `cash_not_banked:${r.user_id ?? "system"}:${r.n}:${r.amount}`,
+    rule: "cash_not_banked",
+    summary: `${r.n} cash or cheque receipt${r.n === 1 ? "" : "s"} for ${money(Number(r.amount))}${r.name ? ` recorded by ${r.name}` : ""} not banked; the oldest is from ${formatCalendarDate(r.oldest)}.`,
+    on: to,
+    links: [{ label: "Cash to bank", path: "finance/deposits" }],
+    reviewable: true,
+  }));
+}
+
 async function reopenedPeriods(tx: Transaction, ctx: TenantContext, from: string, to: string) {
   if (ctx.campusIds !== null) return [];
   const tz = ctx.tenant.timezone;
@@ -259,6 +297,7 @@ async function readChecks(
     ...(await momoUnmatched(tx, ctx)),
     ...(await largeRefunds(tx, ctx, from, to)),
     ...(await reopenedPeriods(tx, ctx, from, to)),
+    ...(await cashNotBanked(tx, ctx, to)),
   ];
   const reviews = found.length
     ? (

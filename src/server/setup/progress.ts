@@ -1,6 +1,15 @@
 import "server-only";
 import { sql } from "drizzle-orm";
-import { SETUP_STEPS, setupState, type SetupCounts, type SetupStep, type StepState } from "../../lib/setup";
+import {
+  OPTIONAL_STEPS,
+  SETUP_STEPS,
+  SWITCH_STEPS,
+  setupState,
+  type SetupCounts,
+  type SetupPath,
+  type SetupStep,
+  type StepState,
+} from "../../lib/setup";
 import { allowed } from "../authz/permissions";
 import type { Database } from "../db/client";
 import { withTenant } from "../db/context";
@@ -20,6 +29,9 @@ export interface SetupProgress {
   steps: Record<SetupStep, StepState>;
   /** The steps that apply to this school, in order (subjects only when its plan includes assessment). */
   applicable: SetupStep[];
+  /** How many of them must be done (optional steps aside). */
+  required: number;
+  /** Required steps done. */
   done: number;
   complete: boolean;
 }
@@ -27,6 +39,7 @@ export interface SetupProgress {
 export async function getSetupProgress(
   database: Database,
   ctx: TenantContext,
+  path: SetupPath = "fresh",
 ): Promise<SetupProgress | null> {
   if (!canSeeSetup(ctx)) return null;
   const t = ctx.tenant.id;
@@ -79,7 +92,9 @@ export async function getSetupProgress(
         (select count(distinct level_id) from active_classes)::int as levels_in_use,
         (select count(distinct ac.level_id) from active_classes ac
           where exists (select 1 from level_subjects ls where ls.level_id = ac.level_id))::int
-          as levels_in_use_with_subjects
+          as levels_in_use_with_subjects,
+        (select count(distinct student_id) from ledger_entries
+          where tenant_id = ${t} and kind = 'opening_balance')::int as opening_balances
     `);
       const row = result.rows[0]!;
       const n = (key: string) => Number(row[key] ?? 0);
@@ -98,13 +113,15 @@ export async function getSetupProgress(
         billedStudents: n("billed_students"),
         levelsInUse: n("levels_in_use"),
         levelsInUseWithSubjects: n("levels_in_use_with_subjects"),
+        openingBalances: n("opening_balances"),
       } satisfies SetupCounts;
     },
   );
   const steps = setupState(counts);
-  const applicable = SETUP_STEPS.filter(
-    (step) => step !== "assessment" || ctx.features.includes("assessment"),
-  );
-  const done = applicable.filter((step) => steps[step].status === "done").length;
-  return { counts, steps, applicable, done, complete: done === applicable.length };
+  const order: readonly SetupStep[] = path === "switch" ? SWITCH_STEPS : SETUP_STEPS;
+  const applicable = order.filter((step) => step !== "assessment" || ctx.features.includes("assessment"));
+  // Optional steps are shown, but the guide is complete without them.
+  const required = applicable.filter((step) => !OPTIONAL_STEPS.includes(step));
+  const done = required.filter((step) => steps[step].status === "done").length;
+  return { counts, steps, applicable, required: required.length, done, complete: done === required.length };
 }

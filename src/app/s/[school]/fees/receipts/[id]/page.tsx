@@ -184,6 +184,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ school
                     <ActionButton
                       action={removeEvidenceAction.bind(null, slug, receipt.id, f.id)}
                       label="Remove"
+                      variant="danger-outline"
                       ariaLabel={`Remove ${f.filename}`}
                     />
                   )}

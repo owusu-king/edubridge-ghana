@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { Alert } from "@/components/ui/alert";
+import { FormError } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Field, Textarea } from "@/components/ui/field";
 import { FormDialog } from "@/components/ui/form-dialog";
@@ -68,9 +69,7 @@ export function PlanRequestForm({
   const chosen = state.values?.presetId ?? plans.find((p) => !p.current)?.id ?? "";
   return (
     <form action={formAction} className="space-y-5" noValidate>
-      {state.status === "error" && !Object.keys(errors).length && (
-        <Alert tone="critical">{state.message}</Alert>
-      )}
+      <FormError state={state} />
       {plans.length > 0 && (
         <fieldset className="space-y-2">
           <legend className="text-sm font-medium text-ink">Plan</legend>

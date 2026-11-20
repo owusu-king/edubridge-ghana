@@ -122,6 +122,7 @@ describe("setup guide", () => {
       students: "todo",
       guardians: "todo",
       fees: "started",
+      balances: "todo",
       assessment: "todo",
     });
     expect(before.steps.teachers.detail).toBe("0 of 2 classes have a class teacher.");
@@ -147,6 +148,29 @@ describe("setup guide", () => {
     expect(await getSetupProgress(conn.app, s.head)).not.toBeNull();
     expect(await getSetupProgress(conn.app, s.teacher)).toBeNull();
     expect(await getSetupProgress(conn.app, s.bursar)).toBeNull();
+  });
+
+  it("guides a school moving from another system in the order an import needs", async () => {
+    const s = await school();
+    const fresh = (await getSetupProgress(conn.app, s.owner))!;
+    expect(fresh.applicable).not.toContain("balances");
+    const moving = (await getSetupProgress(conn.app, s.owner, "switch"))!;
+    // Classes before the student list, balances owed before the first bill; balances never hold the guide open.
+    expect(moving.applicable.indexOf("classes")).toBeLessThan(moving.applicable.indexOf("students"));
+    expect(moving.applicable.indexOf("balances")).toBeLessThan(moving.applicable.indexOf("fees"));
+    expect(moving.required).toBe(moving.applicable.length - 1);
+    expect(moving.steps.balances.status).toBe("todo");
+
+    const ama = (await s.add("Ama", s.classA)).id;
+    await setOpeningBalance(conn.app, s.bursar, ama, {
+      amount: "350",
+      asOf: todayIn(s.owner.tenant.timezone),
+    });
+    const after = (await getSetupProgress(conn.app, s.owner, "switch"))!;
+    expect(after.steps.balances).toEqual({
+      status: "done",
+      detail: "1 student with a balance brought in from your old records.",
+    });
   });
 });
 

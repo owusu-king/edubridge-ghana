@@ -7,7 +7,7 @@ import { Field, Input } from "@/components/ui/field";
 import { formatPhone, maskPhone } from "@/lib/phone";
 import type { FormState } from "@/web/forms";
 import { confirmPhoneAction, removePhoneAction, startPhoneAction } from "./actions";
-import { SuccessToast } from "@/components/ui/toast";
+import { FormError, SuccessToast } from "@/components/ui/toast";
 
 type Started = { verificationId: string; phone: string };
 
@@ -31,7 +31,7 @@ export function PhoneSection({ phone }: { phone: string | null }) {
             {formatPhone(phone)} <span className="ml-2 text-sm text-positive">Verified</span>
           </span>
           <form action={removeAction}>
-            <Button type="submit" variant="ghost" size="sm" pending={removing}>
+            <Button type="submit" variant="danger-outline" size="sm" pending={removing}>
               Remove
             </Button>
           </form>
@@ -42,7 +42,7 @@ export function PhoneSection({ phone }: { phone: string | null }) {
         className="flex max-w-md flex-col gap-3 sm:flex-row sm:items-start"
         noValidate
       >
-        {start.status === "error" && !start.fieldErrors && <Alert tone="critical">{start.message}</Alert>}
+        <FormError state={start} />
         <Field
           label={phone ? "New phone number" : "Phone number"}
           error={start.fieldErrors?.phone}
@@ -61,7 +61,7 @@ export function PhoneSection({ phone }: { phone: string | null }) {
             />
           )}
         </Field>
-        <Button type="submit" variant="secondary" pending={starting} className="sm:mt-6">
+        <Button type="submit" variant="secondary" pending={starting} className="sm:mt-6.5">
           Send code
         </Button>
       </form>
@@ -97,7 +97,7 @@ function ConfirmCode({ started }: { started: Started }) {
             />
           )}
         </Field>
-        <Button type="submit" pending={pending} className="sm:mt-6">
+        <Button type="submit" pending={pending} className="sm:mt-6.5">
           Verify
         </Button>
       </div>

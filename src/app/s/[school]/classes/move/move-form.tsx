@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Alert } from "@/components/ui/alert";
+import { FormError } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/field";
 import { useFormAction } from "@/components/ui/use-form-action";
@@ -65,7 +66,7 @@ export function MoveForm({
 
   return (
     <form onSubmit={onSubmit} className="space-y-6" noValidate>
-      {state.status === "error" && state.message && <Alert tone="critical">{state.message}</Alert>}
+      <FormError state={state} />
       <input type="hidden" name="fromTermId" value={fromTermId} />
       <input type="hidden" name="toTermId" value={toTermId} />
       <ul className="divide-y divide-line border-y border-line">

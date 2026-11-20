@@ -152,11 +152,12 @@ async function reconcileWith(
         providerReference: mobileMoneyRequests.providerReference,
         paymentId: mobileMoneyRequests.paymentId,
         receiptNumber: payments.receiptNumber,
-        voided: sql<boolean>`${paymentVoids.paymentId} is not null`,
+        // Any of its receipts voided: a family payment has one per child.
+        voided: sql<boolean>`exists (select 1 from ${paymentVoids} v where v.payment_id = ${mobileMoneyRequests.paymentId}
+          or v.payment_id in (select s.payment_id from mobile_money_request_shares s where s.request_id = ${mobileMoneyRequests.id}))`,
       })
       .from(mobileMoneyRequests)
       .leftJoin(payments, eq(payments.id, mobileMoneyRequests.paymentId))
-      .leftJoin(paymentVoids, eq(paymentVoids.paymentId, mobileMoneyRequests.paymentId))
       .where(
         and(
           eq(mobileMoneyRequests.tenantId, school.id),

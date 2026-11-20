@@ -63,6 +63,7 @@ export function FinanceExtras({
                   <ActionButton
                     action={setFeeOptionAction.bind(null, slug, studentId, o.feeItemId, !o.takes)}
                     label={o.takes ? "Stop" : "Add"}
+                    variant={o.takes ? "danger-outline" : "secondary"}
                     ariaLabel={o.takes ? `Stop ${o.name}` : `Add ${o.name}`}
                   />
                 )}

@@ -17,6 +17,7 @@ import {
   assessmentScores,
   enrolments,
   reportCards,
+  studentSubjectChoices,
   students,
   subjectComments,
   terms,
@@ -41,7 +42,9 @@ export interface ClassTermData {
   term: TermRef;
   cls: AssessableClass;
   students: ClassStudent[];
-  subjects: { id: string; name: string }[];
+  subjects: { id: string; name: string; elective: boolean }[];
+  /** choices[studentId] = the elective subjects the student takes (2026-11-18). */
+  choices: Map<string, Set<string>>;
   components: AssessmentComponent[];
   showPositions: boolean;
   bands: GradeBand[];
@@ -168,6 +171,8 @@ export async function loadClassTermData(
   const assigned = new Map(
     (await subjectTeachersIn(tx, tenantId, cls.id)).map((t) => [t.subjectId, t.teacherName]),
   );
+  const electives = new Set(subjectList.filter((s) => s.elective).map((s) => s.id));
+  const choices = await readSubjectChoices(tx, tenantId, ids, [...electives]);
   return {
     term,
     cls,
@@ -176,6 +181,7 @@ export async function loadClassTermData(
     style: await readReportCardStyle(tx, tenantId),
     students: roster,
     subjects: subjectList,
+    choices,
     components: scheme.components,
     showPositions: scheme.showPositions,
     bands,
@@ -188,8 +194,43 @@ export async function loadClassTermData(
       subjects: subjectList,
       studentIds: ids,
       scores,
+      electives,
+      choices,
+      aggregate: usesBeceAggregate(cls.stage, bands) ? "bece" : null,
     }),
   };
+}
+
+/** JHS graded on the 1–9 scale (Ghana's): report cards show the BECE-style aggregate. */
+export function usesBeceAggregate(stage: string, bands: readonly GradeBand[]): boolean {
+  return stage === "jhs" && bands.length > 0 && bands.every((b) => /^[1-9]$/.test(b.grade));
+}
+
+/** The electives each student takes, among those given (2026-11-18). */
+export async function readSubjectChoices(
+  tx: Transaction,
+  tenantId: string,
+  studentIds: readonly string[],
+  subjectIds: readonly string[],
+): Promise<Map<string, Set<string>>> {
+  const choices = new Map<string, Set<string>>();
+  if (studentIds.length === 0 || subjectIds.length === 0) return choices;
+  const rows = await tx
+    .select({ studentId: studentSubjectChoices.studentId, subjectId: studentSubjectChoices.subjectId })
+    .from(studentSubjectChoices)
+    .where(
+      and(
+        eq(studentSubjectChoices.tenantId, tenantId),
+        inArray(studentSubjectChoices.studentId, [...studentIds]),
+        inArray(studentSubjectChoices.subjectId, [...subjectIds]),
+      ),
+    );
+  for (const r of rows) {
+    const set = choices.get(r.studentId) ?? new Set<string>();
+    set.add(r.subjectId);
+    choices.set(r.studentId, set);
+  }
+  return choices;
 }
 
 /** The term's academic year name and the start of the next term (shown as "Next term begins"). */
@@ -251,6 +292,7 @@ export function buildSnapshot(
       position: result.position,
       graded: result.graded,
       gpa: result.gpa,
+      ...(result.aggregate !== null ? { aggregate: result.aggregate } : {}),
     },
     style: data.style,
     attendance: reportAttendance(card, data.attendance.get(student.id)),

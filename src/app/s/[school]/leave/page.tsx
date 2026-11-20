@@ -134,6 +134,7 @@ export default async function LeavePage({ params }: { params: Promise<{ school: 
                       <ActionButton
                         action={cancelLeaveAction.bind(null, slug, l.id)}
                         label="Cancel"
+                        variant="danger-outline"
                         ariaLabel={`Cancel leave for ${l.staffName}`}
                       />
                     </li>
@@ -197,6 +198,7 @@ export default async function LeavePage({ params }: { params: Promise<{ school: 
                             <ActionButton
                               action={cancelLeaveAction.bind(null, slug, l.id)}
                               label="Cancel"
+                              variant="danger-outline"
                               ariaLabel={`Cancel ${l.type}, ${dates(l)}`}
                             />
                           )}

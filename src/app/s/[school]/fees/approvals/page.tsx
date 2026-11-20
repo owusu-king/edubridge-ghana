@@ -128,6 +128,7 @@ export default async function ApprovalsPage({ params }: { params: Promise<{ scho
                             <ActionButton
                               action={cancelRefundAction.bind(null, slug, r.id)}
                               label="Cancel"
+                              variant="danger-outline"
                               ariaLabel={`Cancel the refund for ${r.studentName}`}
                             />
                           )}

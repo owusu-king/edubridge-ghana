@@ -57,6 +57,7 @@ function PriceList({ prices }: { prices: CatalogPrice[] }) {
           <ActionButton
             action={archiveCatalogPriceAction.bind(null, p.id)}
             label="Remove"
+            variant="danger-outline"
             ariaLabel={`Remove the price ${formatMoney(p.pricePesewas, p.currencyCode)} ${BILLING_PERIOD_LABELS[p.billingPeriod].toLowerCase()}`}
           />
         </li>

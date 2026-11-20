@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Download, Upload } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
+import { FormError } from "@/components/ui/toast";
 import { Button, buttonStyles } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import { Table, TableFrame, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -63,9 +64,7 @@ export function BalancesImport({
             Download the template
           </a>
         </p>
-        {state.status === "error" && !state.fieldErrors?.file && (
-          <Alert tone="critical">{state.message}</Alert>
-        )}
+        <FormError state={state} />
         <div className="grid gap-5 sm:grid-cols-2">
           <Field label="Spreadsheet (.xlsx or .csv)" error={state.fieldErrors?.file}>
             {(p) => <Input {...p} name="file" type="file" accept=".xlsx,.csv" required />}

@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/field";
+import { besideField, Field, Input, Select } from "@/components/ui/field";
 import { FormDialog } from "@/components/ui/form-dialog";
 import { SuccessToast } from "@/components/ui/toast";
 import { HOUSE_KINDS, HOUSE_KIND_LABELS, type HouseKind } from "@/lib/boarding";
@@ -188,7 +188,7 @@ export function AppointStaffForm({
   return (
     <form
       action={formAction}
-      className="flex flex-wrap items-end gap-3"
+      className="flex flex-wrap items-start gap-3"
       noValidate
       aria-label="Appoint house staff"
     >
@@ -211,7 +211,7 @@ export function AppointStaffForm({
           </Select>
         )}
       </Field>
-      <Button type="submit" variant="secondary" pending={pending}>
+      <Button type="submit" variant="secondary" className={besideField} pending={pending}>
         Appoint
       </Button>
     </form>
@@ -322,7 +322,7 @@ export function FeeItemForm({
   return (
     <form
       action={formAction}
-      className="flex flex-wrap items-end gap-3"
+      className="flex flex-wrap items-start gap-3"
       noValidate
       aria-label="Boarding fee item"
     >
@@ -343,7 +343,7 @@ export function FeeItemForm({
           </Select>
         )}
       </Field>
-      <Button type="submit" variant="secondary" pending={pending}>
+      <Button type="submit" variant="secondary" className={besideField} pending={pending}>
         Save
       </Button>
     </form>

@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/field";
+import { besideField, Field, Input, Select } from "@/components/ui/field";
 import { FormDialog } from "@/components/ui/form-dialog";
 import {
   COMPONENT_BASES,
@@ -20,7 +20,7 @@ type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
 export function PrepareForm({ action, month }: { action: Action; month: string }) {
   const [state, formAction, pending] = useActionState(action, { status: "idle" } as FormState);
   return (
-    <form action={formAction} className="flex flex-wrap items-end gap-3" noValidate>
+    <form action={formAction} className="flex flex-wrap items-start gap-3" noValidate>
       <Field
         label="Month"
         error={state.fieldErrors?.month ?? (state.status === "error" ? state.message : undefined)}
@@ -36,7 +36,7 @@ export function PrepareForm({ action, month }: { action: Action; month: string }
           />
         )}
       </Field>
-      <Button type="submit" variant="primary" pending={pending}>
+      <Button type="submit" variant="primary" className={besideField} pending={pending}>
         Prepare payroll
       </Button>
     </form>

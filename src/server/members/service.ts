@@ -2,7 +2,7 @@ import "server-only";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "../audit/record";
-import { assertAllowed, type Role } from "../authz/permissions";
+import { assertAllowed, OPERATIONAL_ROLES, type Role } from "../authz/permissions";
 import type { Database, Transaction } from "../db/client";
 import { withTenant } from "../db/context";
 import { auditEvents, campuses, invitations, membershipCampuses, memberships, users } from "../db/schema";
@@ -23,6 +23,7 @@ export const ASSIGNABLE_ROLES = [
   "admin",
   "bursar",
   "teacher",
+  ...OPERATIONAL_ROLES,
 ] as const satisfies readonly Role[];
 export type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
 

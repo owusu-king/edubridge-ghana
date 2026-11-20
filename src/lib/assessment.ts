@@ -171,6 +171,47 @@ export interface StudentResult {
    * (otherwise null). Unweighted: every subject counts once.
    */
   gpa: number | null;
+  /**
+   * BECE-style aggregate (JHS on the 1–9 scale): the four core subjects' grades plus the best two others, 6 at best
+   * and 54 at worst. Null when not asked for, or a core subject or two others have no grade yet.
+   */
+  aggregate: number | null;
+}
+
+/** The core BECE subjects, by the names schools use for them (assumption to verify: GES's current core four). */
+export const BECE_CORE = [
+  ["english language", "english"],
+  ["mathematics", "core mathematics", "maths"],
+  ["science", "integrated science", "general science"],
+  ["social studies"],
+] as const;
+
+/**
+ * The BECE-style aggregate from a student's subject grades on the 1–9 scale: the four core subjects plus the best
+ * (lowest) two other grades. Null when any core subject has no grade, fewer than two others are graded, or a grade is
+ * not a whole number from 1 to 9.
+ */
+export function beceAggregate(subjects: readonly { name: string; grade: string | null }[]): number | null {
+  const numeric = (g: string | null) => (g !== null && /^[1-9]$/.test(g) ? Number(g) : null);
+  let core = 0;
+  const used = new Set<number>();
+  for (const names of BECE_CORE) {
+    const i = subjects.findIndex(
+      (s, j) => !used.has(j) && (names as readonly string[]).includes(s.name.trim().toLowerCase()),
+    );
+    if (i < 0) return null;
+    const grade = numeric(subjects[i]!.grade);
+    if (grade === null) return null;
+    used.add(i);
+    core += grade;
+  }
+  const others = subjects
+    .filter((_, j) => !used.has(j))
+    .map((s) => numeric(s.grade))
+    .filter((g): g is number => g !== null)
+    .sort((a, b) => a - b);
+  if (others.length < 2) return null;
+  return core + others[0]! + others[1]!;
 }
 
 /** Results for a whole class: every student's subjects, totals, grades and positions. */
@@ -181,12 +222,21 @@ export function classResults(input: {
   studentIds: readonly string[];
   /** scores[studentId][subjectId][componentKey] = tenths */
   scores: ReadonlyMap<string, ReadonlyMap<string, Readonly<Record<string, number>>>>;
+  /** Elective subjects (2026-11-18): taken only by students whose choices include them. */
+  electives?: ReadonlySet<string>;
+  /** choices[studentId] = the electives the student takes. */
+  choices?: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Work out the BECE-style aggregate (JHS on the 1–9 scale). */
+  aggregate?: "bece" | null;
 }): Map<string, StudentResult> {
   const { components, bands, subjects, studentIds, scores } = input;
+  const takes = (studentId: string, subjectId: string) =>
+    !input.electives?.has(subjectId) || (input.choices?.get(studentId)?.has(subjectId) ?? false);
+  const taken = new Map(studentIds.map((id) => [id, subjects.filter((s) => takes(id, s.id))]));
   const totals = new Map<string, Map<string, number | null>>();
   for (const studentId of studentIds) {
     const bySubject = new Map<string, number | null>();
-    for (const subject of subjects)
+    for (const subject of taken.get(studentId)!)
       bySubject.set(subject.id, subjectTotal(components, scores.get(studentId)?.get(subject.id) ?? {}));
     totals.set(studentId, bySubject);
   }
@@ -197,12 +247,13 @@ export function classResults(input: {
       const t = totals.get(studentId)!.get(subject.id);
       if (t !== null && t !== undefined) values.set(studentId, t);
     }
+    // Only students taking the subject are ranked in it (an elective's position is among its takers).
     subjectPositions.set(subject.id, positions(values));
   }
   const overall = new Map<string, number>();
   for (const studentId of studentIds) {
     const values = [...totals.get(studentId)!.values()];
-    if (subjects.length > 0 && values.every((v) => v !== null))
+    if (values.length > 0 && values.every((v) => v !== null))
       overall.set(
         studentId,
         values.reduce<number>((sum, v) => sum + (v ?? 0), 0),
@@ -213,7 +264,7 @@ export function classResults(input: {
   const results = new Map<string, StudentResult>();
   for (const studentId of studentIds) {
     const studentScores = scores.get(studentId);
-    const subjectResults = subjects.map((subject): SubjectResult => {
+    const subjectResults = taken.get(studentId)!.map((subject): SubjectResult => {
       const total = totals.get(studentId)!.get(subject.id) ?? null;
       const band = total === null ? null : bandFor(bands, total);
       const entered = studentScores?.get(subject.id) ?? {};
@@ -233,9 +284,10 @@ export function classResults(input: {
       studentId,
       subjects: subjectResults,
       total,
-      average: total === null ? null : Math.round((total * 10) / subjects.length) / 10,
+      average: total === null ? null : Math.round((total * 10) / subjectResults.length) / 10,
       position: overallPositions.get(studentId) ?? null,
       graded: subjectResults.filter((s) => s.total !== null).length,
+      aggregate: input.aggregate === "bece" ? beceAggregate(subjectResults) : null,
     });
   }
   return results;
@@ -291,6 +343,8 @@ export interface ReportCardSnapshot {
     position: number | null;
     graded: number;
     gpa?: number | null;
+    /** BECE-style aggregate, on JHS cards (absent on cards published before 2026-11-18). */
+    aggregate?: number | null;
   };
   /** The layout it was published in (absent on earlier cards, which print as the GES terminal report). */
   style?: ReportCardStyle;

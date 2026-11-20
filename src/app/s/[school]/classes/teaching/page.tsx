@@ -141,6 +141,7 @@ export default async function TeachingPage({ params }: { params: Promise<{ schoo
                               <ActionButton
                                 action={removeSubjectTeacherAction.bind(null, slug, r.id)}
                                 label="Remove"
+                                variant="danger-outline"
                                 ariaLabel={`Remove ${g.teacherName} from ${g.subjectName} in ${r.className}`}
                               />
                             )}

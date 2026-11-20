@@ -76,6 +76,7 @@ export default async function TransportRoutePage({
             <ActionButton
               action={setRouteArchivedAction.bind(null, slug, route.id, route.status === "active")}
               label={route.status === "active" ? "Archive" : "Restore"}
+              variant={route.status === "active" ? "danger-outline" : "secondary"}
               ariaLabel={`${route.status === "active" ? "Archive" : "Restore"} ${route.name}`}
             />
           </div>
@@ -130,6 +131,7 @@ export default async function TransportRoutePage({
                             <ActionButton
                               action={setStopArchivedAction.bind(null, slug, route.id, s.id, true)}
                               label="Archive"
+                              variant="danger-outline"
                               ariaLabel={`Archive ${s.name}`}
                             />
                           </div>

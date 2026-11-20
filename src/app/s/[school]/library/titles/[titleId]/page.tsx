@@ -72,6 +72,7 @@ export default async function TitlePage({
             <ActionButton
               action={setTitleArchivedAction.bind(null, slug, t.id, active)}
               label={active ? "Archive" : "Restore"}
+              variant={active ? "danger-outline" : "secondary"}
               ariaLabel={`${active ? "Archive" : "Restore"} ${t.title}`}
             />
           </div>
@@ -164,6 +165,7 @@ export default async function TitlePage({
                   <ActionButton
                     action={cancelReservationAction.bind(null, slug, t.id, r.id)}
                     label="Cancel"
+                    variant="danger-outline"
                     ariaLabel={`Cancel the reservation for ${r.borrower}`}
                   />
                 )}

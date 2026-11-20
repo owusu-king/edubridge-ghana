@@ -78,6 +78,7 @@ export default async function AnnouncementsPage({ params }: { params: Promise<{ 
                 <ActionButton
                   action={cancelScheduledAction.bind(null, ctx.tenant.slug, a.id)}
                   label="Cancel"
+                  variant="danger-outline"
                   ariaLabel={`Cancel the scheduled announcement ${a.title}`}
                 />
               </li>

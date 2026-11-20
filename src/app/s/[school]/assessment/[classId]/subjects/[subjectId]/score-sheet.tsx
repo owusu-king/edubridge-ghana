@@ -4,6 +4,7 @@ import { Lock } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { Alert } from "@/components/ui/alert";
+import { FormMessage } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { useFormAction } from "@/components/ui/use-form-action";
 import { useSyncQueue, type SyncAction } from "@/components/sync/use-sync-queue";
@@ -135,9 +136,7 @@ export function ScoreSheet({
   const editable = sheet.students.some((s) => !s.locked);
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-4" aria-label={`${sheet.subjectName} scores`}>
-      {state.status !== "idle" && state.message && (
-        <Alert tone={state.status === "error" ? "critical" : "positive"}>{state.message}</Alert>
-      )}
+      <FormMessage state={state} />
       <WaitingMarks queue={queue} students={sheet.students} components={sheet.components} sync={sync} />
       <Grid key={version} {...sheet} />
       {editable && (

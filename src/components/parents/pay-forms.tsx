@@ -1,8 +1,10 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { MobileMoneyFields } from "@/components/fees/mobile-money-fields";
 import { Alert } from "@/components/ui/alert";
+import { FormError } from "@/components/ui/toast";
+import { currencySymbol, moneyFormatter, parseMoney } from "@/lib/money";
 import type { FormState } from "@/web/forms";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
@@ -34,7 +36,7 @@ export function PayOnlineForm({
   if (state.status === "success") return <Alert tone="positive">{state.message}</Alert>;
   return (
     <form action={formAction} className="space-y-4">
-      {state.status === "error" && state.message && <Alert tone="critical">{state.message}</Alert>}
+      <FormError state={state} />
       <MobileMoneyFields
         state={state}
         defaultAmount={defaultAmount}
@@ -50,6 +52,88 @@ export function PayOnlineForm({
         className={`${buttonClass} bg-accent text-white hover:bg-accent-hover`}
       >
         {pending ? "Sending…" : "Pay"}
+      </button>
+    </form>
+  );
+}
+
+/**
+ * One Mobile Money prompt for several children (2026-11-18). Each child's amount starts at what they owe; a blank or
+ * 0 leaves a child out. The total is what the payer approves; each child gets their own receipt.
+ */
+export function FamilyPayForm({
+  currency,
+  action,
+  childrenOwing,
+  phone,
+  testMode,
+  testHint,
+  networks,
+}: {
+  currency: string;
+  action: Action;
+  childrenOwing: { studentId: string; name: string; className: string | null; balancePesewas: number }[];
+  phone: string;
+  testMode: boolean;
+  testHint: string | null;
+  networks: { id: string; label: string }[];
+}) {
+  const [state, formAction, pending] = useActionState(action, { status: "idle" } as FormState);
+  const [amounts, setAmounts] = useState<Record<string, string>>(() =>
+    Object.fromEntries(childrenOwing.map((c) => [c.studentId, (c.balancePesewas / 100).toFixed(2)])),
+  );
+  if (state.status === "success") return <Alert tone="positive">{state.message}</Alert>;
+  const total = Object.values(amounts).reduce((sum, text) => sum + (parseMoney(text, currency) ?? 0), 0);
+  const show = moneyFormatter(currency);
+  return (
+    <form action={formAction} className="space-y-4">
+      <FormError state={state} />
+      <fieldset className="space-y-3">
+        <legend className="text-sm font-medium text-ink">
+          Amount for each child ({currencySymbol(currency)})
+        </legend>
+        {childrenOwing.map((child, i) => (
+          <div key={child.studentId} className="flex items-center justify-between gap-3">
+            <label htmlFor={`share-${child.studentId}`} className="min-w-0">
+              <span className="block text-base text-ink">{child.name}</span>
+              <span className="block text-sm text-ink-3">
+                {[child.className, `owes ${show(child.balancePesewas)}`].filter(Boolean).join(" · ")}
+              </span>
+            </label>
+            <input type="hidden" name={`shares.${i}.studentId`} value={child.studentId} />
+            <input
+              id={`share-${child.studentId}`}
+              name={`shares.${i}.amount`}
+              inputMode="decimal"
+              autoComplete="off"
+              value={amounts[child.studentId] ?? ""}
+              onChange={(e) => setAmounts((a) => ({ ...a, [child.studentId]: e.target.value }))}
+              className="h-11 w-32 shrink-0 rounded-lg border border-line-strong bg-surface px-3 text-right text-base text-ink tabular-nums"
+            />
+          </div>
+        ))}
+        {state.fieldErrors?.amount && <p className="text-sm text-critical">{state.fieldErrors.amount}</p>}
+        <p className="flex justify-between border-t border-line pt-3 text-base font-medium text-ink">
+          <span>Total to approve</span>
+          <span className="tabular-nums">{show(total)}</span>
+        </p>
+      </fieldset>
+      <MobileMoneyFields
+        state={state}
+        defaultAmount=""
+        withAmount={false}
+        phones={[{ name: "Your number", phone }]}
+        testMode={testMode}
+        testHint={testHint}
+        networks={networks}
+        currency={currency}
+      />
+      <button
+        type="submit"
+        disabled={pending || total <= 0}
+        className={`${buttonClass} bg-accent text-white hover:bg-accent-hover`}
+      >
+        {pending ? "Sending…" : `Pay ${show(total)}`}
       </button>
     </form>
   );

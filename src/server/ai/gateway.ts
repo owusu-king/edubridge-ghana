@@ -32,10 +32,17 @@ export type AiErrorCode =
   | "ai_limit_hour"
   | "ai_limit_day"
   | "ai_provider_quota"
-  | "ai_unavailable";
+  | "ai_unavailable"
+  | "ai_demo";
 
 /** AI cannot be used for this request, with a message to show (AIG-03); the rest of the system is unaffected. */
 export class AiUnavailableError extends DomainError<AiErrorCode> {}
+
+/** Visitors trying the demo school never reach the AI provider: every call costs money. */
+const demoBlocked = (ctx: TenantContext) =>
+  ctx.demoVisitor
+    ? new AiUnavailableError("ai_demo", "AI features are switched off for visitors to the demo school.")
+    : null;
 
 const scope = (ctx: TenantContext) => ({
   tenantId: ctx.tenant.id,
@@ -213,6 +220,8 @@ export async function openAiSession(
   task: AiTask,
   options: { provider?: AiProvider; config?: AiConfig } = {},
 ): Promise<AiSession> {
+  const demo = demoBlocked(ctx);
+  if (demo) throw demo;
   const config = options.config ?? (await readAiConfig(database));
   const blocked = platformCheck(config, task, Boolean(options.provider));
   if (blocked) throw blocked;
@@ -282,6 +291,8 @@ export async function aiAvailability(
   ctx: TenantContext,
   task: AiTask,
 ): Promise<{ available: boolean; message: string | null; identifiableApproved: boolean }> {
+  const demo = demoBlocked(ctx);
+  if (demo) return { available: false, message: demo.message, identifiableApproved: false };
   const config = await readAiConfig(database);
   const blocked = platformCheck(config, task, false);
   if (blocked) return { available: false, message: blocked.message, identifiableApproved: false };

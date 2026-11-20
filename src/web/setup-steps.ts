@@ -1,6 +1,6 @@
 import type { Route } from "next";
 import { can, ROLE_LABELS, ROLES, type Permission, type Role } from "@/server/authz/permissions";
-import type { SetupStep } from "@/lib/setup";
+import type { SetupPath, SetupStep } from "@/lib/setup";
 import { schoolPath } from "@/lib/routes";
 
 interface StepInfo {
@@ -55,6 +55,13 @@ export const STEP_INFO: Record<SetupStep, StepInfo> = {
     segment: "fees",
     permission: "fees.manage",
   },
+  balances: {
+    title: "Bring in balances owed from before",
+    why: "What each family still owed in your old system, or had paid ahead, so the first bill starts from the right amount. Matched to students by admission number.",
+    action: "Import balances",
+    segment: "fees/opening-balances",
+    permission: "fees.manage",
+  },
   assessment: {
     title: "Choose subjects for report cards",
     why: "Ghana's curriculum subjects for each level can be added in one step, with the usual grading.",
@@ -70,6 +77,31 @@ const STAFF: readonly Role[] = ROLES.filter((r) => r !== "parent" && r !== "stud
 export function whoCan(permission: Permission): string {
   const labels = STAFF.filter((r) => can([r], permission)).map((r) => ROLE_LABELS[r]);
   return labels.length <= 1 ? (labels[0] ?? "") : `${labels.slice(0, -1).join(", ")} or ${labels.at(-1)}`;
+}
+
+/** How the steps read for a school moving from another system, where they differ (2026-11-19). */
+const SWITCH_INFO: Partial<Record<SetupStep, Partial<StepInfo>>> = {
+  classes: {
+    why: "Add each level, then a class for each stream, named as in your old system (for example Basic 4A), so the student list finds every class when you import it.",
+  },
+  students: {
+    title: "Import your student list",
+    why: "Upload the list from your old system as a spreadsheet. Columns such as “Adm No”, “Surname” or “Form” are matched for you, every row is checked before anything is saved, and you can correct the file and upload it again.",
+  },
+  guardians: {
+    why: "Students imported without a guardian's phone number are listed here. Fee reminders and the parent view reach families through these numbers.",
+  },
+  fees: {
+    why: "Set each level's fees for this term, then bill every student in one step. Balances brought in from your old records are added to the first bill.",
+  },
+  teachers: {
+    title: "Bring in your staff",
+    why: "Import your staff list from a spreadsheet, teaching and support staff alike. Then invite the people who will sign in from Members, and choose each class's teacher under Classes.",
+  },
+};
+
+export function stepInfo(step: SetupStep, path: SetupPath = "fresh"): StepInfo {
+  return path === "switch" ? { ...STEP_INFO[step], ...SWITCH_INFO[step] } : STEP_INFO[step];
 }
 
 export const stepHref = (slug: string, step: SetupStep): Route => schoolPath(slug, STEP_INFO[step].segment);

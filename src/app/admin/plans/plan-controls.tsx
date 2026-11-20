@@ -194,6 +194,7 @@ export function ArchiveButton({
     <ActionButton
       action={action}
       label={archived ? "Offer again" : "Archive"}
+      variant={archived ? "secondary" : "danger-outline"}
       ariaLabel={`${archived ? "Offer again" : "Archive"} ${name}`}
     />
   );

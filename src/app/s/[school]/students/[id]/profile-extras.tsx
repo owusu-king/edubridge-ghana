@@ -57,7 +57,11 @@ export function ProfileExtras({
               submitLabel="Upload"
             />
             {hasPhoto && (
-              <ActionButton action={removePhotoAction.bind(null, slug, studentId)} label="Remove photo" />
+              <ActionButton
+                action={removePhotoAction.bind(null, slug, studentId)}
+                variant="danger-outline"
+                label="Remove photo"
+              />
             )}
           </div>
         )}
@@ -86,6 +90,7 @@ export function ProfileExtras({
                     <ActionButton
                       action={removeDocumentAction.bind(null, slug, studentId, d.id)}
                       label="Remove"
+                      variant="danger-outline"
                       ariaLabel={`Remove ${d.filename}`}
                     />
                   )}
